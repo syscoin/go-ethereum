@@ -254,7 +254,7 @@ func checkNode(client *sshClient, network string, boot bool) (*nodeInfos, error)
 	}
 	ipcLocation := string(bytes.TrimSpace(out))
 
-	if out, err = client.Run(fmt.Sprintf("docker exec %s_%s_1 /home/syscoin/.syscoin/sysgeth --exec admin.nodeInfo.enode --cache=16 attach "+ipcLocation, network, kind)); err != nil {
+	if out, err = client.Run(fmt.Sprintf("docker exec %s_%s_1 /usr/local/bin/sysgeth --exec admin.nodeInfo.enode --cache=16 attach "+ipcLocation, network, kind)); err != nil {
 		return nil, ErrServiceUnreachable
 	}
 	enode := bytes.Trim(bytes.TrimSpace(out), "\"")
