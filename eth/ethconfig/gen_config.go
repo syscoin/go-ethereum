@@ -61,8 +61,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		RPCTxFeeCap                           float64
 		Checkpoint                            *params.TrustedCheckpoint      `toml:",omitempty"`
 		CheckpointOracle                      *params.CheckpointOracleConfig `toml:",omitempty"`
-		OverrideTerminalTotalDifficulty       *big.Int                       `toml:",omitempty"`
-		OverrideTerminalTotalDifficultyPassed *bool                          `toml:",omitempty"`
+		OverrideShanghai        *big.Int                       `toml:",omitempty"`
 		// SYSCOIN
 		NEVMPubEP                       string   `toml:",omitempty"`
 	}
@@ -110,8 +109,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Checkpoint = c.Checkpoint
 	enc.CheckpointOracle = c.CheckpointOracle
 	enc.NEVMPubEP = c.NEVMPubEP
-	enc.OverrideTerminalTotalDifficulty = c.OverrideTerminalTotalDifficulty
-	enc.OverrideTerminalTotalDifficultyPassed = c.OverrideTerminalTotalDifficultyPassed
+	enc.OverrideShanghai = c.OverrideShanghai
 	return &enc, nil
 }
 
@@ -160,8 +158,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		RPCTxFeeCap                           *float64
 		Checkpoint                            *params.TrustedCheckpoint      `toml:",omitempty"`
 		CheckpointOracle                      *params.CheckpointOracleConfig `toml:",omitempty"`
-		OverrideTerminalTotalDifficulty       *big.Int                       `toml:",omitempty"`
-		OverrideTerminalTotalDifficultyPassed *bool                          `toml:",omitempty"`
+		OverrideShanghai        *big.Int                       `toml:",omitempty"`
 		// SYSCOIN
 		NEVMPubEP                       *string  `toml:",omitempty"`
 	}
@@ -295,14 +292,11 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.CheckpointOracle != nil {
 		c.CheckpointOracle = dec.CheckpointOracle
 	}
-	if dec.OverrideTerminalTotalDifficulty != nil {
-		c.OverrideTerminalTotalDifficulty = dec.OverrideTerminalTotalDifficulty
-	}
 	if dec.NEVMPubEP != nil {
 		c.NEVMPubEP = *dec.NEVMPubEP
 	}
-	if dec.OverrideTerminalTotalDifficultyPassed != nil {
-		c.OverrideTerminalTotalDifficultyPassed = dec.OverrideTerminalTotalDifficultyPassed
+	if dec.OverrideShanghai != nil {
+		c.OverrideShanghai = dec.OverrideShanghai
 	}
 	return nil
 }

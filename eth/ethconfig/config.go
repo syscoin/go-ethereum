@@ -209,12 +209,8 @@ type Config struct {
 	// SYSCOIN
 	NEVMPubEP string `toml:",omitempty"`
 
-
-	// OverrideTerminalTotalDifficulty (TODO: remove after the fork)
-	OverrideTerminalTotalDifficulty *big.Int `toml:",omitempty"`
-
-	// OverrideTerminalTotalDifficultyPassed (TODO: remove after the fork)
-	OverrideTerminalTotalDifficultyPassed *bool `toml:",omitempty"`
+	// OverrideShanghai (TODO: remove after the fork)
+	OverrideShanghai *big.Int `toml:",omitempty"`
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.
