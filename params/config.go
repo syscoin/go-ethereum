@@ -327,7 +327,7 @@ var (
 
 	TestChainConfig = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, nil, false, new(EthashConfig), nil}
 	NonActivatedConfig = &ChainConfig{big.NewInt(1), nil, nil, false, nil, common.Hash{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, new(EthashConfig), nil}
-	TestRules          = TestChainConfig.Rules(new(big.Int), false)
+	TestRules          = TestChainConfig.Rules(new(big.Int), false, new(big.Int))
 )
 
 // NetworkNames are user friendly names to use in the chain spec banner.
@@ -628,10 +628,10 @@ func (c *ChainConfig) IsTerminalPoWBlock(parentTotalDiff *big.Int, totalDiff *bi
 
 // SYSCOIN IsSyscoin returns whether num is either equal to the Syscoin fork block or greater.
 func (c *ChainConfig) IsSyscoin(num *big.Int) bool {
-	return isForked(c.SyscoinBlock, num)
+	return isBlockForked(c.SyscoinBlock, num)
 }
 func (c *ChainConfig) IsRollux(num *big.Int) bool {
-	return isForked(c.RolluxBlock, num)
+	return isBlockForked(c.RolluxBlock, num)
 }
 // IsCancun returns whether num is either equal to the Cancun fork block or greater.
 func (c *ChainConfig) IsCancun(num *big.Int) bool {
@@ -797,8 +797,8 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkTimestampIncompatible(c.ShanghaiTime, newcfg.ShanghaiTime, headTimestamp) {
 		return newTimestampCompatError("Shanghai fork timestamp", c.ShanghaiTime, newcfg.ShanghaiTime)
 	}
-	if isForkIncompatible(c.RolluxBlock, newcfg.RolluxBlock, head) {
-		return newCompatError("Rollux fork block", c.RolluxBlock, newcfg.RolluxBlock)
+	if isForkBlockIncompatible(c.RolluxBlock, newcfg.RolluxBlock, headNumber) {
+		return newBlockCompatError("Rollux fork block", c.RolluxBlock, newcfg.RolluxBlock)
 	}
 	return nil
 }
