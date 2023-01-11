@@ -63,6 +63,8 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		// SYSCOIN
 		case evm.chainRules.IsSyscoin:
 			cfg.JumpTable = &londonInstructionSet
+		case evm.chainRules.IsShanghai:
+			cfg.JumpTable = &shanghaiInstructionSet
 		case evm.chainRules.IsMerge:
 			cfg.JumpTable = &mergeInstructionSet
 		case evm.chainRules.IsLondon:
