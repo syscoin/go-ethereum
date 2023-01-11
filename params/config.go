@@ -78,6 +78,7 @@ var (
 		BerlinBlock:         big.NewInt(0),
 		SyscoinBlock:        big.NewInt(0),
 		RolluxBlock:         big.NewInt(155000),
+		ShanghaiTime:        big.NewInt(250000),
 		LondonBlock:         big.NewInt(1),
 		ArrowGlacierBlock:   nil,
 		GrayGlacierBlock:    nil,
@@ -144,6 +145,7 @@ var (
 		BerlinBlock:         big.NewInt(0),
 		SyscoinBlock:        big.NewInt(0),
 		RolluxBlock:         big.NewInt(182500),
+		ShanghaiTime:        big.NewInt(213000),
 		LondonBlock:         big.NewInt(1),
 		ArrowGlacierBlock:   nil,
 		Ethash:              new(EthashConfig),
@@ -638,9 +640,9 @@ func (c *ChainConfig) IsCancun(num *big.Int) bool {
 	return isBlockForked(c.CancunBlock, num)
 }
 
-// IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
-func (c *ChainConfig) IsShanghai(time *big.Int) bool {
-	return isTimestampForked(c.ShanghaiTime, time)
+// SYSCOIN IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
+func (c *ChainConfig) IsShanghai(num *big.Int) bool {
+	return isBlockForked(c.ShanghaiTime, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -968,7 +970,8 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp *big.Int) Rule
 		IsSyscoin:        c.IsSyscoin(num),
 		IsRollux:         c.IsRollux(num),
 		IsMerge:          isMerge,
-		IsShanghai:       c.IsShanghai(timestamp),
+		// SYSCOIN
+		IsShanghai:       c.IsShanghai(num),
 		isCancun:         c.IsCancun(num),
 	}
 }
