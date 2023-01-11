@@ -80,7 +80,8 @@ func validate(jt JumpTable) JumpTable {
 }
 
 func newShanghaiInstructionSet() JumpTable {
-	instructionSet := newMergeInstructionSet()
+	// SYSCOIN
+	instructionSet := newLondonInstructionSet()
 	enable3860(&instructionSet)
 	return validate(instructionSet)
 }
