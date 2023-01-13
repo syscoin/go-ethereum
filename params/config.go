@@ -796,8 +796,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkBlockIncompatible(c.CancunBlock, newcfg.CancunBlock, headNumber) {
 		return newBlockCompatError("Cancun fork block", c.CancunBlock, newcfg.CancunBlock)
 	}
-	if isForkTimestampIncompatible(c.ShanghaiTime, newcfg.ShanghaiTime, headTimestamp) {
-		return newTimestampCompatError("Shanghai fork timestamp", c.ShanghaiTime, newcfg.ShanghaiTime)
+	// SYSCOIN
+	if isForkBlockIncompatible(c.ShanghaiTime, newcfg.ShanghaiTime, headNumber) {
+		return newBlockCompatError("Shanghai fork block", c.ShanghaiTime, newcfg.ShanghaiTime)
 	}
 	if isForkBlockIncompatible(c.RolluxBlock, newcfg.RolluxBlock, headNumber) {
 		return newBlockCompatError("Rollux fork block", c.RolluxBlock, newcfg.RolluxBlock)

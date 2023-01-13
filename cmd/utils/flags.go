@@ -274,9 +274,10 @@ var (
 		Value:    2048,
 		Category: flags.EthCategory,
 	}
+	// SYSCOIN
 	OverrideShanghai = &flags.BigFlag{
 		Name:     "override.shanghai",
-		Usage:    "Manually specify the Shanghai fork timestamp, overriding the bundled setting",
+		Usage:    "Manually specify the Shanghai fork block, overriding the bundled setting",
 		Category: flags.EthCategory,
 	}
 	// Light server and client settings
