@@ -90,21 +90,22 @@ func TestCheckCompatible(t *testing.T) {
 				RewindToBlock: 30,
 			},
 		},
+		// SYSCOIN
 		{
 			stored:        &ChainConfig{ShanghaiTime: big.NewInt(10)},
 			new:           &ChainConfig{ShanghaiTime: big.NewInt(20)},
-			headTimestamp: 9,
+			headBlock: 9,
 			wantErr:       nil,
 		},
 		{
 			stored:        &ChainConfig{ShanghaiTime: big.NewInt(10)},
 			new:           &ChainConfig{ShanghaiTime: big.NewInt(20)},
-			headTimestamp: 25,
+			headBlock: 25,
 			wantErr: &ConfigCompatError{
-				What:         "Shanghai fork timestamp",
-				StoredTime:   big.NewInt(10),
-				NewTime:      big.NewInt(20),
-				RewindToTime: 9,
+				What:         "Shanghai fork block",
+				StoredBlock:   big.NewInt(10),
+				NewBlock:      big.NewInt(20),
+				RewindToBlock: 9,
 			},
 		},
 	}
