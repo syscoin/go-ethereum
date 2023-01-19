@@ -144,7 +144,7 @@ var (
 		BerlinBlock:         big.NewInt(0),
 		SyscoinBlock:        big.NewInt(0),
 		RolluxBlock:         big.NewInt(182500),
-		ShanghaiTime:        big.NewInt(213000),
+		ShanghaiTime:        big.NewInt(223000),
 		LondonBlock:         big.NewInt(1),
 		ArrowGlacierBlock:   nil,
 		Ethash:              new(EthashConfig),
