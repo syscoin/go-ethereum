@@ -291,8 +291,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	createBlock := func(eth *Ethereum) *types.Block {
 		eth.wgNEVM.Add(1)
 		defer eth.wgNEVM.Done()
-		eb, _ := eth.Etherbase()
-		eth.miner.Start(eb)
+		eth.miner.Start()
 		for obj := range eth.minedNEVMBlockSub.Chan() {
 			if ev, ok := obj.Data.(core.NewMinedBlockEvent); ok {
 				eth.miner.Stop()
