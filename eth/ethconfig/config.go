@@ -18,7 +18,6 @@
 package ethconfig
 
 import (
-	"math/big"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -210,7 +209,7 @@ type Config struct {
 	NEVMPubEP string `toml:",omitempty"`
 
 	// OverrideShanghai (TODO: remove after the fork)
-	OverrideShanghai *big.Int `toml:",omitempty"`
+	OverrideShanghai *uint64 `toml:",omitempty"`
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.

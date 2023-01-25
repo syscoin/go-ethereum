@@ -19,13 +19,14 @@ package forkid
 import (
 	"bytes"
 	"math"
-	"math/big"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 )
+
+func u64(val uint64) *uint64 { return &val }
 
 // TestCreation tests that different genesis and fork rule combinations result in
 // the correct fork ID.

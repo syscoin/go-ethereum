@@ -24,6 +24,8 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 )
 
+func u64(val uint64) *uint64 { return &val }
+
 // Forks table defines supported forks and their chain config.
 var Forks = map[string]*params.ChainConfig{
 	"Frontier": {

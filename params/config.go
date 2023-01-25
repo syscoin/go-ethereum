@@ -439,7 +439,7 @@ var (
 		Ethash:                        new(EthashConfig),
 		Clique:                        nil,
 	}
-	TestRules = TestChainConfig.Rules(new(big.Int), false, new(big.Int))
+	TestRules = TestChainConfig.Rules(new(big.Int), false, 0)
 )
 
 // NetworkNames are user friendly names to use in the chain spec banner.
@@ -536,9 +536,9 @@ type ChainConfig struct {
 
 	// Fork scheduling was switched from blocks to timestamps here
 
-	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
-	CancunTime   *big.Int `json:"cancunTime,omitempty"`   // Cancun switch time (nil = no fork, 0 = already on cancun)
-	PragueTime   *big.Int `json:"pragueTime,omitempty"`   // Prague switch time (nil = no fork, 0 = already on prague)
+	ShanghaiTime *uint64 `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
+	CancunTime   *uint64 `json:"cancunTime,omitempty"`   // Cancun switch time (nil = no fork, 0 = already on cancun)
+	PragueTime   *uint64 `json:"pragueTime,omitempty"`   // Prague switch time (nil = no fork, 0 = already on prague)
 
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
@@ -756,12 +756,12 @@ func (c *ChainConfig) IsShanghai(num *big.Int) bool {
 }
 
 // IsCancun returns whether num is either equal to the Cancun fork time or greater.
-func (c *ChainConfig) IsCancun(time *big.Int) bool {
+func (c *ChainConfig) IsCancun(time uint64) bool {
 	return isTimestampForked(c.CancunTime, time)
 }
 
 // IsPrague returns whether num is either equal to the Prague fork time or greater.
-func (c *ChainConfig) IsPrague(time *big.Int) bool {
+func (c *ChainConfig) IsPrague(time uint64) bool {
 	return isTimestampForked(c.PragueTime, time)
 }
 
@@ -770,7 +770,7 @@ func (c *ChainConfig) IsPrague(time *big.Int) bool {
 func (c *ChainConfig) CheckCompatible(newcfg *ChainConfig, height uint64, time uint64) *ConfigCompatError {
 	var (
 		bhead = new(big.Int).SetUint64(height)
-		btime = new(big.Int).SetUint64(time)
+		btime = time
 	)
 	// Iterate checkCompatible to find the lowest conflict.
 	var lasterr *ConfigCompatError
@@ -782,7 +782,7 @@ func (c *ChainConfig) CheckCompatible(newcfg *ChainConfig, height uint64, time u
 		lasterr = err
 
 		if err.RewindToTime > 0 {
-			btime.SetUint64(err.RewindToTime)
+			btime = err.RewindToTime
 		} else {
 			bhead.SetUint64(err.RewindToBlock)
 		}
@@ -796,7 +796,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 	type fork struct {
 		name      string
 		block     *big.Int // forks up to - and including the merge - were defined with block numbers
-		timestamp *big.Int // forks after the merge are scheduled using timestamps
+		timestamp *uint64  // forks after the merge are scheduled using timestamps
 		optional  bool     // if true, the fork may be nil and next fork is still allowed
 	}
 	var lastFork fork
@@ -838,7 +838,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 				if lastFork.block != nil && lastFork.block.Cmp(cur.block) > 0 {
 					return fmt.Errorf("unsupported fork ordering: %v enabled at block %v, but %v enabled at block %v",
 						lastFork.name, lastFork.block, cur.name, cur.block)
-				} else if lastFork.timestamp != nil && lastFork.timestamp.Cmp(cur.timestamp) > 0 {
+				} else if lastFork.timestamp != nil && *lastFork.timestamp > *cur.timestamp {
 					return fmt.Errorf("unsupported fork ordering: %v enabled at timestamp %v, but %v enabled at timestamp %v",
 						lastFork.name, lastFork.timestamp, cur.name, cur.timestamp)
 				}
@@ -858,7 +858,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 	return nil
 }
 
-func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, headTimestamp *big.Int) *ConfigCompatError {
+func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, headTimestamp uint64) *ConfigCompatError {
 	if isForkBlockIncompatible(c.HomesteadBlock, newcfg.HomesteadBlock, headNumber) {
 		return newBlockCompatError("Homestead fork block", c.HomesteadBlock, newcfg.HomesteadBlock)
 	}
@@ -968,28 +968,28 @@ func configBlockEqual(x, y *big.Int) bool {
 
 // isForkTimestampIncompatible returns true if a fork scheduled at timestamp s1
 // cannot be rescheduled to timestamp s2 because head is already past the fork.
-func isForkTimestampIncompatible(s1, s2, head *big.Int) bool {
+func isForkTimestampIncompatible(s1, s2 *uint64, head uint64) bool {
 	return (isTimestampForked(s1, head) || isTimestampForked(s2, head)) && !configTimestampEqual(s1, s2)
 }
 
 // isTimestampForked returns whether a fork scheduled at timestamp s is active
 // at the given head timestamp. Whilst this method is the same as isBlockForked,
 // they are explicitly separate for clearer reading.
-func isTimestampForked(s, head *big.Int) bool {
-	if s == nil || head == nil {
+func isTimestampForked(s *uint64, head uint64) bool {
+	if s == nil {
 		return false
 	}
-	return s.Cmp(head) <= 0
+	return *s <= head
 }
 
-func configTimestampEqual(x, y *big.Int) bool {
+func configTimestampEqual(x, y *uint64) bool {
 	if x == nil {
 		return y == nil
 	}
 	if y == nil {
 		return x == nil
 	}
-	return x.Cmp(y) == 0
+	return *x == *y
 }
 
 // ConfigCompatError is raised if the locally-stored blockchain is initialised with a
@@ -1001,7 +1001,7 @@ type ConfigCompatError struct {
 	StoredBlock, NewBlock *big.Int
 
 	// timestamps of the stored and new configurations if time based forking
-	StoredTime, NewTime *big.Int
+	StoredTime, NewTime *uint64
 
 	// the block number to which the local chain must be rewound to correct the error
 	RewindToBlock uint64
@@ -1032,12 +1032,12 @@ func newBlockCompatError(what string, storedblock, newblock *big.Int) *ConfigCom
 	return err
 }
 
-func newTimestampCompatError(what string, storedtime, newtime *big.Int) *ConfigCompatError {
-	var rew *big.Int
+func newTimestampCompatError(what string, storedtime, newtime *uint64) *ConfigCompatError {
+	var rew *uint64
 	switch {
 	case storedtime == nil:
 		rew = newtime
-	case newtime == nil || storedtime.Cmp(newtime) < 0:
+	case newtime == nil || *storedtime < *newtime:
 		rew = storedtime
 	default:
 		rew = newtime
@@ -1048,8 +1048,8 @@ func newTimestampCompatError(what string, storedtime, newtime *big.Int) *ConfigC
 		NewTime:      newtime,
 		RewindToTime: 0,
 	}
-	if rew != nil && rew.Sign() > 0 {
-		err.RewindToTime = rew.Uint64() - 1
+	if rew != nil {
+		err.RewindToTime = *rew - 1
 	}
 	return err
 }
@@ -1075,7 +1075,7 @@ type Rules struct {
 }
 
 // Rules ensures c's ChainID is not nil.
-func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp *big.Int) Rules {
+func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules {
 	chainID := c.ChainID
 	if chainID == nil {
 		chainID = new(big.Int)
