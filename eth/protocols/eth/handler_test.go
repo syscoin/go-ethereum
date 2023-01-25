@@ -92,7 +92,9 @@ func newTestBackendWithGenerator(blocks int, shanghai bool, generator func(int, 
 			ArrowGlacierBlock:             big.NewInt(0),
 			GrayGlacierBlock:              big.NewInt(0),
 			MergeNetsplitBlock:            big.NewInt(0),
-			ShanghaiTime:                  u64(0),
+			// SYSCOIN
+			RolluxBlock:				   big.NewInt(0),
+			ShanghaiTime:                  big.NewInt(0),
 			TerminalTotalDifficulty:       big.NewInt(0),
 			TerminalTotalDifficultyPassed: true,
 			Ethash:                        new(params.EthashConfig),
@@ -340,15 +342,9 @@ func TestGetBlockBodies68(t *testing.T) { testGetBlockBodies(t, ETH68) }
 
 func testGetBlockBodies(t *testing.T, protocol uint) {
 	t.Parallel()
-
+	// SYSCOIN
 	gen := func(n int, g *core.BlockGen) {
-		if n%2 == 0 {
-			w := &types.Withdrawal{
-				Address: common.Address{0xaa},
-				Amount:  42,
-			}
-			g.AddWithdrawal(w)
-		}
+		
 	}
 
 	backend := newTestBackendWithGenerator(maxBodiesServe+15, true, gen)

@@ -439,6 +439,7 @@ var (
 		Ethash:                        new(EthashConfig),
 		Clique:                        nil,
 	}
+	// SYSCOIN
 	TestRules = TestChainConfig.Rules(new(big.Int), false, 0)
 )
 
@@ -536,9 +537,9 @@ type ChainConfig struct {
 
 	// Fork scheduling was switched from blocks to timestamps here
 
-	ShanghaiTime *uint64 `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
-	CancunTime   *uint64 `json:"cancunTime,omitempty"`   // Cancun switch time (nil = no fork, 0 = already on cancun)
-	PragueTime   *uint64 `json:"pragueTime,omitempty"`   // Prague switch time (nil = no fork, 0 = already on prague)
+	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
+	CancunTime   *big.Int `json:"cancunTime,omitempty"`   // Cancun switch time (nil = no fork, 0 = already on cancun)
+	PragueTime   *big.Int `json:"pragueTime,omitempty"`   // Prague switch time (nil = no fork, 0 = already on prague)
 
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
@@ -754,15 +755,18 @@ func (c *ChainConfig) IsRollux(num *big.Int) bool {
 func (c *ChainConfig) IsShanghai(num *big.Int) bool {
 	return isBlockForked(c.ShanghaiTime, num)
 }
+func (c *ChainConfig) IsShanghaiTime(num uint64) bool {
+	return false
+}
 
 // IsCancun returns whether num is either equal to the Cancun fork time or greater.
-func (c *ChainConfig) IsCancun(time uint64) bool {
-	return isTimestampForked(c.CancunTime, time)
+func (c *ChainConfig) IsCancun(num *big.Int) bool {
+	return isBlockForked(c.CancunTime, num)
 }
 
 // IsPrague returns whether num is either equal to the Prague fork time or greater.
-func (c *ChainConfig) IsPrague(time uint64) bool {
-	return isTimestampForked(c.PragueTime, time)
+func (c *ChainConfig) IsPrague(num *big.Int) bool {
+	return isBlockForked(c.PragueTime, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -817,9 +821,9 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "grayGlacierBlock", block: c.GrayGlacierBlock, optional: true},
 		{name: "mergeNetsplitBlock", block: c.MergeNetsplitBlock, optional: true},
 		{name: "rolluxBlock", block: c.RolluxBlock},
-		{name: "shanghaiTime", timestamp: c.ShanghaiTime},
-		{name: "cancunTime", timestamp: c.CancunTime, optional: true},
-		{name: "pragueTime", timestamp: c.PragueTime, optional: true},
+		{name: "shanghaiTime", block: c.ShanghaiTime},
+		{name: "cancunTime", block: c.CancunTime, optional: true},
+		{name: "pragueTime", block: c.PragueTime, optional: true},
 	} {
 		if lastFork.name != "" {
 			switch {
@@ -921,11 +925,11 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkBlockIncompatible(c.RolluxBlock, newcfg.RolluxBlock, headNumber) {
 		return newBlockCompatError("Rollux fork block", c.RolluxBlock, newcfg.RolluxBlock)
 	}
-	if isForkTimestampIncompatible(c.CancunTime, newcfg.CancunTime, headTimestamp) {
-		return newTimestampCompatError("Cancun fork timestamp", c.CancunTime, newcfg.CancunTime)
+	if isForkBlockIncompatible(c.CancunTime, newcfg.CancunTime, headNumber) {
+		return newBlockCompatError("Cancun fork block", c.CancunTime, newcfg.CancunTime)
 	}
-	if isForkTimestampIncompatible(c.PragueTime, newcfg.PragueTime, headTimestamp) {
-		return newTimestampCompatError("Prague fork timestamp", c.PragueTime, newcfg.PragueTime)
+	if isForkBlockIncompatible(c.PragueTime, newcfg.PragueTime, headNumber) {
+		return newBlockCompatError("Prague fork block", c.PragueTime, newcfg.PragueTime)
 	}
 	return nil
 }
@@ -1075,7 +1079,7 @@ type Rules struct {
 }
 
 // Rules ensures c's ChainID is not nil.
-func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules {
+func (c *ChainConfig) Rules(num *big.Int, isMerge bool, time uint64) Rules {
 	chainID := c.ChainID
 	if chainID == nil {
 		chainID = new(big.Int)
@@ -1098,6 +1102,6 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		// SYSCOIN
 		IsShanghai:       c.IsShanghai(num),
 		isCancun:         c.IsCancun(num),
-		isPrague:         c.IsPrague(timestamp),
+		isPrague:         c.IsPrague(num),
 	}
 }

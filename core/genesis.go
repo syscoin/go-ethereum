@@ -271,7 +271,7 @@ func (e *GenesisMismatchError) Error() string {
 
 // ChainOverrides contains the changes to chain config.
 type ChainOverrides struct {
-	OverrideShanghai *uint64
+	OverrideShanghai *big.Int
 }
 
 // SetupGenesisBlock writes or updates the genesis block in db.
@@ -473,7 +473,7 @@ func (g *Genesis) ToBlock() *types.Block {
 			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 		}
 	}
-	if g.Config != nil && g.Config.IsShanghai(g.Timestamp) {
+	if g.Config != nil && g.Config.IsShanghaiTime(g.Timestamp) {
 		head.WithdrawalsHash = &types.EmptyRootHash
 	}
 	return types.NewBlock(head, nil, nil, nil, trie.NewStackTrie(nil))

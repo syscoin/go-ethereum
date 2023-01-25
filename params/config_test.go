@@ -124,18 +124,18 @@ func TestCheckCompatible(t *testing.T) {
 
 func TestConfigRules(t *testing.T) {
 	c := &ChainConfig{
-		ShanghaiTime: u64(500),
+		ShanghaiTime: big.NewInt(500),
 	}
 	var stamp uint64
 	if r := c.Rules(big.NewInt(0), true, stamp); r.IsShanghai {
 		t.Errorf("expected %v to not be shanghai", stamp)
 	}
 	stamp = 500
-	if r := c.Rules(big.NewInt(0), true, stamp); !r.IsShanghai {
+	if r := c.Rules(big.NewInt(500), true, stamp); !r.IsShanghai {
 		t.Errorf("expected %v to be shanghai", stamp)
 	}
 	stamp = math.MaxInt64
-	if r := c.Rules(big.NewInt(0), true, stamp); !r.IsShanghai {
+	if r := c.Rules(big.NewInt(math.MaxInt64), true, stamp); !r.IsShanghai {
 		t.Errorf("expected %v to be shanghai", stamp)
 	}
 }

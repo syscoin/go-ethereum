@@ -405,7 +405,7 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 	if config.IsLondon(header.Number) {
 		header.BaseFee = misc.CalcBaseFee(config, parent.Header())
 	}
-	if config.IsShanghai(header.Time) {
+	if config.IsShanghaiTime(header.Time) {
 		header.WithdrawalsHash = &types.EmptyRootHash
 	}
 	var receipts []*types.Receipt
