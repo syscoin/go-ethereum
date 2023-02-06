@@ -322,12 +322,8 @@ also need to configure a miner to process transactions and create new blocks for
 
 #### Running a private miner
 
-Mining on the public Ethereum network is a complex task as it's only feasible using GPUs,
-requiring an OpenCL or CUDA enabled `ethminer` instance. For information on such a
-setup, please consult the [EtherMining subreddit](https://www.reddit.com/r/EtherMining/)
-and the [ethminer](https://github.com/ethereum-mining/ethminer) repository.
 
-In a private network setting, however, a single CPU miner instance is more than enough for
+In a private network setting a single CPU miner instance is more than enough for
 practical purposes as it can produce a stable stream of blocks at the correct intervals
 without needing heavy resources (consider running on a single thread, no need for multiple
 ones either). To start a `geth` instance for mining, run it with all your usual flags, extended
@@ -364,7 +360,7 @@ Please make sure your contributions adhere to our coding guidelines:
  * Commit messages should be prefixed with the package(s) they modify.
    * E.g. "eth, rpc: make trace configs optional"
 
-Please see the [Developers' Guide](https://geth.ethereum.org/docs/developers/devguide)
+Please see the [Developers' Guide](https://geth.ethereum.org/docs/developers/geth-developer/dev-guide)
 for more details on configuring your environment, managing project dependencies, and
 testing procedures.
 
