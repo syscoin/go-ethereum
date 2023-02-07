@@ -424,8 +424,8 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 		cumulativeGas += tx.Gas()
 	}
 	header.Root = common.BytesToHash(hasher.Sum(nil))
-	// Assemble and return the final block for sealing
-	if config.IsShanghai(header.Time) {
+	// SYSCOIN Assemble and return the final block for sealing
+	if config.IsShanghaiTime(header.Time) {
 		return types.NewBlockWithWithdrawals(header, txs, nil, receipts, []*types.Withdrawal{}, trie.NewStackTrie(nil))
 	}
 	return types.NewBlock(header, txs, nil, receipts, trie.NewStackTrie(nil))
