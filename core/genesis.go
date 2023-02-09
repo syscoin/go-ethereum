@@ -189,8 +189,6 @@ func CommitGenesisState(db ethdb.Database, triedb *trie.Database, hash common.Ha
 		switch hash {
 		case params.MainnetGenesisHash:
 			genesis = DefaultGenesisBlock()
-		case params.RopstenGenesisHash:
-			genesis = DefaultRopstenGenesisBlock()
 		case params.RinkebyGenesisHash:
 			genesis = DefaultRinkebyGenesisBlock()
 		case params.GoerliGenesisHash:
@@ -425,8 +423,6 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return g.Config
 	case ghash == params.MainnetGenesisHash:
 		return params.MainnetChainConfig
-	case ghash == params.RopstenGenesisHash:
-		return params.RopstenChainConfig
 	case ghash == params.SepoliaGenesisHash:
 		return params.SepoliaChainConfig
 	case ghash == params.RinkebyGenesisHash:
@@ -534,18 +530,6 @@ func DefaultGenesisBlock() *Genesis {
 		GasLimit:   0x7A1200,
 		Difficulty: big.NewInt(1),
 		Alloc:      decodePrealloc(syscoinAllocData),
-	}
-}
-
-// DefaultRopstenGenesisBlock returns the Ropsten network genesis block.
-func DefaultRopstenGenesisBlock() *Genesis {
-	return &Genesis{
-		Config:     params.RopstenChainConfig,
-		Nonce:      66,
-		ExtraData:  hexutil.MustDecode("0x3535353535353535353535353535353535353535353535353535353535353535"),
-		GasLimit:   16777216,
-		Difficulty: big.NewInt(1048576),
-		Alloc:      decodePrealloc(ropstenAllocData),
 	}
 }
 
