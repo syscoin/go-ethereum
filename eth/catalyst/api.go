@@ -173,7 +173,7 @@ func (api *ConsensusAPI) ForkchoiceUpdatedV1(update engine.ForkchoiceStateV1, pa
 		if payloadAttributes.Withdrawals != nil {
 			return engine.STATUS_INVALID, engine.InvalidParams.With(fmt.Errorf("withdrawals not supported in V1"))
 		}
-		if api.eth.BlockChain().Config().IsShanghai(payloadAttributes.Timestamp) {
+		if api.eth.BlockChain().Config().IsShanghaiTime(payloadAttributes.Timestamp) {
 			return engine.STATUS_INVALID, engine.InvalidParams.With(fmt.Errorf("forkChoiceUpdateV1 called post-shanghai"))
 		}
 	}
