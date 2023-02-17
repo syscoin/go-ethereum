@@ -166,6 +166,8 @@ var (
 		TerminalTotalDifficulty:       big.NewInt(17_000_000_000_000_000),
 		TerminalTotalDifficultyPassed: true,
 		MergeNetsplitBlock:            big.NewInt(1735371),
+		// SYSCOIN
+		RolluxBlock:                   big.NewInt(0),
 		ShanghaiTime:                  big.NewInt(1677557088),
 		Ethash:                        new(EthashConfig),
 	}
