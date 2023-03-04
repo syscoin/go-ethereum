@@ -115,7 +115,7 @@ func (zmq *ZMQRep) Init(nevmEP string) error {
 				zmq.rep.SendMulti(msgSend)
 				nevmBlockConnectBytes = nil
 			} else if strTopic == "nevmblockinfo" {
-				str := strconv.FormatUint(zmq.eth.blockchain.CurrentBlock().NumberU64(), 10)
+				str := strconv.FormatUint(zmq.eth.blockchain.CurrentBlock().Number.Uint64(), 10)
 				msgSend := zmq4.NewMsgFrom([]byte("nevmblockinfo"), []byte(str))
 				zmq.rep.SendMulti(msgSend)
 			}

@@ -305,7 +305,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return errors.New("addBlock: Empty block")
 		}
 		current := eth.blockchain.CurrentBlock()
-		currentNumber := current.NumberU64()
+		currentNumber := current.Number.Uint64()
 		currentHash := current.Hash()
 		proposedBlockNumber := nevmBlockConnect.Block.NumberU64()
 		proposedBlockParentHash := nevmBlockConnect.Block.ParentHash()
@@ -396,12 +396,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	deleteBlock := func(sysBlockhash string, eth *Ethereum) error {
 		current := eth.blockchain.CurrentBlock()
-		currentNumber := current.NumberU64()
-		if current.NumberU64() == 0 {
+		currentNumber := current.Number.Uint64()
+		if current.Number.Uint64() == 0 {
 			log.Warn("Trying to disconnect block 0")
 			return nil
 		}
-		parent := eth.blockchain.GetBlock(current.ParentHash(), currentNumber-1)
+		parent := eth.blockchain.GetBlock(current.ParentHash, currentNumber-1)
 		if parent == nil {
 			return errors.New("deleteBlock: NEVM tip parent block not found")
 		}
@@ -409,7 +409,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if err != nil {
 			return err
 		}
-		if eth.blockchain.CurrentBlock().NumberU64() != (currentNumber - 1) {
+		if eth.blockchain.CurrentBlock().Number.Uint64() != (currentNumber - 1) {
 			return errors.New("deleteBlock: Block number post-write does not match")
 		}
 		eth.blockchain.DeleteNEVMMapping(current.Hash())
