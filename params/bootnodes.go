@@ -21,7 +21,7 @@ import "github.com/ethereum/go-ethereum/common"
 // SYSCOIN MainnetBootnodes are the enode URLs of the P2P bootstrap nodes running on
 // the main Syscoin network.
 var MainnetBootnodes = []string{
-	"enode://6f417e6740e559818cedd1ae31ea339657f4580c06491ab9c9a7be9dc9136e858e5bc9a3c2e8d6ea49567af5102afced9d8a99c04410244b0c0880911720439a@3.133.0.208:30303",
+	"enode://6f417e6740e559818cedd1ae31ea339657f4580c06491ab9c9a7be9dc9136e858e5bc9a3c2e8d6ea49567af5102afced9d8a99c04410244b0c0880911720439a@54.203.37.244:30303",
 }
 
 // SepoliaBootnodes are the enode URLs of the P2P bootstrap nodes running on the
