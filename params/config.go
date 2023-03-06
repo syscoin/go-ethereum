@@ -244,6 +244,7 @@ var (
 		TerminalTotalDifficulty:       big.NewInt(10_790_000),
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  big.NewInt(1678832736),
+		RolluxBlock:			       big.NewInt(1678832735),
 		Clique: &CliqueConfig{
 			Period: 15,
 			Epoch:  30000,
