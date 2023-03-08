@@ -18,7 +18,6 @@ package catalyst
 
 import (
 	"bytes"
-	"context"
 	crand "crypto/rand"
 	"fmt"
 	"math/big"
@@ -44,8 +43,6 @@ import (
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/trie"
 )
 
@@ -1014,8 +1011,8 @@ func TestSimultaneousNewBlock(t *testing.T) {
 func setupBodies(t *testing.T) (*node.Node, *eth.Ethereum, []*types.Block) {
 	genesis, blocks := generateMergeChain(10, true)
 	n, ethservice := startEthService(t, genesis, blocks)
-	// enable shanghai on the last block
-	ethservice.BlockChain().Config().ShanghaiTime = &blocks[len(blocks)-1].Header().Time
+	// SYSCOIN enable shanghai on the last block
+	ethservice.BlockChain().Config().ShanghaiTime = blocks[len(blocks)-1].Header().Number
 
 	var (
 		parent = ethservice.BlockChain().CurrentBlock()
@@ -1232,7 +1229,7 @@ func TestGetBlockBodiesByRangeInvalidParams(t *testing.T) {
 		{
 			start: 1,
 			count: 1025,
-			want:  engine.TooLargeRequest,
+			want:  engine.InvalidParams,
 		},
 	}
 	for i, tc := range tests {
