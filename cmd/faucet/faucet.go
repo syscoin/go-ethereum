@@ -88,7 +88,7 @@ var (
 	rinkebyFlag   = flag.Bool("rinkeby", false, "Initializes the faucet with Rinkeby network config")
 	sepoliaFlag = flag.Bool("sepolia", false, "Initializes the faucet with Sepolia network config")
 	tanenbaumFlag = flag.Bool("tanenbaum", false, "Initializes the faucet with Tanenbaum network config")
-	syscoinFlag   = flag.Bool("syscoin", false, "Initializes the faucet with Syscoin network config")
+	syscoinFlag   = flag.Bool("mainnet", false, "Initializes the faucet with Syscoin network config")
 	NEVMPubFlag   = flag.String("nevmpub", "", "NEVM ZMQ REP Endpoint")
 	dataDirFlag   = flag.String("datadir", "", "Datadir passthrough from syscoind")
 )
