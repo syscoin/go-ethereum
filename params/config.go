@@ -101,7 +101,7 @@ var (
 		GrayGlacierBlock:              big.NewInt(15_050_000),
 		TerminalTotalDifficulty:       MainnetTerminalTotalDifficulty, // 58_750_000_000_000_000_000_000
 		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  newUint64(1681338455),
+		ShanghaiTime:                  big.NewInt(1681338455),
 		Ethash:                        new(EthashConfig),
 	}
 	// MainnetTrustedCheckpoint contains the light client trusted checkpoint for the main network.
@@ -1035,7 +1035,7 @@ type Rules struct {
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon, IsSyscoin, IsRollux                 bool
-	IsMerge, IsShanghai, isCancun, isPrague                 bool
+	IsMerge, IsShanghai, IsCancun, IsPrague                 bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1061,7 +1061,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, time uint64) Rules {
 		IsMerge:          isMerge,
 		// SYSCOIN
 		IsShanghai:       c.IsShanghai(num),
-		isCancun:         c.IsCancun(num),
-		isPrague:         c.IsPrague(num),
+		IsCancun:         c.IsCancun(num),
+		IsPrague:         c.IsPrague(num),
 	}
 }

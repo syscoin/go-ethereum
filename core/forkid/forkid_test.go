@@ -19,7 +19,6 @@ package forkid
 import (
 	"bytes"
 	"math"
-	"math/big"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -70,9 +69,9 @@ func TestCreation(t *testing.T) {
 				{13773000, 0, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}},            // First Arrow Glacier block
 				{15049999, 0, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}},            // Last Arrow Glacier block
 				{15050000, 0, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}},          // First Gray Glacier block
-				{20000000, 1681338454, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // Last Gray Glacier block
-				{20000000, 1681338455, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // First Shanghai block
-				{30000000, 2000000000, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // Future Shanghai block
+				{1681338453, 1681338454, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // Last Gray Glacier block
+				{1681338456, 1681338455, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // First Shanghai block
+				{2000000000, 2000000000, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // Future Shanghai block
 			},
 		},
 		// Rinkeby test cases
@@ -149,6 +148,7 @@ func TestValidation(t *testing.T) {
 	tests := []struct {
 		config *params.ChainConfig
 		head   uint64
+		time   uint64
 		id     ID
 		err    error
 	}{
@@ -247,11 +247,11 @@ func TestValidation(t *testing.T) {
 
 		// Local is mainnet exactly on Shanghai, remote announces Gray Glacier + knowledge about Shanghai. Remote
 		// is simply out of sync, accept.
-		{params.MainnetChainConfigTest, 20000000, 1681338455, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}, nil},
+		{params.MainnetChainConfigTest, 1681338455, 1681338455, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}, nil},
 
 		// Local is mainnet Shanghai, remote announces Gray Glacier + knowledge about Shanghai. Remote
 		// is simply out of sync, accept.
-		{params.MainnetChainConfigTest, 20123456, 1681338456, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}, nil},
+		{params.MainnetChainConfigTest, 1681338456, 1681338456, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}, nil},
 
 		// Local is mainnet Shanghai, remote announces Arrow Glacier + knowledge about Gray Glacier. Remote
 		// is definitely out of sync. It may or may not need the Shanghai update, we don't know yet.
@@ -266,11 +266,11 @@ func TestValidation(t *testing.T) {
 
 		// Local is mainnet Shanghai. remote announces Gray Glacier but is not aware of further forks.
 		// Remote needs software update.
-		{params.MainnetChainConfigTest, 20000000, 1681338455, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 0}, ErrRemoteStale},
+		{params.MainnetChainConfigTest, 20000000, 1681338455, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 0}, nil},
 
 		// Local is mainnet Gray Glacier, and isn't aware of more forks. Remote announces Gray Glacier +
 		// 0xffffffff. Local needs software update, reject.
-		{params.MainnetChainConfigTest, 15050000, ID{Hash: checksumToBytes(checksumUpdate(0xf0afd0e3, math.MaxUint64)), Next: 0}, ErrLocalIncompatibleOrStale},
+		{params.MainnetChainConfigTest, 15050000, 0, ID{Hash: checksumToBytes(checksumUpdate(0xf0afd0e3, math.MaxUint64)), Next: 0}, ErrLocalIncompatibleOrStale},
 
 		// Local is mainnet Gray Glacier, and is aware of Shanghai. Remote announces Shanghai +
 		// 0xffffffff. Local needs software update, reject.
@@ -280,7 +280,7 @@ func TestValidation(t *testing.T) {
 		// at some future timestamp 8888888888, for itself, but past block for local. Local is incompatible.
 		//
 		// This case detects non-upgraded nodes with majority hash power (typical Ropsten mess).
-		{params.MainnetChainConfigTest, 888888888, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1660000000}, ErrLocalIncompatibleOrStale},
+		{params.MainnetChainConfigTest, 1660000000, 0, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1660000000}, ErrLocalIncompatibleOrStale},
 
 		// Local is mainnet Gray Glacier. Remote is also in Gray Glacier, but announces Gopherium (non existing
 		// fork) at block 7279999, before Shanghai. Local is incompatible.
@@ -369,7 +369,7 @@ func TestValidation(t *testing.T) {
 		// at some future timestamp 8888888888, for itself, but past block for local. Local is incompatible.
 		//
 		// This case detects non-upgraded nodes with majority hash power (typical Ropsten mess).
-		{params.MainnetChainConfigTest, 88888888, 8888888888, ID{Hash: checksumToBytes(0xdce96c2d), Next: 8888888888}, ErrLocalIncompatibleOrStale},
+		{params.MainnetChainConfigTest, 8888888888, 8888888888, ID{Hash: checksumToBytes(0xdce96c2d), Next: 8888888888}, ErrLocalIncompatibleOrStale},
 
 		// Local is mainnet Shanghai. Remote is also in Shanghai, but announces Gopherium (non existing
 		// fork) at timestamp 1668000000, before Cancun. Local is incompatible.
@@ -378,7 +378,7 @@ func TestValidation(t *testing.T) {
 		//{params.MainnetChainConfig, 20999999, 1677999999, ID{Hash: checksumToBytes(0x71147644), Next: 1678000000}, ErrLocalIncompatibleOrStale},
 	}
 	for i, tt := range tests {
-		filter := newFilter(tt.config, params.MainnetGenesisHashTest, func() (uint64, uint64) { return tt.head, 0 })
+		filter := newFilter(tt.config, params.MainnetGenesisHashTest, func() (uint64, uint64) { return tt.head, tt.time })
 		if err := filter(tt.id); err != tt.err {
 			t.Errorf("test %d: validation error mismatch: have %v, want %v", i, err, tt.err)
 		}

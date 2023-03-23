@@ -1022,8 +1022,9 @@ func TestSimultaneousNewBlock(t *testing.T) {
 func setupBodies(t *testing.T) (*node.Node, *eth.Ethereum, []*types.Block) {
 	genesis, blocks := generateMergeChain(10, true)
 	// enable shanghai on the last block
-	time := blocks[len(blocks)-1].Header().Time + 1
-	genesis.Config.ShanghaiTime = &time
+	//time := blocks[len(blocks)-1].Header().Time + 1
+	genesis.Config.RolluxBlock = big.NewInt(int64(len(blocks)-1))
+	genesis.Config.ShanghaiTime = big.NewInt(int64(len(blocks)-1))
 	n, ethservice := startEthService(t, genesis, blocks)
 
 	var (
@@ -1044,7 +1045,7 @@ func setupBodies(t *testing.T) (*node.Node, *eth.Ethereum, []*types.Block) {
 	for i, header := range postMergeHeaders {
 		postMergeBlocks[i] = ethservice.BlockChain().GetBlock(header.Hash(), header.Number.Uint64())
 	}
-	return n, ethservice, append(preMergeBlocks, postMergeBlocks...)
+	return n, ethservice, append(blocks, postMergeBlocks...)
 }
 
 func TestGetBlockBodiesByHash(t *testing.T) {
