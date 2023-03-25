@@ -143,7 +143,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 // also returned if requested and available.
 // Note: an error is only returned if retrieving the head header has failed. If there are no
 // retrievable blocks in the specified range then zero block count is returned with no error.
-func (oracle *Oracle) resolveBlockRange(ctx context.Context, reqEnd rpc.BlockNumber, blocks int) (*types.Block, []*types.Receipt, uint64, int, error) {
+func (oracle *Oracle) resolveBlockRange(ctx context.Context, reqEnd rpc.BlockNumber, blocks uint64) (*types.Block, []*types.Receipt, uint64, uint64, error) {
 	var (
 		headBlock       *types.Header
 		pendingBlock    *types.Block
@@ -201,8 +201,8 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, reqEnd rpc.BlockNum
 		return nil, nil, 0, 0, nil
 	}
 	// Ensure not trying to retrieve before genesis.
-	if int(reqEnd+1) < blocks {
-		blocks = int(reqEnd + 1)
+	if uint64(reqEnd+1) < blocks {
+		blocks = uint64(reqEnd + 1)
 	}
 	return pendingBlock, pendingReceipts, uint64(reqEnd), blocks, nil
 }
@@ -221,7 +221,7 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, reqEnd rpc.BlockNum
 //
 // Note: baseFee includes the next block after the newest of the returned range, because this
 // value can be derived from the newest block.
-func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*big.Int, []float64, error) {
+func (oracle *Oracle) FeeHistory(ctx context.Context, blocks uint64, unresolvedLastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*big.Int, []float64, error) {
 	if blocks < 1 {
 		return common.Big0, nil, nil, nil, nil // returning with no data and no error means there are no retrievable blocks
 	}
@@ -250,7 +250,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	if err != nil || blocks == 0 {
 		return common.Big0, nil, nil, nil, err
 	}
-	oldestBlock := lastBlock + 1 - uint64(blocks)
+	oldestBlock := lastBlock + 1 - blocks
 
 	var (
 		next    = oldestBlock
@@ -260,7 +260,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	for i, p := range rewardPercentiles {
 		binary.LittleEndian.PutUint64(percentileKey[i*8:(i+1)*8], math.Float64bits(p))
 	}
-	for i := 0; i < maxBlockFetchers && i < blocks; i++ {
+	for i := 0; i < maxBlockFetchers && i < int(blocks); i++ {
 		go func() {
 			for {
 				// Retrieve the next block number to fetch with this goroutine
@@ -315,7 +315,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		if fees.err != nil {
 			return common.Big0, nil, nil, nil, fees.err
 		}
-		i := int(fees.blockNumber - oldestBlock)
+		i := fees.blockNumber - oldestBlock
 		if fees.results.baseFee != nil {
 			reward[i], baseFee[i], baseFee[i+1], gasUsedRatio[i] = fees.results.reward, fees.results.baseFee, fees.results.nextBaseFee, fees.results.gasUsedRatio
 		} else {
