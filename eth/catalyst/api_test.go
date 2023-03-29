@@ -500,7 +500,15 @@ func setupBlocks(t *testing.T, ethservice *eth.Ethereum, n int, parent *types.He
 		if ethservice.BlockChain().CurrentBlock().Number.Uint64() != payload.Number {
 			t.Fatal("Chain head should be updated")
 		}
-		if ethservice.BlockChain().CurrentFinalBlock().Number.Uint64() != payload.Number-1 {
+		// SYSCOIN
+		// safe should be the last chainlock (every 5 blocks)
+		lookback := payload.Number - (payload.Number % 5) - 5
+		if lookback < 5 {
+			lookback = 5
+		}
+		// finalized should be previous chainlock
+		lookback -= 5
+		if ethservice.BlockChain().CurrentFinalBlock().Number.Uint64() != lookback {
 			t.Fatal("Finalized block should be updated")
 		}
 		parent = ethservice.BlockChain().CurrentBlock()
