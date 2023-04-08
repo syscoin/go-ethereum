@@ -1400,7 +1400,7 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 	pool.eip2718.Store(pool.chainconfig.IsBerlin(next))
 	pool.eip1559.Store(pool.chainconfig.IsLondon(next))
 	// SYSCOIN
-	pool.shanghai.Store(pool.chainconfig.IsShanghai(next)
+	pool.shanghai.Store(pool.chainconfig.IsShanghai(next))
 }
 
 // promoteExecutables moves transactions that have become processable from the

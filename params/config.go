@@ -723,6 +723,10 @@ func (c *ChainConfig) IsShanghaiTime(num uint64) bool {
 func (c *ChainConfig) IsCancun(num *big.Int) bool {
 	return isBlockForked(c.CancunTime, num)
 }
+func (c *ChainConfig) IsCancunTime(num uint64) bool {
+	return false
+}
+
 
 // IsPrague returns whether num is either equal to the Prague fork time or greater.
 func (c *ChainConfig) IsPrague(num *big.Int) bool {
