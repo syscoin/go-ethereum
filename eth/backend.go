@@ -23,8 +23,6 @@ import (
 	"math/big"
 	"runtime"
 	"sync"
-	"sync/atomic"
-	"time"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
@@ -218,8 +216,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	)
 	// Override the chain config with provided settings.
 	var overrides core.ChainOverrides
-	if config.OverrideShanghai != nil {
-		overrides.OverrideShanghai = config.OverrideShanghai
+	if config.OverrideCancun != nil {
+		overrides.OverrideCancun = config.OverrideCancun
 	}
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, config.Genesis, &overrides, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit)
 	if err != nil {
@@ -234,10 +232,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	// Permit the downloader to use the trie cache allowance during fast sync
 	cacheLimit := cacheConfig.TrieCleanLimit + cacheConfig.TrieDirtyLimit + cacheConfig.SnapshotLimit
-	checkpoint := config.Checkpoint
-	if checkpoint == nil {
-		checkpoint = params.TrustedCheckpoints[eth.blockchain.Genesis().Hash()]
-	}
 	if eth.handler, err = newHandler(&handlerConfig{
 		Database:       chainDb,
 		Chain:          eth.blockchain,
@@ -247,7 +241,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		Sync:           config.SyncMode,
 		BloomCache:     uint64(cacheLimit),
 		EventMux:       eth.eventMux,
-		Checkpoint:     checkpoint,
 		RequiredBlocks: config.RequiredBlocks,
 	}); err != nil {
 		return nil, err
@@ -597,7 +590,7 @@ func (s *Ethereum) StartMining(threads int) error {
 		}
 		// If mining is started, we can disable the transaction rejection mechanism
 		// introduced to speed sync times.
-		atomic.StoreUint32(&s.handler.acceptTxs, 1)
+		s.handler.acceptTxs.Store(true)
 		// SYSCOIN Skip miner start and disable presealing in NEVM mode, since PoW is on Syscoin
 		if s.miner.ChainConfig().SyscoinBlock == nil {
 			go s.miner.Start()
@@ -634,8 +627,8 @@ func (s *Ethereum) Engine() consensus.Engine           { return s.engine }
 func (s *Ethereum) ChainDb() ethdb.Database            { return s.chainDb }
 func (s *Ethereum) IsListening() bool                  { return true } // Always listening
 func (s *Ethereum) Downloader() *downloader.Downloader { return s.handler.downloader }
-func (s *Ethereum) Synced() bool                       { return atomic.LoadUint32(&s.handler.acceptTxs) == 1 }
-func (s *Ethereum) SetSynced()                         { atomic.StoreUint32(&s.handler.acceptTxs, 1) }
+func (s *Ethereum) Synced() bool                       { return s.handler.acceptTxs.Load() }
+func (s *Ethereum) SetSynced()                         { s.handler.acceptTxs.Store(true) }
 func (s *Ethereum) ArchiveMode() bool                  { return s.config.NoPruning }
 func (s *Ethereum) BloomIndexer() *core.ChainIndexer   { return s.bloomIndexer }
 func (s *Ethereum) Merger() *consensus.Merger          { return s.merger }
