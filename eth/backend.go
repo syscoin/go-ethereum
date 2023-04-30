@@ -23,6 +23,8 @@ import (
 	"math/big"
 	"runtime"
 	"sync"
+	// SYSCOIN
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
@@ -377,7 +379,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 						eth.Downloader().Peers().Open()
 						eth.p2pServer.Start()
 						eth.Downloader().DoneEvent()
-						atomic.StoreUint32(&eth.handler.acceptTxs, 1)
+						eth.handler.acceptTxs.Store(true)
 						eth.lock.Unlock()
 						return
 					}

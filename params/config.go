@@ -348,8 +348,8 @@ type ChainConfig struct {
 	// Fork scheduling was switched from blocks to timestamps here
 
 	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
-	CancunTime   *big.Int `json:"cancunTime,omitempty"`   // Cancun switch time (nil = no fork, 0 = already on cancun)
-	PragueTime   *big.Int `json:"pragueTime,omitempty"`   // Prague switch time (nil = no fork, 0 = already on prague)
+	CancunTime   *uint64 `json:"cancunTime,omitempty"`    // Cancun switch time (nil = no fork, 0 = already on cancun)
+	PragueTime   *uint64 `json:"pragueTime,omitempty"`   // Prague switch time (nil = no fork, 0 = already on prague)
 
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
@@ -569,18 +569,15 @@ func (c *ChainConfig) IsShanghaiTime(num uint64) bool {
 	return false
 }
 
-// IsCancun returns whether num is either equal to the Cancun fork time or greater.
-func (c *ChainConfig) IsCancun(num *big.Int) bool {
-	return isBlockForked(c.CancunTime, num)
-}
-func (c *ChainConfig) IsCancunTime(num uint64) bool {
+// SYSCOIN IsCancun returns whether num is either equal to the Cancun fork time or greater.
+func (c *ChainConfig) IsCancun(num uint64) bool {
 	return false
 }
 
 
-// IsPrague returns whether num is either equal to the Prague fork time or greater.
+// SYSCOIN IsPrague returns whether num is either equal to the Prague fork time or greater.
 func (c *ChainConfig) IsPrague(num *big.Int) bool {
-	return isBlockForked(c.PragueTime, num)
+	return false
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -636,8 +633,8 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "mergeNetsplitBlock", block: c.MergeNetsplitBlock, optional: true},
 		{name: "rolluxBlock", block: c.RolluxBlock},
 		{name: "shanghaiTime", block: c.ShanghaiTime},
-		{name: "cancunTime", block: c.CancunTime, optional: true},
-		{name: "pragueTime", block: c.PragueTime, optional: true},
+		{name: "cancunTime", timestamp: c.CancunTime, optional: true},
+		{name: "pragueTime", timestamp: c.PragueTime, optional: true},
 	} {
 		if lastFork.name != "" {
 			switch {
@@ -739,11 +736,11 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkBlockIncompatible(c.RolluxBlock, newcfg.RolluxBlock, headNumber) {
 		return newBlockCompatError("Rollux fork block", c.RolluxBlock, newcfg.RolluxBlock)
 	}
-	if isForkBlockIncompatible(c.CancunTime, newcfg.CancunTime, headNumber) {
-		return newBlockCompatError("Cancun fork block", c.CancunTime, newcfg.CancunTime)
+	if isForkTimestampIncompatible(c.CancunTime, newcfg.CancunTime, headTimestamp) {
+		return newTimestampCompatError("Cancun fork timestamp", c.CancunTime, newcfg.CancunTime)
 	}
-	if isForkBlockIncompatible(c.PragueTime, newcfg.PragueTime, headNumber) {
-		return newBlockCompatError("Prague fork block", c.PragueTime, newcfg.PragueTime)
+	if isForkTimestampIncompatible(c.PragueTime, newcfg.PragueTime, headTimestamp) {
+		return newTimestampCompatError("Prague fork timestamp", c.PragueTime, newcfg.PragueTime)
 	}
 	return nil
 }
@@ -915,7 +912,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, time uint64) Rules {
 		IsMerge:          isMerge,
 		// SYSCOIN
 		IsShanghai:       c.IsShanghai(num),
-		IsCancun:         c.IsCancun(num),
+		IsCancun:         c.IsCancun(time),
 		IsPrague:         c.IsPrague(num),
 	}
 }
