@@ -105,21 +105,6 @@ type API struct {
 func NewAPI(backend Backend) *API {
 	return &API{backend: backend}
 }
-// SYSCOIN
-func (context *chainContext) ReadSYSHash(n uint64) []byte {
-	sysBlockHash, err := context.api.backend.ReadSYSHash(context.ctx, rpc.BlockNumber(n))
-	if err != nil {
-		return nil
-	}
-	return sysBlockHash
-}
-func (context *chainContext) ReadDataHash(hash common.Hash) []byte {
-	dataHash, err := context.api.backend.ReadDataHash(context.ctx, hash)
-	if err != nil {
-		return nil
-	}
-	return dataHash
-}
 // chainContext constructs the context reader which is used by the evm for reading
 // the necessary chain context.
 func (api *API) chainContext(ctx context.Context) core.ChainContext {

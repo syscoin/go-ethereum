@@ -960,6 +960,9 @@ func (diff *BlockOverrides) Apply(blockCtx *vm.BlockContext) {
 type ChainContextBackend interface {
 	Engine() consensus.Engine
 	HeaderByNumber(context.Context, rpc.BlockNumber) (*types.Header, error)
+	// SYSCOIN
+	ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error)
+	ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error)
 }
 
 // ChainContext is an implementation of core.ChainContext. It's main use-case
@@ -987,7 +990,21 @@ func (context *ChainContext) GetHeader(hash common.Hash, number uint64) *types.H
 	}
 	return header
 }
-
+// SYSCOIN
+func (context *ChainContext) ReadSYSHash(n uint64) []byte {
+	sysBlockHash, err := context.b.ReadSYSHash(context.ctx, rpc.BlockNumber(n))
+	if err != nil {
+		return nil
+	}
+	return sysBlockHash
+}
+func (context *ChainContext) ReadDataHash(hash common.Hash) []byte {
+	dataHash, err := context.b.ReadDataHash(context.ctx, hash)
+	if err != nil {
+		return nil
+	}
+	return dataHash
+}
 func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *StateOverride, blockOverrides *BlockOverrides, timeout time.Duration, globalGasCap uint64) (*core.ExecutionResult, error) {
 	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 

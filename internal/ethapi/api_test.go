@@ -237,6 +237,13 @@ func (b testBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*types
 func (b testBackend) HeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, error) {
 	panic("implement me")
 }
+// SYSCOIN
+func (b testBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {
+	panic("implement me")
+}
+func (b testBackend) ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error) {
+	panic("implement me")
+}
 func (b testBackend) CurrentHeader() *types.Header { panic("implement me") }
 func (b testBackend) CurrentBlock() *types.Header  { panic("implement me") }
 func (b testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
