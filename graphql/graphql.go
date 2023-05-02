@@ -196,7 +196,7 @@ type Transaction struct {
 }
 
 // resolve returns the internal transaction object, fetching it if needed.
-// It also returns the block the tx blongs to, unless it is a pending tx.
+// It also returns the block the tx belongs to, unless it is a pending tx.
 func (t *Transaction) resolve(ctx context.Context) (*types.Transaction, *Block, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -1068,7 +1068,7 @@ func (c *CallResult) Status() hexutil.Uint64 {
 func (b *Block) Call(ctx context.Context, args struct {
 	Data ethapi.TransactionArgs
 }) (*CallResult, error) {
-	result, err := ethapi.DoCall(ctx, b.r.backend, args.Data, *b.numberOrHash, nil, b.r.backend.RPCEVMTimeout(), b.r.backend.RPCGasCap())
+	result, err := ethapi.DoCall(ctx, b.r.backend, args.Data, *b.numberOrHash, nil, nil, b.r.backend.RPCEVMTimeout(), b.r.backend.RPCGasCap())
 	if err != nil {
 		return nil, err
 	}
@@ -1131,7 +1131,7 @@ func (p *Pending) Call(ctx context.Context, args struct {
 	Data ethapi.TransactionArgs
 }) (*CallResult, error) {
 	pendingBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-	result, err := ethapi.DoCall(ctx, p.r.backend, args.Data, pendingBlockNr, nil, p.r.backend.RPCEVMTimeout(), p.r.backend.RPCGasCap())
+	result, err := ethapi.DoCall(ctx, p.r.backend, args.Data, pendingBlockNr, nil, nil, p.r.backend.RPCEVMTimeout(), p.r.backend.RPCGasCap())
 	if err != nil {
 		return nil, err
 	}
@@ -1374,9 +1374,9 @@ func (s *SyncState) HealingBytecode() hexutil.Uint64 {
 	return hexutil.Uint64(s.progress.HealingBytecode)
 }
 
-// Syncing returns false in case the node is currently not syncing with the network. It can be up to date or has not
+// Syncing returns false in case the node is currently not syncing with the network. It can be up-to-date or has not
 // yet received the latest block headers from its pears. In case it is synchronizing:
-// - startingBlock:       block number this node started to synchronise from
+// - startingBlock:       block number this node started to synchronize from
 // - currentBlock:        block number this node is currently importing
 // - highestBlock:        block number of the highest block header this node has received from peers
 // - syncedAccounts:      number of accounts downloaded
