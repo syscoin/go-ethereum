@@ -159,10 +159,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	cliqueConfig, err := core.LoadCliqueConfig(chainDb, config.Genesis)
 	if err != nil {
 		return nil, err
-	}	
-	chainConfig, err := core.LoadChainConfig(chainDb, config.Genesis)
-	if err != nil {
-		return nil, err
 	}
 	var chainID *big.Int = nil
 	if config.Genesis != nil && config.Genesis.Config != nil && config.Genesis.Config.ChainID != nil {
