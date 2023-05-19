@@ -20,7 +20,6 @@ package catalyst
 import (
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 

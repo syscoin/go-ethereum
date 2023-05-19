@@ -301,7 +301,7 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	if chain.Config().IsShanghaiTime(header.Time) {
 		return fmt.Errorf("clique does not support shanghai fork")
 	}
-	if chain.Config().IsCancun(header.Number, header.Time) {
+	if chain.Config().IsCancun(header.Time) {
 		return fmt.Errorf("clique does not support cancun fork")
 	}
 	// All basic checks passed, verify cascading fields
