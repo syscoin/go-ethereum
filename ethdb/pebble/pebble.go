@@ -308,6 +308,7 @@ func (d *Database) NewBatch() ethdb.Batch {
 func (d *Database) NewBatchWithSize(_ int) ethdb.Batch {
 	return &batch{
 		b: d.db.NewBatch(),
+		db: d,
 	}
 }
 
