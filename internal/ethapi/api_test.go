@@ -277,11 +277,11 @@ func (b testBackend) HeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc
 	panic("unknown type rpc.BlockNumberOrHash")
 }
 // SYSCOIN
-func (b testBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {
-	return b.chain.ReadDataHash()
-}
 func (b testBackend) ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error) {
-	return b.chain.ReadSYSHash()
+	return b.chain.ReadSYSHash(uint64(number)), nil
+}
+func (b testBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {
+	return b.chain.ReadDataHash(hash), nil
 }
 func (b testBackend) CurrentHeader() *types.Header { return b.chain.CurrentBlock() }
 func (b testBackend) CurrentBlock() *types.Header  { return b.chain.CurrentBlock() }
