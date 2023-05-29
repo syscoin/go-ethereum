@@ -19,6 +19,7 @@ package eth
 import (
 	"math/big"
 	"time"
+	"runtime"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -40,7 +41,8 @@ func NewMinerAPI(e *Ethereum) *MinerAPI {
 // number of threads allowed to use and updates the minimum price required by the
 // transaction pool.
 func (api *MinerAPI) Start() error {
-	return api.e.StartMining()
+	// SYSCOIN
+	return api.e.StartMining(runtime.NumCPU())
 }
 
 // Stop terminates the miner, both at the consensus engine level as well as at
