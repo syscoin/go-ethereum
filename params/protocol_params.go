@@ -162,6 +162,9 @@ const (
 
 	// SYSCOIN
 	SYSDataHashGas uint64 = 1400 // The cost of data hash retrieval
+	BlobTxHashVersion                = 0x01    // Version byte of the commitment hash
+	BlobTxMaxDataGasPerBlock         = 1 << 19 // Maximum consumable data gas for data blobs per block
+	BlobTxTargetDataGasPerBlock      = 1 << 18 // Target consumable data gas for data blobs per block (for 1559-like pricing)
 	BlobTxDataGasPerBlob             = 1 << 17 // Gas consumption of a single data blob (== blob byte size)
 	BlobTxMinDataGasprice            = 1       // Minimum gas price for data blobs
 	BlobTxDataGaspriceUpdateFraction = 2225652 // Controls the maximum rate of change for data gas price
