@@ -596,9 +596,6 @@ func (s *Ethereum) StartMining(threads int) error {
 		// SYSCOIN Skip miner start and disable presealing in NEVM mode, since PoW is on Syscoin
 		if s.miner.ChainConfig().SyscoinBlock == nil {
 			go s.miner.Start()
-		} else {
-			log.Info("Disable mining presealer...")
-			s.miner.DisablePreseal()
 		}
 	}
 	return nil
