@@ -73,7 +73,10 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/go-zeromq/zmq4 v0.15.0
+require (
+	github.com/go-zeromq/zmq4 v0.15.0
+	golang.org/x/term v0.8.0
+)
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v0.21.1 // indirect
