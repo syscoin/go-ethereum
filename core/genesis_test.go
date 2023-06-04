@@ -172,7 +172,6 @@ func TestGenesisHashes(t *testing.T) {
 	}{
 		{DefaultGenesisBlock(), params.MainnetGenesisHash},
 		{DefaultGoerliGenesisBlock(), params.GoerliGenesisHash},
-		{DefaultRinkebyGenesisBlock(), params.RinkebyGenesisHash},
 		{DefaultTanenbaumGenesisBlock(), params.TanenbaumGenesisHash},
 		{DefaultSepoliaGenesisBlock(), params.SepoliaGenesisHash},
 	} {
