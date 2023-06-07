@@ -102,6 +102,7 @@ const (
 	BASEFEE     OpCode = 0x48
 	// SYSCOIN
 	SYSBLOCKHASH OpCode = 0x4f
+	BLOBHASH    OpCode = 0x49
 )
 
 // 0x50 range - 'storage' and execution.
@@ -292,6 +293,7 @@ var opCodeToString = map[OpCode]string{
 	BASEFEE:     "BASEFEE",
 	// SYSCOIN
 	SYSBLOCKHASH: "SYSBLOCKHASH",
+	BLOBHASH:    "BLOBHASH",
 
 	// 0x50 range - 'storage' and execution.
 	POP:      "POP",
@@ -449,6 +451,7 @@ var stringToOp = map[string]OpCode{
 	"CALLDATACOPY":   CALLDATACOPY,
 	"CHAINID":        CHAINID,
 	"BASEFEE":        BASEFEE,
+	"BLOBHASH":       BLOBHASH,
 	"DELEGATECALL":   DELEGATECALL,
 	"STATICCALL":     STATICCALL,
 	"CODESIZE":       CODESIZE,
