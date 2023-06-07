@@ -1128,7 +1128,7 @@ var (
 )
 
 // Run executes the point evaluation precompile.
-func (b *kzgPointEvaluation) Run(input []byte) ([]byte, error) {
+func (b *kzgPointEvaluation) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	if len(input) != blobVerifyInputLength {
 		return nil, errBlobVerifyInvalidInputLength
 	}

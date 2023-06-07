@@ -57,10 +57,10 @@ func NewEVMInterpreter(evm *EVM) *EVMInterpreter {
 	var table *JumpTable
 	switch {
 	// SYSCOIN
-	case evm.chainRules.IsCancun:
-		table = &cancunInstructionSet
 	case evm.chainRules.IsShanghai:
 		table = &shanghaiInstructionSet
+	case evm.chainRules.IsCancun:
+		table = &cancunInstructionSet
 	case evm.chainRules.IsSyscoin:
 		table = &londonInstructionSet
 	case evm.chainRules.IsMerge:
