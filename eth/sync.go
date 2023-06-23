@@ -102,10 +102,14 @@ func (cs *chainSyncer) handlePeerEvent(peer *eth.Peer) bool {
 // loop runs in its own goroutine and launches the sync when necessary.
 func (cs *chainSyncer) loop() {
 	defer cs.handler.wg.Done()
-
-	cs.handler.blockFetcher.Start()
+	// SYSCOIN
+	if cs.handler.blockFetcher != nil {
+		cs.handler.blockFetcher.Start()
+	}
 	cs.handler.txFetcher.Start()
-	defer cs.handler.blockFetcher.Stop()
+	if cs.handler.blockFetcher != nil {
+		defer cs.handler.blockFetcher.Stop()
+	}
 	defer cs.handler.txFetcher.Stop()
 	defer cs.handler.downloader.Terminate()
 

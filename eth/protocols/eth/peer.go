@@ -31,8 +31,7 @@ import (
 const (
 	// maxKnownTxs is the maximum transactions hashes to keep in the known list
 	// before starting to randomly evict them.
-	// SYSCOIN
-	maxKnownTxs = 262144
+	maxKnownTxs = 32768
 
 	// maxKnownBlocks is the maximum block hashes to keep in the known list
 	// before starting to randomly evict them.
@@ -40,11 +39,11 @@ const (
 
 	// maxQueuedTxs is the maximum number of transactions to queue up before dropping
 	// older broadcasts.
-	maxQueuedTxs = 32768
+	maxQueuedTxs = 4096
 
 	// maxQueuedTxAnns is the maximum number of transaction announcements to queue up
 	// before dropping older announcements.
-	maxQueuedTxAnns = 32768
+	maxQueuedTxAnns = 4096
 
 	// maxQueuedBlocks is the maximum number of block propagations to queue up before
 	// dropping broadcasts. There's not much point in queueing stale blocks, so a few
@@ -114,16 +113,7 @@ func NewPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter, txpool TxPool) *Pe
 		term:            make(chan struct{}),
 	}
 	// Start up all the broadcasters
-	// SYSCOIN if not syscoin network actively broadcast blocks,
-	// otherwise just respond to blocks/headers upon request
-	if peer.txpool != nil {
-		chainConfig := peer.txpool.GetChainConfig()
-		if chainConfig == nil || chainConfig.SyscoinBlock == nil {
-			go peer.broadcastBlocks()
-		}
-	} else {
-		go peer.broadcastBlocks()
-	}
+	go peer.broadcastBlocks()
 	go peer.broadcastTransactions()
 	go peer.announceTransactions()
 	go peer.dispatcher()

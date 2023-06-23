@@ -144,8 +144,8 @@ type Config struct {
 var DefaultConfig = Config{
 	Journal:   "transactions.rlp",
 	Rejournal: time.Hour,
-
-	PriceLimit: 1,
+	// SYSCOIN
+	PriceLimit: 100,
 	PriceBump:  10,
 
 	AccountSlots: 16,

@@ -39,15 +39,12 @@ import (
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
-	// SYSCOIN
-	"github.com/ethereum/go-ethereum/params"
 )
 
 const (
 	// txChanSize is the size of channel listening to NewTxsEvent.
 	// The number is referenced from the size of tx pool.
-	// SYSCOIN
-	txChanSize = 32768
+	txChanSize = 4096
 )
 
 var (
@@ -75,9 +72,6 @@ type txPool interface {
 	// SubscribeNewTxsEvent should return an event subscription of
 	// NewTxsEvent and send events to the given channel.
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
-
-	// SYSCOIN get chainconfig for peer interface to know if its a syscoin compliant network (enforce that no blocks are outgoing)
-	GetChainConfig() *params.ChainConfig
 }
 
 // handlerConfig is the collection of initialization parameters to create a full
@@ -201,9 +195,9 @@ func newHandler(config *handlerConfig) (*handler, error) {
 	}
 	// Construct the fetcher (short sync)
 	validator := func(header *types.Header) error {
-		// All the block fetcher activities should be disabled
+		// SYSCOIN All the block fetcher activities should be disabled
 		// after the transition. Print the warning log.
-		if h.merger.PoSFinalized() {
+		if h.merger.PoSFinalized() || h.chain.GetChainConfig().SyscoinBlock != nil {
 			log.Warn("Unexpected validation activity", "hash", header.Hash(), "number", header.Number)
 			return errors.New("unexpected behavior after transition")
 		}
@@ -222,9 +216,9 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		return h.chain.CurrentBlock().Number.Uint64()
 	}
 	inserter := func(blocks types.Blocks) (int, error) {
-		// All the block fetcher activities should be disabled
+		// SYSCOIN All the block fetcher activities should be disabled
 		// after the transition. Print the warning log.
-		if h.merger.PoSFinalized() {
+		if h.merger.PoSFinalized() || h.chain.GetChainConfig().SyscoinBlock != nil {
 			var ctx []interface{}
 			ctx = append(ctx, "blocks", len(blocks))
 			if len(blocks) > 0 {
@@ -274,8 +268,10 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		}
 		return n, err
 	}
-	h.blockFetcher = fetcher.NewBlockFetcher(false, nil, h.chain.GetBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
-
+	// SYSCOIN
+	if h.chain.GetChainConfig().SyscoinBlock == nil {
+		h.blockFetcher = fetcher.NewBlockFetcher(false, nil, h.chain.GetBlockByHash, validator, h.BroadcastBlock, heighter, nil, inserter, h.removePeer)
+	}
 	fetchTx := func(peer string, hashes []common.Hash) error {
 		p := h.peers.peer(peer)
 		if p == nil {
@@ -521,6 +517,10 @@ func (h *handler) Stop() {
 // BroadcastBlock will either propagate a block to a subset of its peers, or
 // will only announce its availability (depending what's requested).
 func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
+	// SYSCOIN
+	if h.chain.GetChainConfig().SyscoinBlock != nil {
+		return
+	}
 	// Disable the block propagation if the chain has already entered the PoS
 	// stage. The block propagation is delegated to the consensus layer.
 	if h.merger.PoSFinalized() {
@@ -607,6 +607,10 @@ func (h *handler) BroadcastTransactions(txs types.Transactions) {
 
 // minedBroadcastLoop sends mined blocks to connected peers.
 func (h *handler) minedBroadcastLoop() {
+	// SYSCOIN
+	if h.chain.GetChainConfig().SyscoinBlock != nil {
+		return
+	}
 	defer h.wg.Done()
 
 	for obj := range h.minedBlockSub.Chan() {
