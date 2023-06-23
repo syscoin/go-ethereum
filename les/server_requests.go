@@ -436,7 +436,7 @@ func handleGetProofs(msg Decoder) (serveRequestFn, uint64, uint64, error) {
 				}
 			}
 			// Prove the user's request from the account or storage trie
-			if err := trie.Prove(request.Key, request.FromLevel, nodes); err != nil {
+			if err := trie.Prove(request.Key, nodes); err != nil {
 				p.Log().Warn("Failed to prove state request", "block", header.Number, "hash", header.Hash(), "err", err)
 				continue
 			}
@@ -480,7 +480,7 @@ func handleGetHelperTrieProofs(msg Decoder) (serveRequestFn, uint64, uint64, err
 			// the headers with no valid proof. Keep the compatibility for
 			// legacy les protocol and drop this hack when the les2/3 are
 			// not supported.
-			err := auxTrie.Prove(request.Key, request.FromLevel, nodes)
+			err := auxTrie.Prove(request.Key, nodes)
 			if p.version >= lpv4 && err != nil {
 				return nil
 			}
@@ -518,12 +518,7 @@ func handleSendTx(msg Decoder) (serveRequestFn, uint64, uint64, error) {
 			hash := tx.Hash()
 			stats[i] = txStatus(backend, hash)
 			if stats[i].Status == txpool.TxStatusUnknown {
-				addFn := backend.TxPool().AddRemotes
-				// Add txs synchronously for testing purpose
-				if backend.AddTxsSync() {
-					addFn = backend.TxPool().AddRemotesSync
-				}
-				if errs := addFn([]*types.Transaction{tx}); errs[0] != nil {
+				if errs := backend.TxPool().Add([]*txpool.Transaction{{Tx: tx}}, false, backend.AddTxsSync()); errs[0] != nil {
 					stats[i].Error = errs[0].Error()
 					continue
 				}
@@ -556,7 +551,7 @@ func handleGetTxStatus(msg Decoder) (serveRequestFn, uint64, uint64, error) {
 func txStatus(b serverBackend, hash common.Hash) light.TxStatus {
 	var stat light.TxStatus
 	// Looking the transaction in txpool first.
-	stat.Status = b.TxPool().Status([]common.Hash{hash})[0]
+	stat.Status = b.TxPool().Status(hash)
 
 	// If the transaction is unknown to the pool, try looking it up locally.
 	if stat.Status == txpool.TxStatusUnknown {

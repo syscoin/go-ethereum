@@ -162,6 +162,8 @@ const (
 
 	// SYSCOIN
 	SYSDataHashGas uint64 = 1400 // The cost of data hash retrieval
+	BlobTxBytesPerFieldElement         = 32      // Size in bytes of a field element
+	BlobTxFieldElementsPerBlob         = 4096    // Number of field elements stored in a single data blob
 	BlobTxHashVersion                  = 0x01    // Version byte of the commitment hash
 	BlobTxMaxDataGasPerBlock           = 1 << 19 // Maximum consumable data gas for data blobs per block
 	BlobTxTargetDataGasPerBlock        = 1 << 18 // Target consumable data gas for data blobs per block (for 1559-like pricing)
