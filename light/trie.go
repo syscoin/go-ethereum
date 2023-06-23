@@ -147,6 +147,10 @@ func (t *odrTrie) UpdateAccount(address common.Address, acc *types.StateAccount)
 	})
 }
 
+func (t *odrTrie) UpdateContractCode(_ common.Address, _ common.Hash, _ []byte) error {
+	return nil
+}
+
 func (t *odrTrie) UpdateStorage(_ common.Address, key, value []byte) error {
 	key = crypto.Keccak256(key)
 	v, _ := rlp.EncodeToBytes(value)
@@ -184,8 +188,8 @@ func (t *odrTrie) Hash() common.Hash {
 	return t.trie.Hash()
 }
 
-func (t *odrTrie) NodeIterator(startkey []byte) trie.NodeIterator {
-	return newNodeIterator(t, startkey)
+func (t *odrTrie) NodeIterator(startkey []byte) (trie.NodeIterator, error) {
+	return newNodeIterator(t, startkey), nil
 }
 
 func (t *odrTrie) GetKey(sha []byte) []byte {
@@ -248,7 +252,11 @@ func newNodeIterator(t *odrTrie, startkey []byte) trie.NodeIterator {
 		})
 	}
 	it.do(func() error {
-		it.NodeIterator = it.t.trie.NodeIterator(startkey)
+		var err error
+		it.NodeIterator, err = it.t.trie.NodeIterator(startkey)
+		if err != nil {
+			return err
+		}
 		return it.NodeIterator.Error()
 	})
 	return it
