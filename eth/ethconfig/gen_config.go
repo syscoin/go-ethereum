@@ -59,6 +59,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		OverrideCancun          *uint64 `toml:",omitempty"`
 		// SYSCOIN
 		NEVMPubEP                       string   `toml:",omitempty"`
+		OverrideVerkle          *uint64 `toml:",omitempty"`
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -103,6 +104,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	// SYSCOIN
 	enc.NEVMPubEP = c.NEVMPubEP
 	enc.OverrideCancun = c.OverrideCancun
+	enc.OverrideVerkle = c.OverrideVerkle
 	return &enc, nil
 }
 
@@ -151,6 +153,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		OverrideCancun          *uint64 `toml:",omitempty"`
 		// SYSCOIN
 		NEVMPubEP                       *string  `toml:",omitempty"`
+		OverrideVerkle          *uint64 `toml:",omitempty"`
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -279,6 +282,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.OverrideCancun != nil {
 		c.OverrideCancun = dec.OverrideCancun
+	}
+	if dec.OverrideVerkle != nil {
+		c.OverrideVerkle = dec.OverrideVerkle
 	}
 	return nil
 }

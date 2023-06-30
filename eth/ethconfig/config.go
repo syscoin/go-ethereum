@@ -202,6 +202,9 @@ type Config struct {
 	NEVMPubEP string `toml:",omitempty"`
 	// OverrideCancun (TODO: remove after the fork)
 	OverrideCancun *uint64 `toml:",omitempty"`
+
+	// OverrideVerkle (TODO: remove after the fork)
+	OverrideVerkle *uint64 `toml:",omitempty"`
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.
