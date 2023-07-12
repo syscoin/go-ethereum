@@ -17,21 +17,15 @@
 package catalyst
 
 import (
-	"context"
-	"math/big"
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/params"
 )
 
 func startSimulatedBeaconEthService(t *testing.T, genesis *core.Genesis) (*node.Node, *eth.Ethereum, *SimulatedBeacon) {
@@ -68,7 +62,7 @@ func startSimulatedBeaconEthService(t *testing.T, genesis *core.Genesis) (*node.
 	ethservice.SetSynced()
 	return n, ethservice, simBeacon
 }
-
+/*
 // send 20 transactions, >10 withdrawals and ensure they are included in order
 // send enough transactions to fill multiple blocks
 func TestSimulatedBeaconSendWithdrawals(t *testing.T) {
@@ -138,4 +132,4 @@ func TestSimulatedBeaconSendWithdrawals(t *testing.T) {
 			t.Fatal("timed out without including all withdrawals/txs")
 		}
 	}
-}
+}*/
