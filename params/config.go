@@ -349,9 +349,9 @@ type ChainConfig struct {
 	// Fork scheduling was switched from blocks to timestamps here
 
 	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
-	CancunTime   *uint64 `json:"cancunTime,omitempty"`    // Cancun switch time (nil = no fork, 0 = already on cancun)
-	PragueTime   *uint64 `json:"pragueTime,omitempty"`   // Prague switch time (nil = no fork, 0 = already on prague)
-	VerkleTime   *uint64 `json:"verkleTime,omitempty"`   // Verkle switch time (nil = no fork, 0 = already on verkle)
+	CancunTime   *big.Int `json:"cancunTime,omitempty"`    // Cancun switch time (nil = no fork, 0 = already on cancun)
+	PragueTime   *big.Int `json:"pragueTime,omitempty"`   // Prague switch time (nil = no fork, 0 = already on prague)
+	VerkleTime   *big.Int `json:"verkleTime,omitempty"`   // Verkle switch time (nil = no fork, 0 = already on verkle)
 
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
@@ -644,9 +644,9 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "mergeNetsplitBlock", block: c.MergeNetsplitBlock, optional: true},
 		{name: "rolluxBlock", block: c.RolluxBlock},
 		{name: "shanghaiTime", block: c.ShanghaiTime},
-		{name: "cancunTime", timestamp: c.CancunTime, optional: true},
-		{name: "pragueTime", timestamp: c.PragueTime, optional: true},
-		{name: "verkleTime", timestamp: c.VerkleTime, optional: true},
+		{name: "cancunTime", block: c.CancunTime, optional: true},
+		{name: "pragueTime", block: c.PragueTime, optional: true},
+		{name: "verkleTime", block: c.VerkleTime, optional: true},
 	} {
 		if lastFork.name != "" {
 			switch {
@@ -748,14 +748,14 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkBlockIncompatible(c.RolluxBlock, newcfg.RolluxBlock, headNumber) {
 		return newBlockCompatError("Rollux fork block", c.RolluxBlock, newcfg.RolluxBlock)
 	}
-	if isForkTimestampIncompatible(c.CancunTime, newcfg.CancunTime, headTimestamp) {
-		return newTimestampCompatError("Cancun fork timestamp", c.CancunTime, newcfg.CancunTime)
+	if isForkBlockIncompatible(c.CancunTime, newcfg.CancunTime, headNumber) {
+		return newBlockCompatError("Cancun fork block", c.CancunTime, newcfg.CancunTime)
 	}
-	if isForkTimestampIncompatible(c.PragueTime, newcfg.PragueTime, headTimestamp) {
-		return newTimestampCompatError("Prague fork timestamp", c.PragueTime, newcfg.PragueTime)
+	if isForkBlockIncompatible(c.PragueTime, newcfg.PragueTime, headNumber) {
+		return newBlockCompatError("Prague fork block", c.PragueTime, newcfg.PragueTime)
 	}
-	if isForkTimestampIncompatible(c.VerkleTime, newcfg.VerkleTime, headTimestamp) {
-		return newTimestampCompatError("Verkle fork timestamp", c.VerkleTime, newcfg.VerkleTime)
+	if isForkBlockIncompatible(c.VerkleTime, newcfg.VerkleTime, headNumber) {
+		return newBlockCompatError("Verkle fork block", c.VerkleTime, newcfg.VerkleTime)
 	}
 	return nil
 }

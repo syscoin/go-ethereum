@@ -295,10 +295,10 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *trie.Database, gen
 	applyOverrides := func(config *params.ChainConfig) {
 		if config != nil {
 			if overrides != nil && overrides.OverrideCancun != nil {
-				config.CancunTime = overrides.OverrideCancun
+				config.CancunTime = big.NewInt(int64(*overrides.OverrideCancun))
 			}
 			if overrides != nil && overrides.OverrideVerkle != nil {
-				config.VerkleTime = overrides.OverrideVerkle
+				config.VerkleTime = big.NewInt(int64(*overrides.OverrideVerkle))
 			}
 		}
 	}
