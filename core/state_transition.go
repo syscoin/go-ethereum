@@ -240,7 +240,8 @@ func (st *StateTransition) buyGas() error {
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.msg.GasFeeCap)
 		balanceCheck.Add(balanceCheck, st.msg.Value)
 	}
-	if st.evm.ChainConfig().IsCancun(st.evm.Context.BlockNumber, st.evm.Context.Time) {
+	// SYSCOIN
+	if st.evm.ChainConfig().IsCancun(st.evm.Context.Time) {
 		if dataGas := st.dataGasUsed(); dataGas > 0 {
 			if st.evm.Context.ExcessDataGas == nil {
 				// programming error
@@ -330,7 +331,7 @@ func (st *StateTransition) preCheck() error {
 		}
 	}
 
-	if st.evm.ChainConfig().IsCancun(st.evm.Context.BlockNumber, st.evm.Context.Time) {
+	if st.evm.ChainConfig().IsCancun(st.evm.Context.Time) {
 		if st.dataGasUsed() > 0 {
 			// Check that the user is paying at least the current blob fee
 			if have, want := st.msg.BlobGasFeeCap, misc.CalcBlobFee(*st.evm.Context.ExcessDataGas); have.Cmp(want) < 0 {

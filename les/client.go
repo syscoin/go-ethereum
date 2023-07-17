@@ -96,7 +96,6 @@ type LightEthereum struct {
 
 	shutdownTracker *shutdowncheck.ShutdownTracker // Tracks if and when the node has shutdown ungracefully
 }
-
 // New creates an instance of the light client.
 func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 	chainDb, err := stack.OpenDatabase("lightchaindata", config.DatabaseCache, config.DatabaseHandles, "eth/db/chaindata/", false)
@@ -239,7 +238,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 		}
 		eth.blockchain.WriteDataHashes(proposedBlockNumber, nevmBlockConnect.VersionHashes)
 		eth.blockchain.WriteSYSHash(nevmBlockConnect.Sysblockhash, proposedBlockNumber)
-		if !eth.handler.inited {
+		if eth.peers.closed {
 			eth.lock.Lock()
 			eth.timeLastBlock = time.Now().Unix()
 			eth.lock.Unlock()
@@ -247,7 +246,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 		return nil
 	}
 	go func(eth *LightEthereum) {
-		sub := eth.eventMux.Subscribe(downloader.StartNetworkEvent{})
+		sub := eth.eventMux.Subscribe(StartNetworkEvent{})
 		defer sub.Unsubscribe()
 		for {
 			event := <-sub.Chan()
@@ -255,7 +254,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 				continue
 			}
 			switch event.Data.(type) {
-			case downloader.StartNetworkEvent:
+			case StartNetworkEvent:
 				eth.lock.Lock()
 				eth.timeLastBlock = time.Now().Unix()
 				eth.lock.Unlock()
@@ -263,20 +262,13 @@ func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 				for {
 					time.Sleep(100 * time.Millisecond)
 					eth.lock.Lock()
-					if eth.handler.inited && eth.peers.closed {
-						log.Info("Networking stopped, return without starting peering...")
-						eth.lock.Unlock()
-						return
-					}
 					// ensure 5 seconds has passed between blocks before we start peering so we are sure sync has finished
 					if time.Now().Unix()-eth.timeLastBlock >= 5 {
 						log.Info("Networking and peering start...")
 						eth.udpEnabled = true
-						eth.handler.start()
 						eth.peers.open()
-						eth.Downloader().Peers().Open()
 						eth.p2pServer.Start()
-						eth.Downloader().DoneEvent()
+						eth.DoneEvent()
 						eth.lock.Unlock()
 						return
 					}
@@ -313,7 +305,18 @@ func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 	}
 	return leth, nil
 }
-
+// SYSCOIN
+type DoneEvent struct {
+	Latest *types.Header
+}
+type StartNetworkEvent struct{}
+func (s *LightEthereum) DoneEvent() {
+	latest := s.blockchain.CurrentHeader()
+	s.eventMux.Post(DoneEvent{latest})
+}
+func (s *LightEthereum) StartNetworkEvent() {
+	s.eventMux.Post(StartNetworkEvent{})
+}
 // VfluxRequest sends a batch of requests to the given node through discv5 UDP TalkRequest and returns the responses
 func (s *LightEthereum) VfluxRequest(n *enode.Node, reqs vflux.Requests) vflux.Replies {
 	if !s.udpEnabled {

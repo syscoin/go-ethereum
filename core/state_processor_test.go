@@ -399,7 +399,8 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 		nBlobs += len(tx.BlobHashes())
 	}
 	header.Root = common.BytesToHash(hasher.Sum(nil))
-	if config.IsCancun(header.Number, header.Time) {
+	// SYSCOIN
+	if config.IsCancun(header.Time) {
 		var pExcess, pUsed = uint64(0), uint64(0)
 		if parent.ExcessDataGas() != nil {
 			pExcess = *parent.ExcessDataGas()

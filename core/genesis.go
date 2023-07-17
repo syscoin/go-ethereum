@@ -478,7 +478,7 @@ func (g *Genesis) ToBlock() *types.Block {
 	}
 	var withdrawals []*types.Withdrawal
 	if conf := g.Config; conf != nil {
-		num := big.NewInt(int64(g.Number))
+		//num := big.NewInt(int64(g.Number))
 		if conf.IsShanghaiTime(g.Timestamp) {
 			head.WithdrawalsHash = &types.EmptyWithdrawalsHash
 			withdrawals = make([]*types.Withdrawal, 0)
