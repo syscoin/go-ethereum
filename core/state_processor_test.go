@@ -61,8 +61,10 @@ func TestStateProcessorErrors(t *testing.T) {
 			Ethash:                        new(params.EthashConfig),
 			TerminalTotalDifficulty:       big.NewInt(0),
 			TerminalTotalDifficultyPassed: true,
-			ShanghaiTime:                  new(uint64),
-			CancunTime:                    new(uint64),
+			// SYSCOIN	
+			RolluxBlock:				   big.NewInt(0),
+			ShanghaiTime:                  big.NewInt(0),
+			CancunTime:                    big.NewInt(0),
 		}
 		signer  = types.LatestSigner(config)
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -248,7 +250,8 @@ func TestStateProcessorErrors(t *testing.T) {
 				txs: []*types.Transaction{
 					mkBlobTx(0, common.Address{}, params.TxGas, big.NewInt(1), big.NewInt(1), []common.Hash{(common.Hash{1})}),
 				},
-				want: "could not apply tx 0 [0x6c11015985ce82db691d7b2d017acda296db88b811c3c60dc71449c76256c716]: max fee per gas less than block base fee: address 0x71562b71999873DB5b286dF957af199Ec94617F7, maxFeePerGas: 1 baseFee: 875000000",
+				// SYSCOIN
+				want: "data blobs present in block body",
 			},
 		} {
 			block := GenerateBadBlock(gspec.ToBlock(), beacon.New(ethash.NewFaker()), tt.txs, gspec.Config)
@@ -400,7 +403,7 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 	}
 	header.Root = common.BytesToHash(hasher.Sum(nil))
 	// SYSCOIN
-	if config.IsCancun(header.Time) {
+	if config.IsCancunTime(header.Time) {
 		var pExcess, pUsed = uint64(0), uint64(0)
 		if parent.ExcessDataGas() != nil {
 			pExcess = *parent.ExcessDataGas()

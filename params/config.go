@@ -54,6 +54,7 @@ var (
 		SyscoinBlock:        big.NewInt(0),
 		RolluxBlock:         big.NewInt(268500),
 		ShanghaiTime:        big.NewInt(268500),
+		//CancunTime:        big.NewInt(368500),
 		LondonBlock:         big.NewInt(1),
 		ArrowGlacierBlock:   nil,
 		GrayGlacierBlock:    nil,
@@ -578,10 +579,12 @@ func (c *ChainConfig) IsShanghaiTime(num uint64) bool {
 }
 
 // SYSCOIN IsCancun returns whether num is either equal to the Cancun fork time or greater.
-func (c *ChainConfig) IsCancun(num uint64) bool {
+func (c *ChainConfig) IsCancun(num *big.Int) bool {
+	return isBlockForked(c.CancunTime, num)
+}
+func (c *ChainConfig) IsCancunTime(num uint64) bool {
 	return false
 }
-
 
 // SYSCOIN IsPrague returns whether num is either equal to the Prague fork time or greater.
 func (c *ChainConfig) IsPrague(num *big.Int) bool {
@@ -930,7 +933,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, time uint64) Rules {
 		IsMerge:          isMerge,
 		// SYSCOIN
 		IsShanghai:       c.IsShanghai(num),
-		IsCancun:         c.IsCancun(time),
+		IsCancun:         c.IsCancun(num),
 		IsPrague:         c.IsPrague(num),
 		IsVerkle:         c.IsVerkle(num),
 	}

@@ -483,7 +483,7 @@ func (g *Genesis) ToBlock() *types.Block {
 			head.WithdrawalsHash = &types.EmptyWithdrawalsHash
 			withdrawals = make([]*types.Withdrawal, 0)
 		}
-		if conf.IsCancun(g.Timestamp) {
+		if conf.IsCancunTime(g.Timestamp) {
 			head.ExcessDataGas = g.ExcessDataGas
 			head.DataGasUsed = g.DataGasUsed
 			if head.ExcessDataGas == nil {
