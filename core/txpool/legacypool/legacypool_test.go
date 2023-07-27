@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -143,6 +144,31 @@ func dynamicFeeTx(nonce uint64, gaslimit uint64, gasFee *big.Int, tip *big.Int, 
 	return tx
 }
 
+func makeAddressReserver() txpool.AddressReserver {
+	var (
+		reserved = make(map[common.Address]struct{})
+		lock     sync.Mutex
+	)
+	return func(addr common.Address, reserve bool) error {
+		lock.Lock()
+		defer lock.Unlock()
+
+		_, exists := reserved[addr]
+		if reserve {
+			if exists {
+				panic("already reserved")
+			}
+			reserved[addr] = struct{}{}
+			return nil
+		}
+		if !exists {
+			panic("not reserved")
+		}
+		delete(reserved, addr)
+		return nil
+	}
+}
+
 func setupPool() (*LegacyPool, *ecdsa.PrivateKey) {
 	return setupPoolWithConfig(params.TestChainConfig)
 }
@@ -153,7 +179,7 @@ func setupPoolWithConfig(config *params.ChainConfig) (*LegacyPool, *ecdsa.Privat
 
 	key, _ := crypto.GenerateKey()
 	pool := New(testTxPoolConfig, blockchain)
-	if err := pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock()); err != nil {
+	if err := pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver()); err != nil {
 		panic(err)
 	}
 	// wait for the pool to initialize
@@ -272,7 +298,7 @@ func TestStateChangeDuringReset(t *testing.T) {
 	tx1 := transaction(1, 100000, key)
 
 	pool := New(testTxPoolConfig, blockchain)
-	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	nonce := pool.Nonce(address)
@@ -471,7 +497,7 @@ func TestChainFork(t *testing.T) {
 	if _, err := pool.add(tx, false); err != nil {
 		t.Error("didn't expect error", err)
 	}
-	pool.removeTx(tx.Hash(), true)
+	pool.removeTx(tx.Hash(), true, true)
 
 	// reset the pool's internal state
 	resetState()
@@ -692,7 +718,7 @@ func TestPostponing(t *testing.T) {
 	blockchain := newTestBlockChain(params.TestChainConfig, 1000000, statedb, new(event.Feed))
 
 	pool := New(testTxPoolConfig, blockchain)
-	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	// Create two test accounts to produce different gap profiles with
@@ -909,7 +935,7 @@ func testQueueGlobalLimiting(t *testing.T, nolocals bool) {
 	config.GlobalQueue = config.AccountQueue*3 - 1 // reduce the queue limits to shorten test time (-1 to make it non divisible)
 
 	pool := New(config, blockchain)
-	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	// Create a number of test accounts and fund them (last one will be the local)
@@ -1002,7 +1028,7 @@ func testQueueTimeLimiting(t *testing.T, nolocals bool) {
 	config.NoLocals = nolocals
 
 	pool := New(config, blockchain)
-	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	// Create two test accounts to ensure remotes expire but locals do not
@@ -1187,7 +1213,7 @@ func TestPendingGlobalLimiting(t *testing.T) {
 	config.GlobalSlots = config.AccountSlots * 10
 
 	pool := New(config, blockchain)
-	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	// Create a number of test accounts and fund them
@@ -1291,7 +1317,7 @@ func TestCapClearsFromAll(t *testing.T) {
 	config.GlobalSlots = 8
 
 	pool := New(config, blockchain)
-	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	// Create a number of test accounts and fund them
@@ -1324,7 +1350,7 @@ func TestPendingMinimumAllowance(t *testing.T) {
 	config.GlobalSlots = 1
 
 	pool := New(config, blockchain)
-	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	// Create a number of test accounts and fund them
@@ -1370,7 +1396,7 @@ func TestRepricing(t *testing.T) {
 	blockchain := newTestBlockChain(params.TestChainConfig, 1000000, statedb, new(event.Feed))
 
 	pool := New(testTxPoolConfig, blockchain)
-	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	// Keep track of transaction events to ensure all executables get announced
@@ -1619,7 +1645,7 @@ func TestRepricingKeepsLocals(t *testing.T) {
 	blockchain := newTestBlockChain(eip1559Config, 1000000, statedb, new(event.Feed))
 
 	pool := New(testTxPoolConfig, blockchain)
-	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	// Create a number of test accounts and fund them
@@ -1697,7 +1723,7 @@ func TestUnderpricing(t *testing.T) {
 	config.GlobalQueue = 2
 
 	pool := New(config, blockchain)
-	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	// Keep track of transaction events to ensure all executables get announced
@@ -1812,7 +1838,7 @@ func TestStableUnderpricing(t *testing.T) {
 	config.GlobalQueue = 0
 
 	pool := New(config, blockchain)
-	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	// Keep track of transaction events to ensure all executables get announced
@@ -2041,7 +2067,7 @@ func TestDeduplication(t *testing.T) {
 	blockchain := newTestBlockChain(params.TestChainConfig, 1000000, statedb, new(event.Feed))
 
 	pool := New(testTxPoolConfig, blockchain)
-	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	// Create a test account to add transactions with
@@ -2108,7 +2134,7 @@ func TestReplacement(t *testing.T) {
 	blockchain := newTestBlockChain(params.TestChainConfig, 1000000, statedb, new(event.Feed))
 
 	pool := New(testTxPoolConfig, blockchain)
-	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	// Keep track of transaction events to ensure all executables get announced
@@ -2319,7 +2345,7 @@ func testJournaling(t *testing.T, nolocals bool) {
 	config.Rejournal = time.Second
 
 	pool := New(config, blockchain)
-	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 
 	// Create two test accounts to ensure remotes expire but locals do not
 	local, _ := crypto.GenerateKey()
@@ -2357,7 +2383,7 @@ func testJournaling(t *testing.T, nolocals bool) {
 	blockchain = newTestBlockChain(params.TestChainConfig, 1000000, statedb, new(event.Feed))
 
 	pool = New(config, blockchain)
-	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 
 	pending, queued = pool.Stats()
 	if queued != 0 {
@@ -2384,7 +2410,7 @@ func testJournaling(t *testing.T, nolocals bool) {
 	statedb.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 1)
 	blockchain = newTestBlockChain(params.TestChainConfig, 1000000, statedb, new(event.Feed))
 	pool = New(config, blockchain)
-	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(config.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 
 	pending, queued = pool.Stats()
 	if pending != 0 {
@@ -2415,7 +2441,7 @@ func TestStatusCheck(t *testing.T) {
 	blockchain := newTestBlockChain(params.TestChainConfig, 1000000, statedb, new(event.Feed))
 
 	pool := New(testTxPoolConfig, blockchain)
-	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock())
+	pool.Init(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain.CurrentBlock(), makeAddressReserver())
 	defer pool.Close()
 
 	// Create the test accounts to check various transaction statuses with
