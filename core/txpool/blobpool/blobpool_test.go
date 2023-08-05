@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus/misc"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -109,7 +109,7 @@ func (bc *testBlockChain) CurrentBlock() *types.Header {
 		mid := new(big.Int).Add(lo, hi)
 		mid.Div(mid, big.NewInt(2))
 
-		if misc.CalcBaseFee(bc.config, &types.Header{
+		if eip1559.CalcBaseFee(bc.config, &types.Header{
 			Number:   blockNumber,
 			GasLimit: gasLimit,
 			GasUsed:  0,
@@ -122,7 +122,7 @@ func (bc *testBlockChain) CurrentBlock() *types.Header {
 	}
 	baseFee := lo
 
-	// The excess data gas at 2^27 translates into a blob fee higher than mainnet
+	// The excess blob gas at 2^27 translates into a blob fee higher than mainnet
 	// ether existence, use that as a cap for the tests.
 	lo = new(big.Int)
 	hi = new(big.Int).Exp(big.NewInt(2), big.NewInt(27), nil)
@@ -137,14 +137,14 @@ func (bc *testBlockChain) CurrentBlock() *types.Header {
 			lo = mid
 		}
 	}
-	excessDataGas := lo.Uint64()
+	excessBlobGas := lo.Uint64()
 
 	return &types.Header{
 		Number:        blockNumber,
 		Time:          blockTime,
 		GasLimit:      gasLimit,
 		BaseFee:       baseFee,
-		ExcessDataGas: &excessDataGas,
+		ExcessBlobGas: &excessBlobGas,
 	}
 }
 
@@ -523,7 +523,7 @@ func TestOpenDrops(t *testing.T) {
 	chain := &testBlockChain{
 		config:  testChainConfig,
 		basefee: uint256.NewInt(params.InitialBaseFee),
-		blobfee: uint256.NewInt(params.BlobTxMinDataGasprice),
+		blobfee: uint256.NewInt(params.BlobTxMinBlobGasprice),
 		statedb: statedb,
 	}
 	pool := New(Config{Datadir: storage}, chain)
@@ -638,7 +638,7 @@ func TestOpenIndex(t *testing.T) {
 	chain := &testBlockChain{
 		config:  testChainConfig,
 		basefee: uint256.NewInt(params.InitialBaseFee),
-		blobfee: uint256.NewInt(params.BlobTxMinDataGasprice),
+		blobfee: uint256.NewInt(params.BlobTxMinBlobGasprice),
 		statedb: statedb,
 	}
 	pool := New(Config{Datadir: storage}, chain)

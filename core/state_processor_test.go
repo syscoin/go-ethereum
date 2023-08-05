@@ -26,7 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/beacon"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
-	"github.com/ethereum/go-ethereum/consensus/misc"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -380,7 +380,7 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 		UncleHash:  types.EmptyUncleHash,
 	}
 	if config.IsLondon(header.Number) {
-		header.BaseFee = misc.CalcBaseFee(config, parent.Header())
+		header.BaseFee = eip1559.CalcBaseFee(config, parent.Header())
 	}
 	if config.IsShanghaiTime(header.Time) {
 		header.WithdrawalsHash = &types.EmptyWithdrawalsHash
@@ -406,14 +406,14 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 	// SYSCOIN
 	if config.IsCancunTime(header.Time) {
 		var pExcess, pUsed = uint64(0), uint64(0)
-		if parent.ExcessDataGas() != nil {
-			pExcess = *parent.ExcessDataGas()
-			pUsed = *parent.DataGasUsed()
+		if parent.ExcessBlobGas() != nil {
+			pExcess = *parent.ExcessBlobGas()
+			pUsed = *parent.BlobGasUsed()
 		}
-		excess := eip4844.CalcExcessDataGas(pExcess, pUsed)
-		used := uint64(nBlobs * params.BlobTxDataGasPerBlob)
-		header.ExcessDataGas = &excess
-		header.DataGasUsed = &used
+		excess := eip4844.CalcExcessBlobGas(pExcess, pUsed)
+		used := uint64(nBlobs * params.BlobTxBlobGasPerBlob)
+		header.ExcessBlobGas = &excess
+		header.BlobGasUsed = &used
 	}
 	// SYSCOIN Assemble and return the final block for sealing
 	if config.IsShanghaiTime(header.Time) {
