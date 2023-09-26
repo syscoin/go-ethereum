@@ -77,7 +77,7 @@ require (
 
 require (
 	github.com/go-zeromq/zmq4 v0.15.0
-	golang.org/x/term v0.8.0
+	golang.org/x/term v0.11.0
 )
 
 require (

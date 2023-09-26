@@ -491,7 +491,8 @@ func New(config Config, notify []string, noverify bool) *Ethash {
 		caches:   newlru(config.CachesInMem, newCache),
 		datasets: newlru(config.DatasetsInMem, newDataset),
 		update:   make(chan struct{}),
-		hashrate: metrics.NewMeterForced(),
+		// SYSCOIN
+		hashrate: metrics.NewMeter(),
 	}
 	if config.PowMode == ModeShared {
 		ethash.shared = sharedEthash
@@ -661,21 +662,7 @@ func (ethash *Ethash) SetThreads(threads int) {
 // Note the returned hashrate includes local hashrate, but also includes the total
 // hashrate of all remote miner.
 func (ethash *Ethash) Hashrate() float64 {
-	// Short circuit if we are run the ethash in normal/test mode.
-	if ethash.config.PowMode != ModeNormal && ethash.config.PowMode != ModeTest {
-		return ethash.hashrate.Rate1()
-	}
-	var res = make(chan uint64, 1)
-
-	select {
-	case ethash.remote.fetchRateCh <- res:
-	case <-ethash.remote.exitCh:
-		// Return local hashrate only if ethash is stopped.
-		return ethash.hashrate.Rate1()
-	}
-
-	// Gather total submitted hash rate of remote sealers.
-	return ethash.hashrate.Rate1() + float64(<-res)
+	return 0
 }
 
 // APIs implements consensus.Engine, returning the user facing RPC APIs.

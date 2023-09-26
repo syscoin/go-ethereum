@@ -939,10 +939,10 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 			header.GasLimit = core.CalcGasLimit(parentGasLimit, w.config.GasCeil)
 		}
 	}
-	// Apply EIP-4844, EIP-4788.
-	if w.chainConfig.IsCancun(header.Number, header.Time) {
+	// SYSCOIN Apply EIP-4844, EIP-4788.
+	if w.chainConfig.IsCancunTime(header.Time) {
 		var excessBlobGas uint64
-		if w.chainConfig.IsCancun(parent.Number, parent.Time) {
+		if w.chainConfig.IsCancunTime(parent.Time) {
 			excessBlobGas = eip4844.CalcExcessBlobGas(*parent.ExcessBlobGas, *parent.BlobGasUsed)
 		} else {
 			// For the first post-fork block, both parent.data_gas_used and parent.excess_data_gas are evaluated as 0
