@@ -27,6 +27,7 @@ import (
 var (
 	MainnetGenesisHash = common.HexToHash("0x2112327cad6deec6ada8bd7e5d33d263b57742a8495f3b641faa326b55b1c666")
 	MainnetGenesisHashTest = common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+	HoleskyGenesisHash = common.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4")
 	SepoliaGenesisHash = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
 	GoerliGenesisHash  = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
 	// SYSCOIN
@@ -105,6 +106,30 @@ var (
 		ArrowGlacierBlock:   nil,
 		Ethash:              new(EthashConfig),
 	}
+	// HoleskyChainConfig contains the chain parameters to run a node on the Holesky test network.
+	HoleskyChainConfig = &ChainConfig{
+		ChainID:                       big.NewInt(17000),
+		HomesteadBlock:                big.NewInt(0),
+		DAOForkBlock:                  nil,
+		DAOForkSupport:                true,
+		EIP150Block:                   big.NewInt(0),
+		EIP155Block:                   big.NewInt(0),
+		EIP158Block:                   big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              nil,
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             nil,
+		GrayGlacierBlock:              nil,
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		MergeNetsplitBlock:            nil,
+		ShanghaiTime:                  big.NewInt(1696000704),
+		Ethash:                        new(EthashConfig),
+	}
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
 	SepoliaChainConfig = &ChainConfig{
 		ChainID:                       big.NewInt(11155111),
@@ -121,6 +146,8 @@ var (
 		MuirGlacierBlock:              big.NewInt(0),
 		BerlinBlock:                   big.NewInt(0),
 		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             nil,
+		GrayGlacierBlock:              nil,
 		TerminalTotalDifficulty:       big.NewInt(17_000_000_000_000_000),
 		TerminalTotalDifficultyPassed: true,
 		MergeNetsplitBlock:            big.NewInt(1735371),
@@ -316,6 +343,7 @@ var NetworkNames = map[string]string{
 	SepoliaChainConfig.ChainID.String(): "sepolia",
 	// SYSCOIN
 	TanenbaumChainConfig.ChainID.String(): "tanenbaum",
+	HoleskyChainConfig.ChainID.String(): "holesky",
 }
 
 // ChainConfig is the core config which determines the blockchain settings.
@@ -394,7 +422,7 @@ func (c *CliqueConfig) String() string {
 func (c *ChainConfig) Description() string {
 	var banner string
 
-	// Create some basinc network config output
+	// Create some basic network config output
 	network := NetworkNames[c.ChainID.String()]
 	if network == "" {
 		network = "unknown"

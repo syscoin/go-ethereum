@@ -64,8 +64,11 @@ func generateMergeChain(n int, merged bool) (*core.Genesis, []*types.Block) {
 		engine = beaconConsensus.NewFaker()
 	}
 	genesis := &core.Genesis{
-		Config:     &config,
-		Alloc:      core.GenesisAlloc{testAddr: {Balance: testBalance}},
+		Config: &config,
+		Alloc: core.GenesisAlloc{
+			testAddr:                         {Balance: testBalance},
+			params.BeaconRootsStorageAddress: {Balance: common.Big0, Code: common.Hex2Bytes("3373fffffffffffffffffffffffffffffffffffffffe14604457602036146024575f5ffd5b620180005f350680545f35146037575f5ffd5b6201800001545f5260205ff35b6201800042064281555f359062018000015500")},
+		},
 		ExtraData:  []byte("test genesis"),
 		Timestamp:  9000,
 		BaseFee:    big.NewInt(params.InitialBaseFee),
@@ -200,6 +203,7 @@ func TestEth2PrepareAndGetPayload(t *testing.T) {
 		Timestamp:    blockParams.Timestamp,
 		FeeRecipient: blockParams.SuggestedFeeRecipient,
 		Random:       blockParams.Random,
+		BeaconRoot:   blockParams.BeaconRoot,
 	}).Id()
 	execData, err := api.GetPayloadV1(payloadID)
 	if err != nil {
@@ -310,7 +314,7 @@ func TestEth2NewBlock(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create the executable data %v", err)
 		}
-		block, err := engine.ExecutableDataToBlock(*execData, nil)
+		block, err := engine.ExecutableDataToBlock(*execData, nil, nil)
 		if err != nil {
 			t.Fatalf("Failed to convert executable data to block %v", err)
 		}
@@ -352,7 +356,7 @@ func TestEth2NewBlock(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create the executable data %v", err)
 		}
-		block, err := engine.ExecutableDataToBlock(*execData, nil)
+		block, err := engine.ExecutableDataToBlock(*execData, nil, nil)
 		if err != nil {
 			t.Fatalf("Failed to convert executable data to block %v", err)
 		}
@@ -668,6 +672,7 @@ func assembleBlock(api *ConsensusAPI, parentHash common.Hash, params *engine.Pay
 		FeeRecipient: params.SuggestedFeeRecipient,
 		Random:       params.Random,
 		Withdrawals:  params.Withdrawals,
+		BeaconRoot:   params.BeaconRoot,
 	}
 	payload, err := api.eth.Miner().BuildPayload(args)
 	if err != nil {
@@ -988,7 +993,7 @@ func TestSimultaneousNewBlock(t *testing.T) {
 				t.Fatal(testErr)
 			}
 		}
-		block, err := engine.ExecutableDataToBlock(*execData, nil)
+		block, err := engine.ExecutableDataToBlock(*execData, nil, nil)
 		if err != nil {
 			t.Fatalf("Failed to convert executable data to block %v", err)
 		}
@@ -1258,13 +1263,16 @@ func TestBlockToPayloadWithBlobs(t *testing.T) {
 	}
 
 	txs = append(txs, types.NewTx(&inner))
-
-	blobs := make([]kzg4844.Blob, 1)
-	commitments := make([]kzg4844.Commitment, 1)
-	proofs := make([]kzg4844.Proof, 1)
+	sidecars := []*types.BlobTxSidecar{
+		{
+			Blobs:       make([]kzg4844.Blob, 1),
+			Commitments: make([]kzg4844.Commitment, 1),
+			Proofs:      make([]kzg4844.Proof, 1),
+		},
+	}
 
 	block := types.NewBlock(&header, txs, nil, nil, trie.NewStackTrie(nil))
-	envelope := engine.BlockToExecutableData(block, nil, blobs, commitments, proofs)
+	envelope := engine.BlockToExecutableData(block, nil, sidecars)
 	var want int
 	for _, tx := range txs {
 		want += len(tx.BlobHashes())
@@ -1278,7 +1286,7 @@ func TestBlockToPayloadWithBlobs(t *testing.T) {
 	if got := len(envelope.BlobsBundle.Blobs); got != want {
 		t.Fatalf("invalid number of blobs: got %v, want %v", got, want)
 	}
-	_, err := engine.ExecutableDataToBlock(*envelope.ExecutionPayload, make([]common.Hash, 1))
+	_, err := engine.ExecutableDataToBlock(*envelope.ExecutionPayload, make([]common.Hash, 1), nil)
 	if err != nil {
 		t.Error(err)
 	}

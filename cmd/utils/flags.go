@@ -137,7 +137,7 @@ var (
 	}
 	NetworkIdFlag = &cli.Uint64Flag{
 		Name:     "networkid",
-		Usage:    "Explicitly set network id (integer)(For testnets: use --goerli, --sepolia instead)",
+		Usage:    "Explicitly set network id (integer)(For testnets: use --goerli, --sepolia, --holesky instead)",
 		Value:    ethconfig.Defaults.NetworkId,
 		Category: flags.EthCategory,
 	}
@@ -156,7 +156,11 @@ var (
 		Usage:    "Sepolia network: pre-configured proof-of-work test network",
 		Category: flags.EthCategory,
 	}
-
+	HoleskyFlag = &cli.BoolFlag{
+		Name:     "holesky",
+		Usage:    "Holesky network: pre-configured proof-of-stake test network",
+		Category: flags.EthCategory,
+	}
 	// Dev mode
 	DeveloperFlag = &cli.BoolFlag{
 		Name:     "dev",
@@ -1037,24 +1041,26 @@ var (
 		SepoliaFlag,
 		// SYSCOIN
 		TanenbaumFlag,
+		HoleskyFlag,
 	}
 	// NetworkFlags is the flag group of all built-in supported networks.
 	NetworkFlags = append([]cli.Flag{
 		MainnetFlag,
 	}, TestnetFlags...)
 
-	// DatabasePathFlags is the flag group of all database path flags.
-	DatabasePathFlags = []cli.Flag{
+	// DatabaseFlags is the flag group of all database flags.
+	DatabaseFlags = []cli.Flag{
 		DataDirFlag,
 		AncientFlag,
 		RemoteDBFlag,
+		StateSchemeFlag,
 		HttpHeaderFlag,
 	}
 )
 
 func init() {
 	if rawdb.PebbleEnabled {
-		DatabasePathFlags = append(DatabasePathFlags, DBEngineFlag)
+		DatabaseFlags = append(DatabaseFlags, DBEngineFlag)
 	}
 }
 
@@ -1072,6 +1078,9 @@ func MakeDataDir(ctx *cli.Context) string {
 		if ctx.Bool(SepoliaFlag.Name) {
 			return filepath.Join(path, "sepolia")
 		}
+		if ctx.Bool(HoleskyFlag.Name) {
+			return filepath.Join(path, "holesky")
+		}
 		return path
 	}
 	Fatalf("Cannot determine default data directory, please set manually (--datadir)")
@@ -1080,7 +1089,7 @@ func MakeDataDir(ctx *cli.Context) string {
 
 // setNodeKey creates a node key from set command line flags, either loading it
 // from a file or as a specified hex value. If neither flags were provided, this
-// method returns nil and an emphemeral key is to be generated.
+// method returns nil and an ephemeral key is to be generated.
 func setNodeKey(ctx *cli.Context, cfg *p2p.Config) {
 	var (
 		hex  = ctx.String(NodeKeyHexFlag.Name)
@@ -1113,35 +1122,47 @@ func setNodeUserIdent(ctx *cli.Context, cfg *node.Config) {
 
 // setBootstrapNodes creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
+// Priority order for bootnodes configuration:
+//
+// 1. --bootnodes flag
+// 2. Config file
+// 3. Network preset flags (e.g. --goerli)
+// 4. default to mainnet nodes
 func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 	urls := params.MainnetBootnodes
-	switch {
-	case ctx.IsSet(BootnodesFlag.Name):
+	if ctx.IsSet(BootnodesFlag.Name) {
 		urls = SplitAndTrim(ctx.String(BootnodesFlag.Name))
-	case ctx.Bool(SepoliaFlag.Name):
-		urls = params.SepoliaBootnodes
-	case ctx.Bool(GoerliFlag.Name):
-		urls = params.GoerliBootnodes
-	case ctx.Bool(TanenbaumFlag.Name):
-		urls = params.TanenbaumBootnodes
+	} else {
+		if cfg.BootstrapNodes != nil {
+			return // Already set by config file, don't apply defaults.
+		}
+		switch {
+		case ctx.Bool(HoleskyFlag.Name):
+			urls = params.HoleskyBootnodes
+		case ctx.Bool(SepoliaFlag.Name):
+			urls = params.SepoliaBootnodes
+		case ctx.Bool(GoerliFlag.Name):
+			urls = params.GoerliBootnodes
+		case ctx.Bool(TanenbaumFlag.Name):
+			urls = params.TanenbaumBootnodes
+		}
 	}
+	cfg.BootstrapNodes = mustParseBootnodes(urls)
+}
 
-	// don't apply defaults if BootstrapNodes is already set
-	if cfg.BootstrapNodes != nil {
-		return
-	}
-
-	cfg.BootstrapNodes = make([]*enode.Node, 0, len(urls))
+func mustParseBootnodes(urls []string) []*enode.Node {
+	nodes := make([]*enode.Node, 0, len(urls))
 	for _, url := range urls {
 		if url != "" {
 			node, err := enode.Parse(enode.ValidSchemes, url)
 			if err != nil {
 				log.Crit("Bootstrap URL invalid", "enode", url, "err", err)
-				continue
+				return nil
 			}
-			cfg.BootstrapNodes = append(cfg.BootstrapNodes, node)
+			nodes = append(nodes, node)
 		}
 	}
+	return nodes
 }
 
 // setBootstrapNodesV5 creates a list of bootstrap nodes from the command line
@@ -1574,6 +1595,8 @@ func SetDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "tanenbaum")
 	case ctx.Bool(SepoliaFlag.Name) && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "sepolia")
+	case ctx.Bool(HoleskyFlag.Name) && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "holesky")
 	}
 }
 
@@ -1764,7 +1787,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	// Avoid conflicting network flags
-	CheckExclusive(ctx, MainnetFlag, DeveloperFlag, GoerliFlag, TanenbaumFlag, SepoliaFlag)
+	CheckExclusive(ctx, MainnetFlag, DeveloperFlag, GoerliFlag, TanenbaumFlag, SepoliaFlag, HoleskyFlag)
 	CheckExclusive(ctx, LightServeFlag, SyncModeFlag, "light")
 	CheckExclusive(ctx, DeveloperFlag, ExternalSignerFlag) // Can't use both ephemeral unlocked and external signer
 
@@ -1922,6 +1945,12 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		}
 		cfg.Genesis = core.DefaultGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
+	case ctx.Bool(HoleskyFlag.Name):
+		if !ctx.IsSet(NetworkIdFlag.Name) {
+			cfg.NetworkId = 17000
+		}
+		cfg.Genesis = core.DefaultHoleskyGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.HoleskyGenesisHash)
 	case ctx.Bool(SepoliaFlag.Name):
 		if !ctx.IsSet(NetworkIdFlag.Name) {
 			cfg.NetworkId = 11155111
@@ -2212,10 +2241,10 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.
 // tryMakeReadOnlyDatabase try to open the chain database in read-only mode,
 // or fallback to write mode if the database is not initialized.
 func tryMakeReadOnlyDatabase(ctx *cli.Context, stack *node.Node) ethdb.Database {
-	// If datadir doesn't exist we need to open db in write-mode
-	// so database engine can create files.
+	// If the database doesn't exist we need to open it in write-mode to allow
+	// the engine to create files.
 	readonly := true
-	if !common.FileExist(stack.ResolvePath("chaindata")) {
+	if rawdb.PreexistingDatabase(stack.ResolvePath("chaindata")) == "" {
 		readonly = false
 	}
 	return MakeChainDatabase(ctx, stack, readonly)
@@ -2242,7 +2271,7 @@ func DialRPCWithHeaders(endpoint string, headers []string) (*rpc.Client, error) 
 	}
 	var opts []rpc.ClientOption
 	if len(headers) > 0 {
-		var customHeaders = make(http.Header)
+		customHeaders := make(http.Header)
 		for _, h := range headers {
 			kv := strings.Split(h, ":")
 			if len(kv) != 2 {
@@ -2260,6 +2289,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 	switch {
 	case ctx.Bool(MainnetFlag.Name):
 		genesis = core.DefaultGenesisBlock()
+	case ctx.Bool(HoleskyFlag.Name):
+		genesis = core.DefaultHoleskyGenesisBlock()
 	case ctx.Bool(SepoliaFlag.Name):
 		genesis = core.DefaultSepoliaGenesisBlock()
 	case ctx.Bool(GoerliFlag.Name):

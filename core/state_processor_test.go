@@ -414,6 +414,9 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 		used := uint64(nBlobs * params.BlobTxBlobGasPerBlob)
 		header.ExcessBlobGas = &excess
 		header.BlobGasUsed = &used
+
+		beaconRoot := common.HexToHash("0xbeac00")
+		header.ParentBeaconRoot = &beaconRoot
 	}
 	// SYSCOIN Assemble and return the final block for sealing
 	if config.IsShanghaiTime(header.Time) {

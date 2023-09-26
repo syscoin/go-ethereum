@@ -130,7 +130,9 @@ func (ga *GenesisAlloc) deriveHash() (common.Hash, error) {
 		return common.Hash{}, err
 	}
 	for addr, account := range *ga {
-		statedb.AddBalance(addr, account.Balance)
+		if account.Balance != nil {
+			statedb.AddBalance(addr, account.Balance)
+		}
 		statedb.SetCode(addr, account.Code)
 		statedb.SetNonce(addr, account.Nonce)
 		for key, value := range account.Storage {
@@ -149,7 +151,9 @@ func (ga *GenesisAlloc) flush(db ethdb.Database, triedb *trie.Database, blockhas
 		return err
 	}
 	for addr, account := range *ga {
-		statedb.AddBalance(addr, account.Balance)
+		if account.Balance != nil {
+			statedb.AddBalance(addr, account.Balance)
+		}
 		statedb.SetCode(addr, account.Code)
 		statedb.SetNonce(addr, account.Nonce)
 		for key, value := range account.Storage {
@@ -485,7 +489,13 @@ func (g *Genesis) ToBlock() *types.Block {
 			head.WithdrawalsHash = &types.EmptyWithdrawalsHash
 			withdrawals = make([]*types.Withdrawal, 0)
 		}
+		// SYSCOIN
 		if conf.IsCancunTime(g.Timestamp) {
+			// EIP-4788: The parentBeaconBlockRoot of the genesis block is always
+			// the zero hash. This is because the genesis block does not have a parent
+			// by definition.
+			head.ParentBeaconRoot = new(common.Hash)
+			// EIP-4844 fields
 			head.ExcessBlobGas = g.ExcessBlobGas
 			head.BlobGasUsed = g.BlobGasUsed
 			if head.ExcessBlobGas == nil {
@@ -554,7 +564,16 @@ func DefaultGenesisBlock() *Genesis {
 		Alloc:      decodePrealloc(syscoinAllocData),
 	}
 }
-
+func DefaultGenesisTestBlock() *Genesis {
+	return &Genesis{
+		Config:     params.MainnetChainConfigTest,
+		Timestamp:  0x60d7aef6,
+		ExtraData:  hexutil.MustDecode("0x00"),
+		GasLimit:   0x7A1200,
+		Difficulty: big.NewInt(1),
+		Alloc:      decodePrealloc(syscoinAllocData),
+	}
+}
 // DefaultGoerliGenesisBlock returns the Görli network genesis block.
 func DefaultGoerliGenesisBlock() *Genesis {
 	return &Genesis{
@@ -592,6 +611,18 @@ func DefaultSepoliaGenesisBlock() *Genesis {
 	}
 }
 
+// DefaultHoleskyGenesisBlock returns the Holesky network genesis block.
+func DefaultHoleskyGenesisBlock() *Genesis {
+	return &Genesis{
+		Config:     params.HoleskyChainConfig,
+		Nonce:      0x1234,
+		GasLimit:   0x17d7840,
+		Difficulty: big.NewInt(0x01),
+		Timestamp:  1695902100,
+		Alloc:      decodePrealloc(holeskyAllocData),
+	}
+}
+
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(gasLimit uint64, faucet common.Address) *Genesis {
 	// Override the default period to the user requested one
@@ -619,13 +650,34 @@ func DeveloperGenesisBlock(gasLimit uint64, faucet common.Address) *Genesis {
 }
 
 func decodePrealloc(data string) GenesisAlloc {
-	var p []struct{ Addr, Balance *big.Int }
+	var p []struct {
+		Addr    *big.Int
+		Balance *big.Int
+		Misc    *struct {
+			Nonce uint64
+			Code  []byte
+			Slots []struct {
+				Key common.Hash
+				Val common.Hash
+			}
+		} `rlp:"optional"`
+	}
 	if err := rlp.NewStream(strings.NewReader(data), 0).Decode(&p); err != nil {
 		panic(err)
 	}
 	ga := make(GenesisAlloc, len(p))
 	for _, account := range p {
-		ga[common.BigToAddress(account.Addr)] = GenesisAccount{Balance: account.Balance}
+		acc := GenesisAccount{Balance: account.Balance}
+		if account.Misc != nil {
+			acc.Nonce = account.Misc.Nonce
+			acc.Code = account.Misc.Code
+
+			acc.Storage = make(map[common.Hash]common.Hash)
+			for _, slot := range account.Misc.Slots {
+				acc.Storage[slot.Key] = slot.Val
+			}
+		}
+		ga[common.BigToAddress(account.Addr)] = acc
 	}
 	return ga
 }
