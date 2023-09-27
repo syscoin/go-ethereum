@@ -567,11 +567,11 @@ func DefaultGenesisBlock() *Genesis {
 func DefaultGenesisTestBlock() *Genesis {
 	return &Genesis{
 		Config:     params.MainnetChainConfigTest,
-		Timestamp:  0x60d7aef6,
-		ExtraData:  hexutil.MustDecode("0x00"),
-		GasLimit:   0x7A1200,
-		Difficulty: big.NewInt(1),
-		Alloc:      decodePrealloc(syscoinAllocData),
+		Nonce:      66,
+		ExtraData:  hexutil.MustDecode("0x11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa"),
+		GasLimit:   5000,
+		Difficulty: big.NewInt(17179869184),
+		Alloc:      decodePrealloc(mainnetAllocData),
 	}
 }
 // DefaultGoerliGenesisBlock returns the Görli network genesis block.

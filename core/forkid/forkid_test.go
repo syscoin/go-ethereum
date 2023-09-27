@@ -46,7 +46,7 @@ func TestCreation(t *testing.T) {
 		// Mainnet test cases
 		{
 			params.MainnetChainConfigTest,
-			core.DefaultGenesisBlock().ToBlock(),
+			core.DefaultGenesisTestBlock().ToBlock(),
 			[]testcase{
 				{0, 0, ID{Hash: checksumToBytes(0xfc64ec04), Next: 1150000}},                    // Unsynced
 				{1149999, 0, ID{Hash: checksumToBytes(0xfc64ec04), Next: 1150000}},              // Last Frontier block
@@ -115,7 +115,7 @@ func TestCreation(t *testing.T) {
 			[]testcase{
 				{0, 0, ID{Hash: checksumToBytes(0xc61a6098), Next: 1696000704}},   // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium, Constantinople, Petersburg, Istanbul, Berlin, London, Paris block
 				{123, 0, ID{Hash: checksumToBytes(0xc61a6098), Next: 1696000704}}, // First MergeNetsplit block
-				{123, 1696000704, ID{Hash: checksumToBytes(0xfd4f016b), Next: 0}}, // Last MergeNetsplit block
+				{123, 1696000704, ID{Hash: checksumToBytes(0xc61a6098), Next: 1696000704}}, // Last MergeNetsplit block
 			},
 		},
 	}
@@ -402,7 +402,7 @@ func TestEncoding(t *testing.T) {
 // forkid hash.
 func TestTimeBasedForkInGenesis(t *testing.T) {
 	var (
-		time       = uint64(1690475657)
+		time       = uint64(0)
 		genesis    = types.NewBlockWithHeader(&types.Header{Time: time})
 		forkidHash = checksumToBytes(crc32.ChecksumIEEE(genesis.Hash().Bytes()))
 		config     = func(shanghai, cancun uint64) *params.ChainConfig {
@@ -421,6 +421,8 @@ func TestTimeBasedForkInGenesis(t *testing.T) {
 				MuirGlacierBlock:              big.NewInt(0),
 				BerlinBlock:                   big.NewInt(0),
 				LondonBlock:                   big.NewInt(0),
+				SyscoinBlock:                  big.NewInt(0),
+				RolluxBlock:                   big.NewInt(0),
 				TerminalTotalDifficulty:       big.NewInt(0),
 				TerminalTotalDifficultyPassed: true,
 				MergeNetsplitBlock:            big.NewInt(0),
@@ -444,7 +446,7 @@ func TestTimeBasedForkInGenesis(t *testing.T) {
 		{config(time+1, time+2), ID{Hash: forkidHash, Next: time + 1}},
 	}
 	for _, tt := range tests {
-		if have := NewID(tt.config, genesis, 0, time); have != tt.want {
+		if have := NewID(tt.config, genesis, time, 0); have != tt.want {
 			t.Fatalf("incorrect forkid hash: have %x, want %x", have, tt.want)
 		}
 	}
