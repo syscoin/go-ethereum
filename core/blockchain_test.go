@@ -4663,6 +4663,7 @@ func TestEIP3651(t *testing.T) {
 	gspec.Config.TerminalTotalDifficultyPassed = true
 	// SYSCOIN
 	gspec.Config.RolluxBlock = common.Big0
+	gspec.Config.NexusBlock = common.Big0
 	gspec.Config.ShanghaiTime = common.Big0
 	signer := types.LatestSigner(gspec.Config)
 

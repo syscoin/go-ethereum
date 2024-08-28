@@ -2,7 +2,7 @@
   {
     "Input": "0000000000000000000000000000000000000000000000000000000000000000",
     "Expected": "",
-    "Name": "dataHash1",
+    "Name": "dataHash",
     "Gas": 1400,
     "NoBenchmark": false
   }

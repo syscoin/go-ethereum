@@ -1036,6 +1036,7 @@ type ChainContextBackend interface {
 	// SYSCOIN
 	ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error)
 	ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error)
+	GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error)
 }
 
 // ChainContext is an implementation of core.ChainContext. It's main use-case
@@ -1078,6 +1079,14 @@ func (context *ChainContext) ReadDataHash(hash common.Hash) []byte {
 	}
 	return dataHash
 }
+func (context *ChainContext) GetNEVMAddress(address common.Address) []byte {
+	collateralHeight, err := context.b.GetNEVMAddress(context.ctx, address)
+	if err != nil {
+		return nil
+	}
+	return collateralHeight
+}
+
 func doCall(ctx context.Context, b Backend, args TransactionArgs, state *state.StateDB, header *types.Header, overrides *StateOverride, blockOverrides *BlockOverrides, timeout time.Duration, globalGasCap uint64) (*core.ExecutionResult, error) {
 	if err := overrides.Apply(state); err != nil {
 		return nil, err

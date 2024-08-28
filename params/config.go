@@ -55,6 +55,7 @@ var (
 		SyscoinBlock:        big.NewInt(0),
 		RolluxBlock:         big.NewInt(268500),
 		ShanghaiTime:        big.NewInt(268500),
+		NexusBlock:          big.NewInt(400000),
 		//CancunTime:        big.NewInt(368500),
 		LondonBlock:         big.NewInt(1),
 		ArrowGlacierBlock:   nil,
@@ -102,6 +103,7 @@ var (
 		SyscoinBlock:        big.NewInt(0),
 		RolluxBlock:         big.NewInt(182500),
 		ShanghaiTime:        big.NewInt(223000),
+		NexusBlock:          big.NewInt(400000),
 		LondonBlock:         big.NewInt(1),
 		ArrowGlacierBlock:   nil,
 		Ethash:              new(EthashConfig),
@@ -154,6 +156,7 @@ var (
 		// SYSCOIN
 		RolluxBlock:                   big.NewInt(1677557087),
 		ShanghaiTime:                  big.NewInt(1677557088),
+		NexusBlock:                    big.NewInt(1677557089),
 		Ethash:                        new(EthashConfig),
 	}
 	// GoerliChainConfig contains the chain parameters to run a node on the Görli test network.
@@ -177,6 +180,7 @@ var (
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  big.NewInt(1678832736),
 		RolluxBlock:			       big.NewInt(1678832735),
+		NexusBlock:			           big.NewInt(1678832737),
 		Clique: &CliqueConfig{
 			Period: 15,
 			Epoch:  30000,
@@ -204,6 +208,7 @@ var (
 		MergeNetsplitBlock:            nil,
 		SyscoinBlock:        		   nil,
 		RolluxBlock:         		   nil,
+		NexusBlock:         		   nil,
 		ShanghaiTime:                  nil,
 		CancunTime:                    nil,
 		PragueTime:                    nil,
@@ -231,6 +236,7 @@ var (
 		GrayGlacierBlock:              big.NewInt(0),
 		// SYSCOIN
 		RolluxBlock:				   big.NewInt(0),
+		NexusBlock:				       big.NewInt(0),
 		ShanghaiTime:                  big.NewInt(0),
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
@@ -256,6 +262,7 @@ var (
 		LondonBlock:                   big.NewInt(0),
 		SyscoinBlock:        		   nil,
 		RolluxBlock:         		   nil,
+		NexusBlock:         		   nil,
 		ArrowGlacierBlock:             nil,
 		GrayGlacierBlock:              nil,
 		MergeNetsplitBlock:            nil,
@@ -290,6 +297,7 @@ var (
 		GrayGlacierBlock:              big.NewInt(0),
 		SyscoinBlock:        		   nil,
 		RolluxBlock:         		   nil,
+		NexusBlock:         		   nil,
 		MergeNetsplitBlock:            nil,
 		ShanghaiTime:                  nil,
 		CancunTime:                    nil,
@@ -324,6 +332,7 @@ var (
 		ShanghaiTime:                  nil,
 		SyscoinBlock:        		   nil,
 		RolluxBlock:         		   nil,
+		NexusBlock:         		   nil,
 		CancunTime:                    nil,
 		PragueTime:                    nil,
 		VerkleTime:                    nil,
@@ -372,6 +381,7 @@ type ChainConfig struct {
 	BerlinBlock         *big.Int `json:"berlinBlock,omitempty"`         // Berlin switch block (nil = no fork, 0 = already on berlin)
 	SyscoinBlock        *big.Int `json:"syscoinBlock,omitempty"`        // Syscoin switch block (nil = no fork, 0 = already on syscoin)
 	RolluxBlock         *big.Int `json:"rolluxBlock,omitempty"`         // Rollux switch block (nil = no fork, 0 = already on syscoin)
+	NexusBlock          *big.Int `json:"nexusBlock,omitempty"`          // Nexus switch block (nil = no fork, 0 = already on syscoin)
 	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 1 = already on london)
 	ArrowGlacierBlock   *big.Int `json:"arrowGlacierBlock,omitempty"`   // Eip-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	GrayGlacierBlock    *big.Int `json:"grayGlacierBlock,omitempty"`    // Eip-5133 (bomb delay) switch block (nil = no fork, 0 = already activated)
@@ -597,6 +607,9 @@ func (c *ChainConfig) IsSyscoin(num *big.Int) bool {
 func (c *ChainConfig) IsRollux(num *big.Int) bool {
 	return isBlockForked(c.RolluxBlock, num)
 }
+func (c *ChainConfig) IsNexus(num *big.Int) bool {
+	return isBlockForked(c.NexusBlock, num)
+}
 
 // SYSCOIN IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
 func (c *ChainConfig) IsShanghai(num *big.Int) bool {
@@ -677,6 +690,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "mergeNetsplitBlock", block: c.MergeNetsplitBlock, optional: true},
 		{name: "rolluxBlock", block: c.RolluxBlock},
 		{name: "shanghaiTime", block: c.ShanghaiTime},
+		{name: "nexusBlock", block: c.NexusBlock},
 		{name: "cancunTime", block: c.CancunTime, optional: true},
 		{name: "pragueTime", block: c.PragueTime, optional: true},
 		{name: "verkleTime", block: c.VerkleTime, optional: true},
@@ -780,6 +794,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	}
 	if isForkBlockIncompatible(c.RolluxBlock, newcfg.RolluxBlock, headNumber) {
 		return newBlockCompatError("Rollux fork block", c.RolluxBlock, newcfg.RolluxBlock)
+	}
+	if isForkBlockIncompatible(c.NexusBlock, newcfg.NexusBlock, headNumber) {
+		return newBlockCompatError("Nexus fork block", c.NexusBlock, newcfg.NexusBlock)
 	}
 	if isForkBlockIncompatible(c.CancunTime, newcfg.CancunTime, headNumber) {
 		return newBlockCompatError("Cancun fork block", c.CancunTime, newcfg.CancunTime)
@@ -933,7 +950,7 @@ type Rules struct {
 	ChainID                                                 *big.Int
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon, IsSyscoin, IsRollux                 bool
+	IsBerlin, IsLondon, IsSyscoin, IsRollux, IsNexus        bool
 	IsMerge, IsShanghai, IsCancun, IsPrague                 bool
 	IsVerkle                                                bool
 }
@@ -958,6 +975,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, time uint64) Rules {
 		IsLondon:         c.IsLondon(num),
 		IsSyscoin:        c.IsSyscoin(num),
 		IsRollux:         c.IsRollux(num),
+		IsNexus:          c.IsNexus(num),
 		IsMerge:          isMerge,
 		// SYSCOIN
 		IsShanghai:       c.IsShanghai(num),

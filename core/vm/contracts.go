@@ -131,7 +131,22 @@ var PrecompiledContractsRollux = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
 	common.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
 	common.BytesToAddress([]byte{9}): &blake2F{},
-	common.BytesToAddress([]byte{99}): &datahash{},
+	common.BytesToAddress([]byte{98}): &nevmaddress{},
+}
+var PrecompiledContractsNexus = map[common.Address]PrecompiledContract{
+	common.BytesToAddress([]byte{1}): &ecrecover{},
+	common.BytesToAddress([]byte{2}): &sha256hash{},
+	common.BytesToAddress([]byte{3}): &ripemd160hash{},
+	common.BytesToAddress([]byte{4}): &dataCopy{},
+	common.BytesToAddress([]byte{5}): &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{6}): &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{9}): &blake2F{},
+	common.BytesToAddress([]byte{0x0a}): &kzgPointEvaluation{},
+	common.BytesToAddress([]byte{0x61}): &sysblockhash{},
+	common.BytesToAddress([]byte{0x62}): &nevmaddress{},
+	common.BytesToAddress([]byte{0x63}): &datahash{},
 }
 var (
 	PrecompiledAddressesCancun    []common.Address
@@ -141,6 +156,7 @@ var (
 	PrecompiledAddressesHomestead []common.Address
 	PrecompiledAddressesSyscoin   []common.Address
 	PrecompiledAddressesRollux    []common.Address
+	PrecompiledAddressesNexus    []common.Address
 )
 
 func init() {
@@ -162,11 +178,16 @@ func init() {
 	for k := range PrecompiledContractsCancun {
 		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
 	}
+	for k := range PrecompiledContractsNexus {
+		PrecompiledAddressesNexus = append(PrecompiledAddressesNexus, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules params.Rules) []common.Address {
 	switch {
+	case rules.IsNexus:
+		return PrecompiledAddressesNexus
 	case rules.IsRollux:
 		return PrecompiledAddressesRollux
 	case rules.IsCancun:
@@ -672,6 +693,8 @@ var (
 	errBLS12381G1PointSubgroup             = errors.New("g1 point is not on correct subgroup")
 	errBLS12381G2PointSubgroup             = errors.New("g2 point is not on correct subgroup")
 	errDataHashInvalidInputLength          = errors.New("invalid version hash length")
+	errNEVMAddressInvalidInputLength          = errors.New("invalid version hash length")
+	errReadSYSHashInvalidInputLength          = errors.New("invalid input number")
 )
 
 // bls12381G1Add implements EIP-2537 G1Add precompile.
@@ -1107,6 +1130,50 @@ func (c *datahash) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error
 
 	return interpreter.evm.Context.ReadDataHash(common.BytesToHash(input)), nil
 }
+
+type sysblockhash struct{}
+
+// RequiredGas returns the gas required to execute the pre-compiled contract.
+func (c *sysblockhash) RequiredGas(input []byte) uint64 {
+	return params.SYSBlockHashGas
+}
+
+func (c *sysblockhash) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
+	if len(input) != 8 {
+		return nil, errReadSYSHashInvalidInputLength
+	}
+	inputUint64 := binary.BigEndian.Uint64(input)
+	var upper, lower uint64
+	upper = interpreter.evm.Context.BlockNumber.Uint64()
+	if upper < 50001 {
+		lower = 0
+	} else {
+		lower = upper - 50000
+	}
+	if inputUint64 >= lower && inputUint64 < upper {
+		return interpreter.evm.Context.ReadSYSHash(inputUint64), nil
+	} else {
+		return []byte{}, nil
+	}
+}
+
+
+type nevmaddress struct{}
+
+// RequiredGas returns the gas required to execute the pre-compiled contract.
+func (c *nevmaddress) RequiredGas(input []byte) uint64 {
+	return params.NEVMAddressGas
+}
+
+func (c *nevmaddress) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
+	if len(input) != 20 {
+		return nil, errNEVMAddressInvalidInputLength
+	}
+
+	return interpreter.evm.Context.GetNEVMAddress(common.BytesToAddress(input)), nil
+}
+
+
 // kzgPointEvaluation implements the EIP-4844 point evaluation precompile.
 type kzgPointEvaluation struct{}
 

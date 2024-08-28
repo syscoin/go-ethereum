@@ -38,11 +38,14 @@ type (
 	// SYSCOIN
 	ReadSYSHashFunc  func(uint64) []byte
 	ReadDataHashFunc func(common.Hash) []byte
+	GetNEVMAddressFunc func(common.Address) []byte
 )
 
 func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 	var precompiles map[common.Address]PrecompiledContract
 	switch {
+	case evm.chainRules.IsNexus:
+		precompiles = PrecompiledContractsNexus
 	case evm.chainRules.IsRollux:
 		precompiles = PrecompiledContractsRollux
 	case evm.chainRules.IsCancun:
@@ -73,6 +76,7 @@ type BlockContext struct {
 	// SYSCOIN
 	ReadSYSHash  ReadSYSHashFunc
 	ReadDataHash ReadDataHashFunc
+	GetNEVMAddress GetNEVMAddressFunc
 
 	// Block information
 	Coinbase      common.Address // Provides information for COINBASE

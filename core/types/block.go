@@ -215,11 +215,34 @@ type Block struct {
 }
 
 // SYSCOIN
+type NEVMBlockDisconnect struct {
+	Sysblockhash  string
+	Diff          *wire.NEVMAddressDiff
+}
+
+func (n *NEVMBlockDisconnect) Deserialize(bytesIn []byte) error {
+	var NEVMBlockWire wire.NEVMDisconnectBlockWire
+	r := bytes.NewReader(bytesIn)
+	err := NEVMBlockWire.Deserialize(r)
+	if err != nil {
+		log.Error("NEVMBlockDisconnect: could not deserialize", "err", err)
+		return err
+	}
+	
+	// Assign deserialized fields to NEVMDisconnectBlock fields
+	n.Sysblockhash = string(NEVMBlockWire.SYSBlockHash)
+
+	// Deserialize and handle the Diff field
+	n.Diff = &NEVMBlockWire.Diff
+
+	return nil
+}
 type NEVMBlockConnect struct {
 	Blockhash     common.Hash
 	Sysblockhash  string
 	Block         *Block
 	VersionHashes []*common.Hash
+	Diff          *wire.NEVMAddressDiff
 }
 
 func (n *NEVMBlockConnect) Deserialize(bytesIn []byte) error {
@@ -230,54 +253,81 @@ func (n *NEVMBlockConnect) Deserialize(bytesIn []byte) error {
 		log.Error("NEVMBlockConnect: could not deserialize", "err", err)
 		return err
 	}
+	
+	// Assign deserialized fields to NEVMBlockConnect fields
 	n.Blockhash = common.BytesToHash(NEVMBlockWire.NEVMBlockHash)
 	n.Sysblockhash = string(NEVMBlockWire.SYSBlockHash)
+	
 	if len(NEVMBlockWire.NEVMBlockData) == 0 {
-		return errors.New("Empty block data")
+		return errors.New("empty block data")
 	}
-	// decode the raw block inside of NEVM data
+	
+	// Decode the raw block inside of NEVM data
 	var block Block
-	rlp.DecodeBytes(NEVMBlockWire.NEVMBlockData, &block)
-	// create NEVMBlockConnect object from deserialized block and NEVM wire data
+	err = rlp.DecodeBytes(NEVMBlockWire.NEVMBlockData, &block)
+	if err != nil {
+		log.Error("NEVMBlockConnect: could not decode NEVMBlockData", "err", err)
+		return err
+	}
+
+	// Create NEVMBlockConnect object from deserialized block and NEVM wire data
 	n.Block = &block
-	// we need to validate that tx root and receipt root is correct based on the block because SYS will store this information in its coinbase tx
+	
+	// Validate that tx root and receipt root is correct based on the block
 	txRootHash := common.BytesToHash(NEVMBlockWire.TxRoot)
 	if txRootHash != block.TxHash() {
-		return errors.New("Transaction Root mismatch")
+		return errors.New("transaction Root mismatch")
 	}
+
 	receiptRootHash := common.BytesToHash(NEVMBlockWire.ReceiptRoot)
 	if receiptRootHash != block.ReceiptHash() {
-		return errors.New("Receipt Root mismatch")
+		return errors.New("receipt Root mismatch")
 	}
+
 	if n.Blockhash != block.Hash() {
-		return errors.New("Blockhash mismatch")
+		return errors.New("blockhash mismatch")
 	}
+	
+	// Process VersionHashes
 	numVH := len(NEVMBlockWire.VersionHashes)
 	n.VersionHashes = make([]*common.Hash, numVH)
 	for i := 0; i < numVH; i++ {
 		vh := common.BytesToHash(NEVMBlockWire.VersionHashes[i])
 		n.VersionHashes[i] = &vh
 	}
+	
+	// Deserialize and handle the Diff field
+	n.Diff = &NEVMBlockWire.Diff
+
 	return nil
 }
+
 func (n *NEVMBlockConnect) Serialize(block *Block) ([]byte, error) {
 	var NEVMBlockWire wire.NEVMBlockWire
 	var err error
+
+	// Encode block to RLP
 	NEVMBlockWire.NEVMBlockData, err = rlp.EncodeToBytes(block)
 	if err != nil {
 		return nil, err
 	}
+
+	// Set block hashes
 	NEVMBlockWire.NEVMBlockHash = block.Hash().Bytes()
 	NEVMBlockWire.TxRoot = block.TxHash().Bytes()
 	NEVMBlockWire.ReceiptRoot = block.ReceiptHash().Bytes()
+
+	// Serialize the NEVMBlockWire structure to bytes
 	var buffer bytes.Buffer
 	err = NEVMBlockWire.Serialize(&buffer)
 	if err != nil {
 		log.Error("NEVMBlockConnect: could not serialize", "err", err)
 		return nil, err
 	}
+
 	return buffer.Bytes(), nil
 }
+
 
 // "external" block encoding. used for eth protocol, etc.
 type extblock struct {

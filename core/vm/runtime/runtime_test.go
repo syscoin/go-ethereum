@@ -66,7 +66,10 @@ func TestDefaults(t *testing.T) {
 	}
 	if cfg.ReadDataHashFn == nil {
 		t.Error("expected time to be non nil")
-	}	
+	}
+	if cfg.GetNEVMAddressFn == nil {
+		t.Error("expected time to be non nil")
+	}		
 	if cfg.BlockNumber == nil {
 		t.Error("expected block number to be non nil")
 	}
@@ -112,7 +115,7 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	state, _ := state.New(types.EmptyRootHash, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
-	address := common.HexToAddress("0x0a")
+	address := common.HexToAddress("0xaa")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
 		byte(vm.PUSH1), 0,
@@ -262,6 +265,10 @@ func (d *dummyChain) ReadSYSHash(uint64) []byte {
 func (d *dummyChain) ReadDataHash(common.Hash) []byte {
 	return []byte{}
 }
+func (d *dummyChain) GetNEVMAddress(common.Address) []byte {
+	return []byte{}
+}
+
 
 // TestBlockhash tests the blockhash operation. It's a bit special, since it internally
 // requires access to a chain reader.
@@ -315,6 +322,7 @@ func TestBlockhash(t *testing.T) {
 		// SYSCOIN
 		ReadSYSHashFn: core.ReadSYSHashFn(chain),
 		ReadDataHashFn: core.ReadDataHashFn(chain),
+		GetNEVMAddressFn: core.GetNEVMAddressFn(chain),
 		BlockNumber:   new(big.Int).Set(header.Number),
 	})
 	if err != nil {

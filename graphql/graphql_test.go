@@ -459,6 +459,7 @@ func newGQLService(t *testing.T, stack *node.Node, shanghai bool, gspec *core.Ge
 		shanghaiTime := big.NewInt(1)
 		// SYSCOIN
 		chainCfg.RolluxBlock = common.Big0
+		chainCfg.NexusBlock = common.Big0
 		chainCfg.ShanghaiTime = shanghaiTime
 	}
 	ethBackend, err := eth.New(stack, ethConf)

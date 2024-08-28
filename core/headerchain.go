@@ -73,6 +73,7 @@ type HeaderChain struct {
 	NEVMCache     *lru.Cache[common.Hash, []byte] // Cache for NEVM blocks existing
 	SYSHashCache  *lru.Cache[uint64, []byte] // Cache for SYS hash
 	DataHashCache *lru.Cache[common.Hash, []byte] // Cache for Data availability
+	NEVMAddressCache *rawdb.NEVMAddressMapping
 	procInterrupt func() bool
 
 	rand   *mrand.Rand
@@ -483,6 +484,30 @@ func (hc *HeaderChain) GetHeaderByHash(hash common.Hash) *types.Header {
 	return hc.GetHeader(hash, *number)
 }
 
+func (hc *HeaderChain) WriteNEVMAddressMapping(mapping *rawdb.NEVMAddressMapping) {
+	rawdb.WriteNEVMAddressMapping(hc.chainDb, mapping)
+	hc.NEVMAddressCache = mapping
+}
+
+// ReadNEVMAddressMapping retrieves the NEVM address mapping from the database
+func (hc *HeaderChain) ReadNEVMAddressMapping() *rawdb.NEVMAddressMapping {
+	if hc.NEVMAddressCache != nil {
+		return hc.NEVMAddressCache
+	}
+	// sanity in case it doesn't exist in cache
+	addressMapping := rawdb.ReadNEVMAddressMapping(hc.chainDb)
+	if len(addressMapping.AddressMappings) == 0 {
+		return nil
+	}
+	hc.NEVMAddressCache = addressMapping
+	return addressMapping
+}
+
+func (hc *HeaderChain) GetNEVMAddress(address common.Address) []byte {
+	mapping := hc.ReadNEVMAddressMapping()
+	return mapping.GetNEVMAddress(address)	
+}
+
 func (hc *HeaderChain) ReadSYSHash(n uint64) []byte {
 	// Should exist in cache because we store in LRU upon creating block and delete upon disconnecting we should only store latest 50k blocks (limits to querying in opcode)
 	if sysBlockhash, ok := hc.SYSHashCache.Get(n); ok {
@@ -509,6 +534,7 @@ func (hc *HeaderChain) ReadDataHash(hash common.Hash) []byte {
 	hc.DataHashCache.Add(hash, []byte{0})
 	return hash.Bytes()
 }
+
 func (hc *HeaderChain) WriteSYSHash(sysBlockhash string, n uint64) {
 	rawdb.WriteSYSHash(hc.chainDb, sysBlockhash, n)
 	hc.SYSHashCache.Add(n, []byte(sysBlockhash))

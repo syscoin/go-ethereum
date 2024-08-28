@@ -825,6 +825,31 @@ func writeAncientBlock(op ethdb.AncientWriteOp, block *types.Block, header *type
 }
 
 // SYSCOIN
+// WriteNEVMAddressMapping stores the NEVM address mapping into the database
+func WriteNEVMAddressMapping(db ethdb.KeyValueWriter, mapping *NEVMAddressMapping) {
+	data, err := rlp.EncodeToBytes(mapping.AddressMappings)
+	if err != nil {
+		log.Crit("Failed to RLP encode NEVM address mappings", "err", err)
+	}
+	if err := db.Put(nevmAddressKey(), data); err != nil {
+		log.Crit("Failed to store NEVM address mappings", "err", err)
+	}
+}
+
+// ReadNEVMAddressMapping retrieves the NEVM address mapping from the database
+func ReadNEVMAddressMapping(db ethdb.Reader) *NEVMAddressMapping {
+	data, err := db.Get(nevmAddressKey())
+	if err != nil || len(data) == 0 {
+		return NewNEVMAddressMapping()
+	}
+	var mappings map[common.Address]uint32
+	if err := rlp.DecodeBytes(data, &mappings); err != nil {
+		log.Crit("Failed to decode NEVM address mappings", "err", err)
+	}
+	return &NEVMAddressMapping{AddressMappings: mappings}
+}
+
+
 func WriteSYSHash(db ethdb.KeyValueWriter, sysBlockhash string, n uint64) {
 	if err := db.Put(blockNumToSysKey(n), []byte(sysBlockhash)); err != nil {
 		log.Crit("Failed to store blockNumToSysKey", "err", err)

@@ -266,6 +266,10 @@ func nevmToSysKey(hash common.Hash) []byte {
 func blockNumToSysKey(n uint64) []byte {
 	return append(blockNumToSysKeyPrefix, []byte(new(big.Int).SetUint64(n).String())...)
 }
+// nevmAddressKey generates the key for storing NEVM addresses
+func nevmAddressKey() []byte {
+	return []byte("nevm-addresses")
+}
 func dataHashesKey(n uint64) []byte {
 	return append(dataHashesKeyPrefix, []byte(new(big.Int).SetUint64(n).String())...)
 }

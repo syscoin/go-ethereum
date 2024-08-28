@@ -36,6 +36,7 @@ type ChainContext interface {
 	// SYSCOIN
 	ReadSYSHash(uint64) []byte
 	ReadDataHash(common.Hash) []byte
+	GetNEVMAddress(common.Address) []byte
 }
 
 // NewEVMBlockContext creates a new context for use in the EVM.
@@ -64,6 +65,7 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 		// SYSCOIN
 		ReadSYSHash:  ReadSYSHashFn(chain),
 		ReadDataHash: ReadDataHashFn(chain),
+		GetNEVMAddress: GetNEVMAddressFn(chain),
 		Coinbase:      beneficiary,
 		BlockNumber:   new(big.Int).Set(header.Number),
 		Time:          header.Time,
@@ -132,6 +134,11 @@ func ReadSYSHashFn(chain ChainContext) func(n uint64) []byte {
 func ReadDataHashFn(chain ChainContext) func(hash common.Hash) []byte {
 	return func(hash common.Hash) []byte {
 		return chain.ReadDataHash(hash)
+	}
+}
+func GetNEVMAddressFn(chain ChainContext) func(address common.Address) []byte {
+	return func(address common.Address) []byte {
+		return chain.GetNEVMAddress(address)
 	}
 }
 

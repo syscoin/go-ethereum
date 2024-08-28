@@ -93,6 +93,7 @@ type Backend interface {
 	// SYSCOIN
 	ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error)
 	ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error)
+	GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error)
 }
 
 // API is the collection of tracing APIs exposed over the private debugging endpoint.

@@ -56,11 +56,10 @@ func NewEVMInterpreter(evm *EVM) *EVMInterpreter {
 	// If jump table was not initialised we set the default one.
 	var table *JumpTable
 	switch {
-	// SYSCOIN
-	case evm.chainRules.IsShanghai:
-		table = &shanghaiInstructionSet
 	case evm.chainRules.IsCancun:
 		table = &cancunInstructionSet
+	case evm.chainRules.IsShanghai:
+		table = &shanghaiInstructionSet
 	case evm.chainRules.IsSyscoin:
 		table = &londonInstructionSet
 	case evm.chainRules.IsMerge:

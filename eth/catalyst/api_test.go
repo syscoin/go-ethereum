@@ -1040,6 +1040,7 @@ func setupBodies(t *testing.T) (*node.Node, *eth.Ethereum, []*types.Block) {
 	// enable shanghai on the last block
 	//time := blocks[len(blocks)-1].Header().Time + 1
 	genesis.Config.RolluxBlock = big.NewInt(int64(len(blocks)-1))
+	genesis.Config.NexusBlock = big.NewInt(int64(len(blocks)-1))
 	genesis.Config.ShanghaiTime = big.NewInt(int64(len(blocks)-1))
 	n, ethservice := startEthService(t, genesis, blocks)
 

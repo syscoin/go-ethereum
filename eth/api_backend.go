@@ -101,6 +101,10 @@ func (b *EthAPIBackend) ReadSYSHash(ctx context.Context, number rpc.BlockNumber)
 func (b *EthAPIBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {
 	return b.eth.blockchain.ReadDataHash(hash), nil
 }
+func (b *EthAPIBackend) GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error) {
+	return b.eth.blockchain.GetNEVMAddress(address), nil
+}
+
 func (b *EthAPIBackend) HeaderByNumberOrHash(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, error) {
 	if blockNr, ok := blockNrOrHash.Number(); ok {
 		return b.HeaderByNumber(ctx, blockNr)

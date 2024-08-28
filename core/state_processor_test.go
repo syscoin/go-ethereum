@@ -64,6 +64,7 @@ func TestStateProcessorErrors(t *testing.T) {
 			TerminalTotalDifficultyPassed: true,
 			// SYSCOIN	
 			RolluxBlock:				   big.NewInt(0),
+			NexusBlock:				       big.NewInt(0),
 			ShanghaiTime:                  big.NewInt(0),
 			CancunTime:                    big.NewInt(0),
 		}

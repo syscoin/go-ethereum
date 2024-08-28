@@ -417,6 +417,9 @@ func (b testBackend) ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([
 func (b testBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {
 	return b.chain.ReadDataHash(hash), nil
 }
+func (b testBackend) GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error) {
+	return b.chain.GetNEVMAddress(address), nil
+}
 func (b testBackend) CurrentHeader() *types.Header { return b.chain.CurrentBlock() }
 func (b testBackend) CurrentBlock() *types.Header  { return b.chain.CurrentBlock() }
 func (b testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {

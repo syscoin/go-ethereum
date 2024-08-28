@@ -69,7 +69,7 @@ type Config = ethconfig.Config
 // SYSCOIN
 type NEVMCreateBlockFn func(*Ethereum) *types.Block
 type NEVMAddBlockFn func(*types.NEVMBlockConnect, *Ethereum) error
-type NEVMDeleteBlockFn func(string, *Ethereum) error
+type NEVMDeleteBlockFn func(*types.NEVMBlockDisconnect, *Ethereum) error
 
 type NEVMIndex struct {
 	// Callbacks
@@ -316,6 +316,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if nevmBlockConnect == nil {
 			return errors.New("addBlock: Empty block")
 		}
+		// Retrieve the current NEVM address mappings from the database
+		mapping := eth.blockchain.ReadNEVMAddressMapping()
+
 		current := eth.blockchain.CurrentBlock()
 		currentNumber := current.Number.Uint64()
 		currentHash := current.Hash()
@@ -347,6 +350,19 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			}
 			return err
 		}
+		// Update the NEVM address mappings based on the block's diff
+		for _, entry := range nevmBlockConnect.Diff.AddedMNNEVM {
+			mapping.AddNEVMAddress(common.BytesToAddress(entry.Address), entry.CollateralHeight)
+		}
+		for _, entry := range nevmBlockConnect.Diff.UpdatedMNNEVM {
+			mapping.UpdateNEVMAddress(common.BytesToAddress(entry.OldAddress), common.BytesToAddress(entry.NewAddress))
+		}
+		for _, entry := range nevmBlockConnect.Diff.RemovedMNNEVM {
+			mapping.RemoveNEVMAddress(common.BytesToAddress(entry.Address))
+		}
+	
+		// Persist the updated NEVM address mappings to the database
+		eth.blockchain.WriteNEVMAddressMapping(mapping)
 		// do before potentially inserting into chain (verifyHeader depends on the mapping), we will delete if anything is wrong
 		eth.blockchain.WriteNEVMMapping(proposedBlockHash)
 		_, err = eth.blockchain.InsertChain(types.Blocks([]*types.Block{nevmBlockConnect.Block}))
@@ -396,7 +412,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 						eth.Downloader().Peers().Open()
 						eth.p2pServer.Start()
 						eth.Downloader().DoneEvent()
-						eth.handler.acceptTxs.Store(true)
+						eth.handler.synced.Store(true)
 						eth.lock.Unlock()
 						return
 					}
@@ -406,7 +422,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}(eth)
 
-	deleteBlock := func(sysBlockhash string, eth *Ethereum) error {
+	deleteBlock := func(nevmBlockDisconnect *types.NEVMBlockDisconnect, eth *Ethereum) error {
 		current := eth.blockchain.CurrentBlock()
 		currentNumber := current.Number.Uint64()
 		if current.Number.Uint64() == 0 {
@@ -424,6 +440,23 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if eth.blockchain.CurrentBlock().Number.Uint64() != (currentNumber - 1) {
 			return errors.New("deleteBlock: Block number post-write does not match")
 		}
+		// Retrieve the current NEVM address mappings from the database
+		mapping := eth.blockchain.ReadNEVMAddressMapping()
+
+		// Update the NEVM address mappings based on the block's diff
+		for _, entry := range nevmBlockDisconnect.Diff.AddedMNNEVM {
+			mapping.AddNEVMAddress(common.BytesToAddress(entry.Address), entry.CollateralHeight)
+		}
+		for _, entry := range nevmBlockDisconnect.Diff.UpdatedMNNEVM {
+			mapping.UpdateNEVMAddress(common.BytesToAddress(entry.OldAddress), common.BytesToAddress(entry.NewAddress))
+		}
+		for _, entry := range nevmBlockDisconnect.Diff.RemovedMNNEVM {
+			mapping.RemoveNEVMAddress(common.BytesToAddress(entry.Address))
+		}
+	
+		// Persist the updated NEVM address mappings to the database
+		eth.blockchain.WriteNEVMAddressMapping(mapping)
+
 		eth.blockchain.DeleteNEVMMapping(current.Hash())
 		eth.blockchain.DeleteSYSHash(currentNumber)
 		eth.blockchain.DeleteDataHashes(currentNumber)

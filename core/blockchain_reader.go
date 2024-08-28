@@ -440,6 +440,15 @@ func (bc *BlockChain) SubscribeBlockProcessingEvent(ch chan<- bool) event.Subscr
 func (bc *BlockChain) ReadSYSHash(n uint64) []byte {
 	return bc.hc.ReadSYSHash(n)
 }
+func (bc *BlockChain) GetNEVMAddress(address common.Address) []byte {
+	return bc.hc.GetNEVMAddress(address)
+}
+func (bc *BlockChain) WriteNEVMAddressMapping(mapping *rawdb.NEVMAddressMapping) {
+	bc.hc.WriteNEVMAddressMapping(mapping)
+}
+func (bc *BlockChain) ReadNEVMAddressMapping() *rawdb.NEVMAddressMapping {
+	return bc.hc.ReadNEVMAddressMapping()
+}
 func (bc *BlockChain) ReadDataHash(hash common.Hash) []byte {
 	return bc.hc.ReadDataHash(hash)
 }

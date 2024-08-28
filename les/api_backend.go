@@ -104,6 +104,9 @@ func (b *LesApiBackend) ReadSYSHash(ctx context.Context, number rpc.BlockNumber)
 func (b *LesApiBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {
 	return b.eth.blockchain.ReadDataHash(hash), nil
 }
+func (b *LesApiBackend) GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error) {
+	return b.eth.blockchain.GetNEVMAddress(address), nil
+}
 func (b *LesApiBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	header, err := b.HeaderByNumber(ctx, number)
 	if header == nil || err != nil {

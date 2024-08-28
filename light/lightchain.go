@@ -481,6 +481,15 @@ func (lc *LightChain) ReadSYSHash(n uint64) []byte {
 func (lc *LightChain) ReadDataHash(hash common.Hash) []byte {
 	return lc.hc.ReadDataHash(hash)
 }
+func (lc *LightChain) GetNEVMAddress(address common.Address) []byte {
+	return lc.hc.GetNEVMAddress(address)	
+}
+func (lc *LightChain) WriteNEVMAddressMapping(mapping *rawdb.NEVMAddressMapping) {
+	lc.hc.WriteNEVMAddressMapping(mapping)
+}
+func (lc *LightChain) ReadNEVMAddressMapping() *rawdb.NEVMAddressMapping {
+	return lc.hc.ReadNEVMAddressMapping()
+}
 func (lc *LightChain) WriteSYSHash(sysBlockhash string, n uint64) {
 	lc.hc.WriteSYSHash(sysBlockhash, n)
 }

@@ -423,6 +423,7 @@ func TestTimeBasedForkInGenesis(t *testing.T) {
 				LondonBlock:                   big.NewInt(0),
 				SyscoinBlock:                  big.NewInt(0),
 				RolluxBlock:                   big.NewInt(0),
+				NexusBlock:                    big.NewInt(0),
 				TerminalTotalDifficulty:       big.NewInt(0),
 				TerminalTotalDifficultyPassed: true,
 				MergeNetsplitBlock:            big.NewInt(0),

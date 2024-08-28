@@ -95,6 +95,7 @@ func newTestBackendWithGenerator(blocks int, shanghai bool, generator func(int, 
 			MergeNetsplitBlock:            big.NewInt(0),
 			// SYSCOIN
 			RolluxBlock:				   big.NewInt(0),
+			NexusBlock:				       big.NewInt(0),
 			ShanghaiTime:                  big.NewInt(0),
 			TerminalTotalDifficulty:       big.NewInt(0),
 			TerminalTotalDifficultyPassed: true,
