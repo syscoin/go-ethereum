@@ -769,7 +769,7 @@ func (p *BlobPool) Reset(oldHead, newHead *types.Header) {
 		}
 	}
 	// SYSCOIN Flush out any blobs from limbo that are older than the latest finality
-	if p.chain.Config().IsCancun(p.head.Number) {
+	if p.chain.Config().IsCancunTime(p.head.Time) {
 		p.limbo.finalize(p.chain.CurrentFinalBlock())
 	}
 	// Reset the price heap for the new set of basefee/blobfee pairs

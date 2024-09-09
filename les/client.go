@@ -214,8 +214,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 		if nevmBlockConnect == nil {
 			return errors.New("addBlock: Empty block")
 		}
-		// Retrieve the current NEVM address mappings from the database
-		mapping := eth.blockchain.ReadNEVMAddressMapping()
 		currentHeader := eth.blockchain.CurrentHeader()
 		currentNumber := currentHeader.Number.Uint64()
 		currentHash := currentHeader.Hash()
@@ -233,18 +231,25 @@ func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 			}
 		}
 		// Update the NEVM address mappings based on the block's diff
-		for _, entry := range nevmBlockConnect.Diff.AddedMNNEVM {
-			mapping.AddNEVMAddress(common.BytesToAddress(entry.Address), entry.CollateralHeight)
+		hasDiff := nevmBlockConnect.HasDiff()
+		if hasDiff {
+			// Retrieve the current NEVM address mappings from the database
+			mapping := eth.blockchain.ReadNEVMAddressMapping()
+			for _, entry := range nevmBlockConnect.Diff.AddedMNNEVM {
+				mapping.AddNEVMAddress(common.BytesToAddress(entry.Address), entry.CollateralHeight)
+			}
+			for _, entry := range nevmBlockConnect.Diff.UpdatedMNNEVM {
+				mapping.UpdateNEVMAddress(common.BytesToAddress(entry.OldAddress), common.BytesToAddress(entry.NewAddress))
+			}
+			for _, entry := range nevmBlockConnect.Diff.RemovedMNNEVM {
+				mapping.RemoveNEVMAddress(common.BytesToAddress(entry.Address))
+			}
+		
+			// Persist the updated NEVM address mappings to the database
+			if(hasDiff) {
+				eth.blockchain.WriteNEVMAddressMapping(mapping)
+			}
 		}
-		for _, entry := range nevmBlockConnect.Diff.UpdatedMNNEVM {
-			mapping.UpdateNEVMAddress(common.BytesToAddress(entry.OldAddress), common.BytesToAddress(entry.NewAddress))
-		}
-		for _, entry := range nevmBlockConnect.Diff.RemovedMNNEVM {
-			mapping.RemoveNEVMAddress(common.BytesToAddress(entry.Address))
-		}
-	
-		// Persist the updated NEVM address mappings to the database
-		eth.blockchain.WriteNEVMAddressMapping(mapping)
 		// add before potentially inserting into chain (verifyHeader depends on the mapping), we will delete if anything is wrong
 		eth.blockchain.WriteNEVMMapping(proposedBlockHash)
 		_, err = eth.blockchain.InsertHeaderChain([]*types.Header{nevmBlockConnect.Block.Header()}, 0)
@@ -311,22 +316,26 @@ func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 		if eth.blockchain.CurrentHeader().Number.Uint64() != (currentNumber - 1) {
 			return errors.New("deleteBlock: Block number post-write does not match")
 		}
-		// Retrieve the current NEVM address mappings from the database
-		mapping := eth.blockchain.ReadNEVMAddressMapping()
-
 		// Update the NEVM address mappings based on the block's diff
-		for _, entry := range nevmBlockDisconnect.Diff.AddedMNNEVM {
-			mapping.AddNEVMAddress(common.BytesToAddress(entry.Address), entry.CollateralHeight)
+		hasDiff := nevmBlockDisconnect.HasDiff()
+		if hasDiff {
+			// Retrieve the current NEVM address mappings from the database
+			mapping := eth.blockchain.ReadNEVMAddressMapping()
+			for _, entry := range nevmBlockDisconnect.Diff.AddedMNNEVM {
+				mapping.AddNEVMAddress(common.BytesToAddress(entry.Address), entry.CollateralHeight)
+			}
+			for _, entry := range nevmBlockDisconnect.Diff.UpdatedMNNEVM {
+				mapping.UpdateNEVMAddress(common.BytesToAddress(entry.OldAddress), common.BytesToAddress(entry.NewAddress))
+			}
+			for _, entry := range nevmBlockDisconnect.Diff.RemovedMNNEVM {
+				mapping.RemoveNEVMAddress(common.BytesToAddress(entry.Address))
+			}
+		
+			// Persist the updated NEVM address mappings to the database
+			if(hasDiff) {
+				eth.blockchain.WriteNEVMAddressMapping(mapping)
+			}
 		}
-		for _, entry := range nevmBlockDisconnect.Diff.UpdatedMNNEVM {
-			mapping.UpdateNEVMAddress(common.BytesToAddress(entry.OldAddress), common.BytesToAddress(entry.NewAddress))
-		}
-		for _, entry := range nevmBlockDisconnect.Diff.RemovedMNNEVM {
-			mapping.RemoveNEVMAddress(common.BytesToAddress(entry.Address))
-		}
-	
-		// Persist the updated NEVM address mappings to the database
-		eth.blockchain.WriteNEVMAddressMapping(mapping)
 		eth.blockchain.DeleteNEVMMapping(current.Hash())
 		eth.blockchain.DeleteSYSHash(currentNumber)
 		eth.blockchain.DeleteDataHashes(currentNumber)

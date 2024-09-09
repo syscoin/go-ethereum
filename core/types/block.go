@@ -244,7 +244,12 @@ type NEVMBlockConnect struct {
 	VersionHashes []*common.Hash
 	Diff          *wire.NEVMAddressDiff
 }
-
+func (n *NEVMBlockConnect) HasDiff() bool {
+	return len(n.Diff.AddedMNNEVM) > 0 || len(n.Diff.RemovedMNNEVM) > 0 || len(n.Diff.UpdatedMNNEVM) > 0
+}
+func (n *NEVMBlockDisconnect) HasDiff() bool {
+	return len(n.Diff.AddedMNNEVM) > 0 || len(n.Diff.RemovedMNNEVM) > 0 || len(n.Diff.UpdatedMNNEVM) > 0
+}
 func (n *NEVMBlockConnect) Deserialize(bytesIn []byte) error {
 	var NEVMBlockWire wire.NEVMBlockWire
 	r := bytes.NewReader(bytesIn)
