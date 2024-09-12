@@ -71,7 +71,8 @@ var DefaultConfig = Config{
 		MaxPeers:   50,
 		NAT:        nat.Any(),
 	},
-	DBEngine: "", // Use whatever exists, will default to Pebble if non-existent and supported
+	// SYSCOIN
+	DBEngine: "leveldb",
 }
 
 // DefaultDataDir is the default data directory to use for the databases and other

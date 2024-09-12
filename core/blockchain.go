@@ -259,6 +259,8 @@ type BlockChain struct {
 	processor  Processor // Block transaction processor interface
 	forker     *ForkChoice
 	vmConfig   vm.Config
+	// SYSCOIN
+	NevmBlockConnect *types.NEVMBlockConnect
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -981,6 +983,12 @@ func (bc *BlockChain) stopWithoutSaving() {
 // Stop stops the blockchain service. If any imports are currently in progress
 // it will abort them using the procInterrupt.
 func (bc *BlockChain) Stop() {
+	// SYSCOIN we set canonical chain if we are stopping or we have synced
+	if bc.NevmBlockConnect != nil {
+		if _, err := bc.SetCanonical(bc.NevmBlockConnect.Block); err != nil {
+			log.Error("Failed setting canonical chain from NEVM block connect", "err", err)
+		}
+	}
 	bc.stopWithoutSaving()
 
 	// Ensure that the entirety of the state snapshot is journalled to disk.
@@ -1404,6 +1412,33 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	rawdb.WriteBlock(blockBatch, block)
 	rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
 	rawdb.WritePreimages(blockBatch, state.Preimages())
+	// SYSCOIN
+	nevmBlockConnect := bc.NevmBlockConnect
+	if nevmBlockConnect != nil {
+		// Update the NEVM address mappings based on the block's diff
+		hasDiff := nevmBlockConnect.HasDiff()
+		if hasDiff {
+			// Retrieve the current NEVM address mappings from the database
+			mapping := bc.ReadNEVMAddressMapping()
+			for _, entry := range nevmBlockConnect.Diff.AddedMNNEVM {
+				mapping.AddNEVMAddress(common.BytesToAddress(entry.Address), entry.CollateralHeight)
+			}
+			for _, entry := range nevmBlockConnect.Diff.UpdatedMNNEVM {
+				mapping.UpdateNEVMAddress(common.BytesToAddress(entry.OldAddress), common.BytesToAddress(entry.NewAddress))
+			}
+			for _, entry := range nevmBlockConnect.Diff.RemovedMNNEVM {
+				mapping.RemoveNEVMAddress(common.BytesToAddress(entry.Address))
+			}
+		
+			// Persist the updated NEVM address mappings to the database
+			bc.WriteNEVMAddressMapping(blockBatch, mapping)
+		}
+		proposedBlockNumber := nevmBlockConnect.Block.NumberU64()
+		bc.WriteNEVMMapping(blockBatch, nevmBlockConnect.Block.Hash())
+		bc.WriteDataHashes(blockBatch, proposedBlockNumber, nevmBlockConnect.VersionHashes)
+		bc.WriteSYSHash(blockBatch, nevmBlockConnect.Sysblockhash, proposedBlockNumber)
+	}
+
 	if err := blockBatch.Write(); err != nil {
 		log.Crit("Failed to write block into disk", "err", err)
 	}

@@ -276,7 +276,8 @@ var (
 	StateSchemeFlag = &cli.StringFlag{
 		Name:     "state.scheme",
 		Usage:    "Scheme to use for storing ethereum state ('hash' or 'path')",
-		Value:    rawdb.HashScheme,
+		// SYSCOIN
+		Value:    rawdb.PathScheme,
 		Category: flags.StateCategory,
 	}
 	StateHistoryFlag = &cli.Uint64Flag{
@@ -2406,8 +2407,9 @@ func ParseStateScheme(ctx *cli.Context, disk ethdb.Database) (string, error) {
 		if stored == "" {
 			// use default scheme for empty database, flip it when
 			// path mode is chosen as default
-			log.Info("State schema set to default", "scheme", "hash")
-			return rawdb.HashScheme, nil
+			// SYSCOIN
+			log.Info("State schema set to default", "scheme", "path")
+			return rawdb.PathScheme, nil
 		}
 		log.Info("State scheme set to already existing", "scheme", stored)
 		return stored, nil // reuse scheme of persistent scheme

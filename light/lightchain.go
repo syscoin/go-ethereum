@@ -73,6 +73,8 @@ type LightChain struct {
 	stopped          atomic.Bool // whether LightChain is stopped or running
 	procInterrupt    atomic.Bool // interrupts chain insert
 	disableCheckFreq atomic.Bool // disables header verification
+	// SYSCOIN
+	NevmBlockConnect *types.NEVMBlockConnect
 }
 
 // NewLightChain returns a fully initialised light chain using information
@@ -397,6 +399,10 @@ func (lc *LightChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 		checkFreq = 0
 	}
 	start := time.Now()
+	// SYSCOIN
+	if lc.NevmBlockConnect != nil {
+		lc.hc.NevmBlockConnect = lc.NevmBlockConnect
+	}
 	if i, err := lc.hc.ValidateHeaderChain(chain, checkFreq); err != nil {
 		return i, err
 	}
@@ -484,23 +490,23 @@ func (lc *LightChain) ReadDataHash(hash common.Hash) []byte {
 func (lc *LightChain) GetNEVMAddress(address common.Address) []byte {
 	return lc.hc.GetNEVMAddress(address)	
 }
-func (lc *LightChain) WriteNEVMAddressMapping(mapping *rawdb.NEVMAddressMapping) {
-	lc.hc.WriteNEVMAddressMapping(mapping)
+func (lc *LightChain) WriteNEVMAddressMapping(db ethdb.KeyValueWriter, mapping *rawdb.NEVMAddressMapping) {
+	lc.hc.WriteNEVMAddressMapping(db, mapping)
 }
 func (lc *LightChain) ReadNEVMAddressMapping() *rawdb.NEVMAddressMapping {
 	return lc.hc.ReadNEVMAddressMapping()
 }
-func (lc *LightChain) WriteSYSHash(sysBlockhash string, n uint64) {
-	lc.hc.WriteSYSHash(sysBlockhash, n)
+func (lc *LightChain) WriteSYSHash(db ethdb.KeyValueWriter, sysBlockhash string, n uint64) {
+	lc.hc.WriteSYSHash(db, sysBlockhash, n)
 }
-func (lc *LightChain) WriteDataHashes(n uint64, dataHashes []*common.Hash) {
-	lc.hc.WriteDataHashes(n, dataHashes)
+func (lc *LightChain) WriteDataHashes(db ethdb.KeyValueWriter, n uint64, dataHashes []*common.Hash) {
+	lc.hc.WriteDataHashes(db, n, dataHashes)
 }
-func (lc *LightChain) DeleteDataHashes(n uint64) {
-	lc.hc.DeleteDataHashes(n)
+func (lc *LightChain) DeleteDataHashes(db ethdb.KeyValueWriter, n uint64) {
+	lc.hc.DeleteDataHashes(db, n)
 }
-func (lc *LightChain) DeleteSYSHash(n uint64) {
-	lc.hc.DeleteSYSHash(n)
+func (lc *LightChain) DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
+	lc.hc.DeleteSYSHash(db, n)
 }
 
 // SYSCOIN HasNEVMMapping checks if a NEVM block is present in the database or not, caching
@@ -508,11 +514,11 @@ func (lc *LightChain) DeleteSYSHash(n uint64) {
 func (lc *LightChain) HasNEVMMapping(hash common.Hash) bool {
 	return lc.hc.HasNEVMMapping(hash)
 }
-func (lc *LightChain) DeleteNEVMMapping(hash common.Hash) {
-	lc.hc.DeleteNEVMMapping(hash)
+func (lc *LightChain) DeleteNEVMMapping(db ethdb.KeyValueWriter, hash common.Hash) {
+	lc.hc.DeleteNEVMMapping(db, hash)
 }
-func (lc *LightChain) WriteNEVMMapping(hash common.Hash) {
-	lc.hc.WriteNEVMMapping(hash)
+func (lc *LightChain) WriteNEVMMapping(db ethdb.KeyValueWriter, hash common.Hash) {
+	lc.hc.WriteNEVMMapping(db, hash)
 }
 
 // GetAncestor retrieves the Nth ancestor of a given block. It assumes that either the given block or

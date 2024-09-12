@@ -230,35 +230,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 				return errors.New("addBlock: Non contiguous block insert")
 			}
 		}
-		// Update the NEVM address mappings based on the block's diff
-		hasDiff := nevmBlockConnect.HasDiff()
-		if hasDiff {
-			// Retrieve the current NEVM address mappings from the database
-			mapping := eth.blockchain.ReadNEVMAddressMapping()
-			for _, entry := range nevmBlockConnect.Diff.AddedMNNEVM {
-				mapping.AddNEVMAddress(common.BytesToAddress(entry.Address), entry.CollateralHeight)
-			}
-			for _, entry := range nevmBlockConnect.Diff.UpdatedMNNEVM {
-				mapping.UpdateNEVMAddress(common.BytesToAddress(entry.OldAddress), common.BytesToAddress(entry.NewAddress))
-			}
-			for _, entry := range nevmBlockConnect.Diff.RemovedMNNEVM {
-				mapping.RemoveNEVMAddress(common.BytesToAddress(entry.Address))
-			}
-		
-			// Persist the updated NEVM address mappings to the database
-			if(hasDiff) {
-				eth.blockchain.WriteNEVMAddressMapping(mapping)
-			}
-		}
-		// add before potentially inserting into chain (verifyHeader depends on the mapping), we will delete if anything is wrong
-		eth.blockchain.WriteNEVMMapping(proposedBlockHash)
+		eth.blockchain.NevmBlockConnect = nevmBlockConnect
 		_, err = eth.blockchain.InsertHeaderChain([]*types.Header{nevmBlockConnect.Block.Header()}, 0)
 		if err != nil {
-			eth.blockchain.DeleteNEVMMapping(proposedBlockHash)
 			return err
 		}
-		eth.blockchain.WriteDataHashes(proposedBlockNumber, nevmBlockConnect.VersionHashes)
-		eth.blockchain.WriteSYSHash(nevmBlockConnect.Sysblockhash, proposedBlockNumber)
 		if eth.peers.closed {
 			eth.lock.Lock()
 			eth.timeLastBlock = time.Now().Unix()
@@ -316,6 +292,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 		if eth.blockchain.CurrentHeader().Number.Uint64() != (currentNumber - 1) {
 			return errors.New("deleteBlock: Block number post-write does not match")
 		}
+		batch := eth.chainDb.NewBatch()
 		// Update the NEVM address mappings based on the block's diff
 		hasDiff := nevmBlockDisconnect.HasDiff()
 		if hasDiff {
@@ -332,13 +309,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*LightEthereum, error) {
 			}
 		
 			// Persist the updated NEVM address mappings to the database
-			if(hasDiff) {
-				eth.blockchain.WriteNEVMAddressMapping(mapping)
-			}
+			eth.blockchain.WriteNEVMAddressMapping(batch, mapping)
 		}
-		eth.blockchain.DeleteNEVMMapping(current.Hash())
-		eth.blockchain.DeleteSYSHash(currentNumber)
-		eth.blockchain.DeleteDataHashes(currentNumber)
+		eth.blockchain.DeleteNEVMMapping(batch, current.Hash())
+		eth.blockchain.DeleteSYSHash(batch, currentNumber)
+		eth.blockchain.DeleteDataHashes(batch, currentNumber)
 		return nil
 	}
 	if config.Ethash.PowMode == ethash.ModeNEVM {

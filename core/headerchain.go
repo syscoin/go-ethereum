@@ -78,6 +78,8 @@ type HeaderChain struct {
 
 	rand   *mrand.Rand
 	engine consensus.Engine
+	// SYSCOIN
+	NevmBlockConnect *types.NEVMBlockConnect
 }
 
 // NewHeaderChain creates a new HeaderChain structure. ProcInterrupt points
@@ -252,6 +254,32 @@ func (hc *HeaderChain) WriteHeaders(headers []*types.Header) (int, error) {
 			hc.numberCache.Add(hash, number)
 		}
 		parentKnown = alreadyKnown
+	}
+	// SYSCOIN
+	nevmBlockConnect := hc.NevmBlockConnect
+	if nevmBlockConnect != nil {
+		// Update the NEVM address mappings based on the block's diff
+		hasDiff := nevmBlockConnect.HasDiff()
+		if hasDiff {
+			// Retrieve the current NEVM address mappings from the database
+			mapping := hc.ReadNEVMAddressMapping()
+			for _, entry := range nevmBlockConnect.Diff.AddedMNNEVM {
+				mapping.AddNEVMAddress(common.BytesToAddress(entry.Address), entry.CollateralHeight)
+			}
+			for _, entry := range nevmBlockConnect.Diff.UpdatedMNNEVM {
+				mapping.UpdateNEVMAddress(common.BytesToAddress(entry.OldAddress), common.BytesToAddress(entry.NewAddress))
+			}
+			for _, entry := range nevmBlockConnect.Diff.RemovedMNNEVM {
+				mapping.RemoveNEVMAddress(common.BytesToAddress(entry.Address))
+			}
+		
+			// Persist the updated NEVM address mappings to the database
+			hc.WriteNEVMAddressMapping(batch, mapping)
+		}
+		proposedBlockNumber := nevmBlockConnect.Block.NumberU64()
+		hc.WriteNEVMMapping(batch, nevmBlockConnect.Block.Hash())
+		hc.WriteDataHashes(batch, proposedBlockNumber, nevmBlockConnect.VersionHashes)
+		hc.WriteSYSHash(batch, nevmBlockConnect.Sysblockhash, proposedBlockNumber)
 	}
 	// Skip the slow disk write of all headers if interrupted.
 	if hc.procInterrupt() {
@@ -484,8 +512,8 @@ func (hc *HeaderChain) GetHeaderByHash(hash common.Hash) *types.Header {
 	return hc.GetHeader(hash, *number)
 }
 
-func (hc *HeaderChain) WriteNEVMAddressMapping(mapping *rawdb.NEVMAddressMapping) {
-	rawdb.WriteNEVMAddressMapping(hc.chainDb, mapping)
+func (hc *HeaderChain) WriteNEVMAddressMapping(db ethdb.KeyValueWriter, mapping *rawdb.NEVMAddressMapping) {
+	rawdb.WriteNEVMAddressMapping(db, mapping)
 	hc.NEVMAddressCache = mapping
 }
 
@@ -535,24 +563,24 @@ func (hc *HeaderChain) ReadDataHash(hash common.Hash) []byte {
 	return hash.Bytes()
 }
 
-func (hc *HeaderChain) WriteSYSHash(sysBlockhash string, n uint64) {
-	rawdb.WriteSYSHash(hc.chainDb, sysBlockhash, n)
+func (hc *HeaderChain) WriteSYSHash(db ethdb.KeyValueWriter, sysBlockhash string, n uint64) {
+	rawdb.WriteSYSHash(db, sysBlockhash, n)
 	hc.SYSHashCache.Add(n, []byte(sysBlockhash))
 }
-func (hc *HeaderChain) WriteDataHashes(n uint64, dataHashes []*common.Hash) {
-	rawdb.WriteDataHashes(hc.chainDb, hc.chainDb, n, dataHashes)
+func (hc *HeaderChain) WriteDataHashes(db ethdb.KeyValueWriter, n uint64, dataHashes []*common.Hash) {
+	rawdb.WriteDataHashes(db, hc.chainDb, n, dataHashes)
 	for _, dataHash := range dataHashes {
 		hc.DataHashCache.Add(*dataHash, []byte{0})
 	}
 }
-func (hc *HeaderChain) DeleteDataHashes(n uint64) {
-	dataHashes := rawdb.DeleteDataHashes(hc.chainDb, hc.chainDb, n)
+func (hc *HeaderChain) DeleteDataHashes(db ethdb.KeyValueWriter, n uint64) {
+	dataHashes := rawdb.DeleteDataHashes(db, hc.chainDb, n)
 	for _, dataHash := range dataHashes {
 		hc.DataHashCache.Remove(*dataHash)
 	}
 }
-func (hc *HeaderChain) DeleteSYSHash(n uint64) {
-	rawdb.DeleteSYSHash(hc.chainDb, n)
+func (hc *HeaderChain) DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
+	rawdb.DeleteSYSHash(db, n)
 	hc.SYSHashCache.Remove(n)
 }
 func (hc *HeaderChain) HasNEVMMapping(hash common.Hash) bool {
@@ -565,12 +593,12 @@ func (hc *HeaderChain) HasNEVMMapping(hash common.Hash) bool {
 	}
 	return hasMapping
 }
-func (hc *HeaderChain) DeleteNEVMMapping(hash common.Hash) {
-	rawdb.DeleteNEVMMapping(hc.chainDb, hash)
+func (hc *HeaderChain) DeleteNEVMMapping(db ethdb.KeyValueWriter, hash common.Hash) {
+	rawdb.DeleteNEVMMapping(db, hash)
 	hc.NEVMCache.Remove(hash)
 }
-func (hc *HeaderChain) WriteNEVMMapping(hash common.Hash) {
-	rawdb.WriteNEVMMapping(hc.chainDb, hash)
+func (hc *HeaderChain) WriteNEVMMapping(db ethdb.KeyValueWriter, hash common.Hash) {
+	rawdb.WriteNEVMMapping(db, hash)
 	hc.NEVMCache.Add(hash, []byte{0})
 }
 

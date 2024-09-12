@@ -316,31 +316,35 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if nevmBlockConnect == nil {
 			return errors.New("addBlock: Empty block")
 		}
-
-		current := eth.blockchain.CurrentBlock()
-		currentNumber := current.Number.Uint64()
-		currentHash := current.Hash()
 		proposedBlockNumber := nevmBlockConnect.Block.NumberU64()
-		proposedBlockParentHash := nevmBlockConnect.Block.ParentHash()
 		proposedBlockHash := nevmBlockConnect.Block.Hash()
+		proposedBlockParentHash := nevmBlockConnect.Block.ParentHash()
+		currentHash := common.Hash{}
+		currentNumber := uint64(0)
 		if nevmBlockConnect.Block == nil {
 			return errors.New("addBlock: empty block")
 		}
-		if currentNumber > 0 {
-			if (proposedBlockNumber != (currentNumber + 1)) || (proposedBlockParentHash != currentHash) {
-				log.Error("Non contiguous block insert", "number", proposedBlockNumber, "hash", proposedBlockHash,
-					"parent", proposedBlockParentHash, "prevnumber", currentNumber, "prevhash", currentHash)
-				return errors.New("addBlock: Non contiguous block insert")
-			}
+		// because we set canonical head only after sync we can check for continuity via saved block connects
+		if eth.blockchain.NevmBlockConnect != nil {
+			currentBlock := eth.blockchain.NevmBlockConnect.Block
+			currentNumber = currentBlock.NumberU64()
+			currentHash = currentBlock.Hash()
+		} else {
+			currentBlock := eth.blockchain.CurrentBlock()
+			currentNumber = currentBlock.Number.Uint64()
+			currentHash = currentBlock.Hash()
 		}
+		if (proposedBlockNumber != (currentNumber + 1)) || (proposedBlockParentHash != currentHash) {
+			log.Error("Non contiguous block insert", "number", proposedBlockNumber, "hash", proposedBlockHash,
+				"parent", proposedBlockParentHash, "prevnumber", currentNumber, "prevhash", currentHash)
+			return errors.New("addBlock: Non contiguous block insert")
+		}
+		eth.blockchain.NevmBlockConnect = nevmBlockConnect
 		// special case where miner process includes validating block in pre-packaging stage on SYS node
 		// the validation of this hash is done in ConnectNEVMCommitment() in Syscoin using fJustCheck
 		sysBlockHash := common.BytesToHash([]byte(nevmBlockConnect.Sysblockhash))
 		if sysBlockHash == (common.Hash{}) {
-			// we need to write/delete between verifyheader because it depends on the mapping
-			eth.blockchain.WriteNEVMMapping(proposedBlockHash)
 			err := eth.engine.VerifyHeader(eth.blockchain, nevmBlockConnect.Block.Header(), false)
-			eth.blockchain.DeleteNEVMMapping(proposedBlockHash)
 			if err != nil {
 				eth.miner.Close()
 				eth.miner = miner.New(eth, &eth.config.Miner, eth.miner.ChainConfig(), eth.EventMux(), eth.engine, eth.isLocalBlock)
@@ -348,40 +352,18 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			}
 			return err
 		}
-		// Update the NEVM address mappings based on the block's diff
-		hasDiff := nevmBlockConnect.HasDiff()
-		if hasDiff {
-			// Retrieve the current NEVM address mappings from the database
-			mapping := eth.blockchain.ReadNEVMAddressMapping()
-			for _, entry := range nevmBlockConnect.Diff.AddedMNNEVM {
-				mapping.AddNEVMAddress(common.BytesToAddress(entry.Address), entry.CollateralHeight)
-			}
-			for _, entry := range nevmBlockConnect.Diff.UpdatedMNNEVM {
-				mapping.UpdateNEVMAddress(common.BytesToAddress(entry.OldAddress), common.BytesToAddress(entry.NewAddress))
-			}
-			for _, entry := range nevmBlockConnect.Diff.RemovedMNNEVM {
-				mapping.RemoveNEVMAddress(common.BytesToAddress(entry.Address))
-			}
-		
-			// Persist the updated NEVM address mappings to the database
-			if(hasDiff) {
-				eth.blockchain.WriteNEVMAddressMapping(mapping)
-			}
-		}
-		// do before potentially inserting into chain (verifyHeader depends on the mapping), we will delete if anything is wrong
-		eth.blockchain.WriteNEVMMapping(proposedBlockHash)
-		_, err = eth.blockchain.InsertChain(types.Blocks([]*types.Block{nevmBlockConnect.Block}))
-		if err != nil {
-			eth.blockchain.DeleteNEVMMapping(proposedBlockHash)
+		if err := eth.blockchain.InsertBlockWithoutSetHead(nevmBlockConnect.Block); err != nil {
 			return err
 		}
-		eth.blockchain.WriteDataHashes(proposedBlockNumber, nevmBlockConnect.VersionHashes)
-		eth.blockchain.WriteSYSHash(nevmBlockConnect.Sysblockhash, proposedBlockNumber)
 
 		if !eth.handler.inited {
 			eth.lock.Lock()
 			eth.timeLastBlock = time.Now().Unix()
 			eth.lock.Unlock()
+		} else {
+			if _, err := eth.blockchain.SetCanonical(nevmBlockConnect.Block); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -445,6 +427,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if eth.blockchain.CurrentBlock().Number.Uint64() != (currentNumber - 1) {
 			return errors.New("deleteBlock: Block number post-write does not match")
 		}
+		batch := eth.ChainDb().NewBatch()
 		// Update the NEVM address mappings based on the block's diff
 		hasDiff := nevmBlockDisconnect.HasDiff()
 		if hasDiff {
@@ -461,14 +444,15 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			}
 		
 			// Persist the updated NEVM address mappings to the database
-			if(hasDiff) {
-				eth.blockchain.WriteNEVMAddressMapping(mapping)
-			}
+			eth.blockchain.WriteNEVMAddressMapping(batch, mapping)
 		}
 
-		eth.blockchain.DeleteNEVMMapping(current.Hash())
-		eth.blockchain.DeleteSYSHash(currentNumber)
-		eth.blockchain.DeleteDataHashes(currentNumber)
+		eth.blockchain.DeleteNEVMMapping(batch, current.Hash())
+		eth.blockchain.DeleteSYSHash(batch, currentNumber)
+		eth.blockchain.DeleteDataHashes(batch, currentNumber)
+		if err := batch.Write(); err != nil {
+			log.Crit("Failed to delete NEVM index data", "err", err)
+		}
 		return nil
 	}
 	if ethashConfig.PowMode == ethash.ModeNEVM {
