@@ -327,10 +327,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		// because we set canonical head only after sync we can check for continuity via saved block connects
 		if eth.blockchain.NevmBlockConnect != nil {
 			currentBlock := eth.blockchain.NevmBlockConnect.Block
+			if currentBlock == nil {
+				return errors.New("addBlock: Current block is nil")
+			}
 			currentNumber = currentBlock.NumberU64()
 			currentHash = currentBlock.Hash()
 		} else {
 			currentBlock := eth.blockchain.CurrentBlock()
+			if currentBlock == nil {
+				return errors.New("addBlock: Current block is nil")
+			}
 			currentNumber = currentBlock.Number.Uint64()
 			currentHash = currentBlock.Hash()
 		}
@@ -360,6 +366,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			eth.lock.Lock()
 			eth.timeLastBlock = time.Now().Unix()
 			eth.lock.Unlock()
+			if (nevmBlockConnect.Block.NumberU64() % 100) == 0 {
+				if _, err := eth.blockchain.SetCanonical(nevmBlockConnect.Block); err != nil {
+					return err
+				}
+			}
 		} else {
 			if _, err := eth.blockchain.SetCanonical(nevmBlockConnect.Block); err != nil {
 				return err
@@ -411,6 +422,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	deleteBlock := func(nevmBlockDisconnect *types.NEVMBlockDisconnect, eth *Ethereum) error {
 		current := eth.blockchain.CurrentBlock()
+		if current == nil {
+			return errors.New("deleteBlock: Current block is nil")
+		}
 		currentNumber := current.Number.Uint64()
 		if current.Number.Uint64() == 0 {
 			log.Warn("Trying to disconnect block 0")
@@ -744,6 +758,7 @@ func (s *Ethereum) Stop() error {
 	s.chainDb.Close()
 	s.eventMux.Stop()
 	// SYSCOIN
+	s.p2pServer.Stop()
 	s.minedNEVMBlockSub.Unsubscribe()
 	s.wgNEVM.Wait()
 	if s.zmqRep != nil {
