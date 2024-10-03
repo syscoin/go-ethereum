@@ -105,7 +105,7 @@ func TestCreation(t *testing.T) {
 				// SYSCOIN
 				{1735371, 0, ID{Hash: checksumToBytes(0xb96cbd13), Next: 1677557087}},          // First MergeNetsplit block
 				{1735372, 1677557087, ID{Hash: checksumToBytes(0xb96cbd13), Next: 1677557087}}, // Last MergeNetsplit block
-				{1677557088, 1677557088, ID{Hash: checksumToBytes(0x2bbff41a), Next: 0}},          // First Shanghai block
+				{1677557088, 1677557088, ID{Hash: checksumToBytes(0x2bbff41a), Next: 0x63fd7d61}},          // First Shanghai block
 			},
 		},
 		// Holesky test cases
