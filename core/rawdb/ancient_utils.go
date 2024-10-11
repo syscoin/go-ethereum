@@ -18,6 +18,7 @@ package rawdb
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -80,28 +81,25 @@ func inspectFreezers(db ethdb.Database) ([]freezerInfo, error) {
 	var infos []freezerInfo
 	for _, freezer := range freezers {
 		switch freezer {
-		case chainFreezerName:
-			info, err := inspect(chainFreezerName, chainFreezerNoSnappy, db)
+		case ChainFreezerName:
+			info, err := inspect(ChainFreezerName, chainFreezerNoSnappy, db)
 			if err != nil {
 				return nil, err
 			}
 			infos = append(infos, info)
 
-		case stateFreezerName:
-			if ReadStateScheme(db) != PathScheme {
-				continue
-			}
+		case MerkleStateFreezerName, VerkleStateFreezerName:
 			datadir, err := db.AncientDatadir()
 			if err != nil {
 				return nil, err
 			}
-			f, err := NewStateFreezer(datadir, true)
+			f, err := NewStateFreezer(datadir, freezer == VerkleStateFreezerName, true)
 			if err != nil {
-				return nil, err
+				continue // might be possible the state freezer is not existent
 			}
 			defer f.Close()
 
-			info, err := inspect(stateFreezerName, stateFreezerNoSnappy, f)
+			info, err := inspect(freezer, stateFreezerNoSnappy, f)
 			if err != nil {
 				return nil, err
 			}
@@ -124,8 +122,10 @@ func InspectFreezerTable(ancient string, freezerName string, tableName string, s
 		tables map[string]bool
 	)
 	switch freezerName {
-	case chainFreezerName:
+	case ChainFreezerName:
 		path, tables = resolveChainFreezerDir(ancient), chainFreezerNoSnappy
+	case MerkleStateFreezerName, VerkleStateFreezerName:
+		path, tables = filepath.Join(ancient, freezerName), stateFreezerNoSnappy
 	default:
 		return fmt.Errorf("unknown freezer, supported ones: %v", freezers)
 	}

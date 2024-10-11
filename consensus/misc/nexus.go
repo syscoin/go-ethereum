@@ -17,24 +17,24 @@
 package misc
 
 import (
-	"math/big"
-
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/params"
+    "github.com/ethereum/go-ethereum/core/tracing"
+    "github.com/holiman/uint256"
 )
 
 
 // ApplyNexusHardFork modifies the state database according to the Nexus hard-fork
-// rules, transferring SYS balance from previous ERC20Manager to new one
+// rules, transferring SYS balance from previous VaultManager to new one
 func ApplyNexusHardFork(statedb *state.StateDB) {
     // Create the new contract account if it doesn't already exist
-    if !statedb.Exist(params.ERC20Manager) {
-        statedb.CreateAccount(params.ERC20Manager)
+    if !statedb.Exist(params.VaultManager) {
+        statedb.CreateAccount(params.VaultManager)
     }
 
     // Transfer the balance from the old contract to the new contract
-    oldBalance := statedb.GetBalance(params.ERC20ManagerOld)
-    statedb.AddBalance(params.ERC20Manager, oldBalance)
-    statedb.SetBalance(params.ERC20ManagerOld, new(big.Int)) // Reset the old contract's balance
+    oldBalance := statedb.GetBalance(params.VaultManagerOld)
+    statedb.AddBalance(params.VaultManager, oldBalance, tracing.BalanceIncreaseVaultManagerContract)
+    statedb.SetBalance(params.VaultManagerOld, new(uint256.Int), tracing.BalanceDecreaseVaultManagerAccount)// Reset the old contract's balance
 
 }

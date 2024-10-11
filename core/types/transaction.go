@@ -19,6 +19,7 @@ package types
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"sync/atomic"
@@ -37,6 +38,9 @@ var (
 	ErrTxTypeNotSupported   = errors.New("transaction type not supported")
 	ErrGasFeeCapTooLow      = errors.New("fee cap less than base fee")
 	errShortTypedTx         = errors.New("typed transaction too short")
+	errInvalidYParity       = errors.New("'yParity' field must be 0 or 1")
+	errVYParityMismatch     = errors.New("'v' and 'yParity' fields do not match")
+	errVYParityMissing      = errors.New("missing 'yParity' or 'v' field in transaction")
 )
 
 // Transaction types.
@@ -53,9 +57,9 @@ type Transaction struct {
 	time  time.Time // Time first seen locally (spam avoidance)
 
 	// caches
-	hash atomic.Value
-	size atomic.Value
-	from atomic.Value
+	hash atomic.Pointer[common.Hash]
+	size atomic.Uint64
+	from atomic.Pointer[sigCache]
 }
 
 // NewTx creates a new transaction.
@@ -168,7 +172,7 @@ func (tx *Transaction) DecodeRLP(s *rlp.Stream) error {
 }
 
 // UnmarshalBinary decodes the canonical encoding of transactions.
-// It supports legacy RLP transactions and EIP2718 typed transactions.
+// It supports legacy RLP transactions and EIP-2718 typed transactions.
 func (tx *Transaction) UnmarshalBinary(b []byte) error {
 	if len(b) > 0 && b[0] > 0x7f {
 		// It's a legacy transaction.
@@ -180,7 +184,7 @@ func (tx *Transaction) UnmarshalBinary(b []byte) error {
 		tx.setDecoded(&data, uint64(len(b)))
 		return nil
 	}
-	// It's an EIP2718 typed transaction envelope.
+	// It's an EIP-2718 typed transaction envelope.
 	inner, err := tx.decodeTyped(b)
 	if err != nil {
 		return err
@@ -317,6 +321,7 @@ func (tx *Transaction) Cost() *big.Int {
 
 // RawSignatureValues returns the V, R, S signature values of the transaction.
 // The return values should not be modified by the caller.
+// The return values may be nil or zero, if the transaction is unsigned.
 func (tx *Transaction) RawSignatureValues() (v, r, s *big.Int) {
 	return tx.inner.rawSignatureValues()
 }
@@ -395,7 +400,7 @@ func (tx *Transaction) BlobGasFeeCap() *big.Int {
 	return nil
 }
 
-// BlobHashes returns the hases of the blob commitments for blob transactions, nil otherwise.
+// BlobHashes returns the hashes of the blob commitments for blob transactions, nil otherwise.
 func (tx *Transaction) BlobHashes() []common.Hash {
 	if blobtx, ok := tx.inner.(*BlobTx); ok {
 		return blobtx.BlobHashes
@@ -441,6 +446,26 @@ func (tx *Transaction) WithoutBlobTxSidecar() *Transaction {
 	return cpy
 }
 
+// WithBlobTxSidecar returns a copy of tx with the blob sidecar added.
+func (tx *Transaction) WithBlobTxSidecar(sideCar *BlobTxSidecar) *Transaction {
+	blobtx, ok := tx.inner.(*BlobTx)
+	if !ok {
+		return tx
+	}
+	cpy := &Transaction{
+		inner: blobtx.withSidecar(sideCar),
+		time:  tx.time,
+	}
+	// Note: tx.size cache not carried over because the sidecar is included in size!
+	if h := tx.hash.Load(); h != nil {
+		cpy.hash.Store(h)
+	}
+	if f := tx.from.Load(); f != nil {
+		cpy.from.Store(f)
+	}
+	return cpy
+}
+
 // SetTime sets the decoding time of a transaction. This is used by tests to set
 // arbitrary times and by persistent transaction pools when loading old txs from
 // disk.
@@ -457,7 +482,7 @@ func (tx *Transaction) Time() time.Time {
 // Hash returns the transaction hash.
 func (tx *Transaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
-		return hash.(common.Hash)
+		return *hash
 	}
 
 	var h common.Hash
@@ -466,15 +491,15 @@ func (tx *Transaction) Hash() common.Hash {
 	} else {
 		h = prefixedRlpHash(tx.Type(), tx.inner)
 	}
-	tx.hash.Store(h)
+	tx.hash.Store(&h)
 	return h
 }
 
 // Size returns the true encoded storage size of the transaction, either by encoding
 // and returning it, or returning a previously cached value.
 func (tx *Transaction) Size() uint64 {
-	if size := tx.size.Load(); size != nil {
-		return size.(uint64)
+	if size := tx.size.Load(); size > 0 {
+		return size
 	}
 
 	// Cache miss, encode and cache.
@@ -505,6 +530,9 @@ func (tx *Transaction) WithSignature(signer Signer, sig []byte) (*Transaction, e
 	if err != nil {
 		return nil, err
 	}
+	if r == nil || s == nil || v == nil {
+		return nil, fmt.Errorf("%w: r: %s, s: %s, v: %s", ErrInvalidSig, r, s, v)
+	}
 	cpy := tx.inner.copy()
 	cpy.setSignatureValues(signer.ChainID(), v, r, s)
 	return &Transaction{inner: cpy, time: tx.time}, nil
@@ -528,11 +556,11 @@ func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
 	}
 }
 
-// TxDifference returns a new set which is the difference between a and b.
+// TxDifference returns a new set of transactions that are present in a but not in b.
 func TxDifference(a, b Transactions) Transactions {
 	keep := make(Transactions, 0, len(a))
 
-	remove := make(map[common.Hash]struct{})
+	remove := make(map[common.Hash]struct{}, b.Len())
 	for _, tx := range b {
 		remove[tx.Hash()] = struct{}{}
 	}
@@ -546,7 +574,7 @@ func TxDifference(a, b Transactions) Transactions {
 	return keep
 }
 
-// HashDifference returns a new set which is the difference between a and b.
+// HashDifference returns a new set of hashes that are present in a but not in b.
 func HashDifference(a, b []common.Hash) []common.Hash {
 	keep := make([]common.Hash, 0, len(a))
 

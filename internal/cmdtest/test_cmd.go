@@ -32,7 +32,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/docker/docker/pkg/reexec"
+	"github.com/ethereum/go-ethereum/internal/reexec"
 )
 
 func NewTestCmd(t *testing.T, data interface{}) *TestCmd {
@@ -237,8 +237,7 @@ func (tt *TestCmd) Kill() {
 }
 
 func (tt *TestCmd) withKillTimeout(fn func()) {
-	// SYSCOIN extend timeout
-	timeout := time.AfterFunc(60*time.Second, func() {
+	timeout := time.AfterFunc(30*time.Second, func() {
 		tt.Log("killing the child process (timeout)")
 		tt.Kill()
 	})

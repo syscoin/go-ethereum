@@ -61,12 +61,12 @@ type Interface interface {
 //	"pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
 func Parse(spec string) (Interface, error) {
 	var (
-		parts = strings.SplitN(spec, ":", 2)
-		mech  = strings.ToLower(parts[0])
-		ip    net.IP
+		before, after, found = strings.Cut(spec, ":")
+		mech                 = strings.ToLower(before)
+		ip                   net.IP
 	)
-	if len(parts) > 1 {
-		ip = net.ParseIP(parts[1])
+	if found {
+		ip = net.ParseIP(after)
 		if ip == nil {
 			return nil, errors.New("invalid IP address")
 		}
@@ -86,7 +86,7 @@ func Parse(spec string) (Interface, error) {
 	case "pmp", "natpmp", "nat-pmp":
 		return PMP(ip), nil
 	default:
-		return nil, fmt.Errorf("unknown mechanism %q", parts[0])
+		return nil, fmt.Errorf("unknown mechanism %q", before)
 	}
 }
 
@@ -138,8 +138,10 @@ func (n ExtIP) String() string              { return fmt.Sprintf("ExtIP(%v)", ne
 
 // These do nothing.
 
-func (ExtIP) AddMapping(string, int, int, string, time.Duration) (uint16, error) { return 0, nil }
-func (ExtIP) DeleteMapping(string, int, int) error                               { return nil }
+func (ExtIP) AddMapping(protocol string, extport, intport int, name string, lifetime time.Duration) (uint16, error) {
+	return uint16(extport), nil
+}
+func (ExtIP) DeleteMapping(string, int, int) error { return nil }
 
 // Any returns a port mapper that tries to discover any supported
 // mechanism on the local network.

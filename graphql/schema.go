@@ -157,7 +157,7 @@ const schema string = `
         r: BigInt!
         s: BigInt!
         v: BigInt!
-        yParity: Long
+        yParity: BigInt
         # Envelope transaction support
         type: Long
         accessList: [AccessTuple!]
@@ -232,9 +232,6 @@ const schema string = `
         mixHash: Bytes32!
         # Difficulty is a measure of the difficulty of mining this block.
         difficulty: BigInt!
-        # TotalDifficulty is the sum of all difficulty values up to and including
-        # this block.
-        totalDifficulty: BigInt!
         # OmmerCount is the number of ommers (AKA uncles) associated with this
         # block. If ommers are unavailable, this field will be null.
         ommerCount: Long

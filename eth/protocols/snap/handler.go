@@ -24,13 +24,13 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/light"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ethereum/go-ethereum/trie/trienode"
 )
 
 const (
@@ -82,13 +82,7 @@ type Backend interface {
 }
 
 // MakeProtocols constructs the P2P protocol definitions for `snap`.
-func MakeProtocols(backend Backend, dnsdisc enode.Iterator) []p2p.Protocol {
-	// Filter the discovery iterator for nodes advertising snap support.
-	dnsdisc = enode.Filter(dnsdisc, func(n *enode.Node) bool {
-		var snap enrEntry
-		return n.Load(&snap) == nil
-	})
-
+func MakeProtocols(backend Backend) []p2p.Protocol {
 	protocols := make([]p2p.Protocol, len(ProtocolVersions))
 	for i, version := range ProtocolVersions {
 		version := version // Closure
@@ -108,8 +102,7 @@ func MakeProtocols(backend Backend, dnsdisc enode.Iterator) []p2p.Protocol {
 			PeerInfo: func(id enode.ID) interface{} {
 				return backend.PeerInfo(id)
 			},
-			Attributes:     []enr.Entry{&enrEntry{}},
-			DialCandidates: dnsdisc,
+			Attributes: []enr.Entry{&enrEntry{}},
 		}
 	}
 	return protocols
@@ -321,7 +314,7 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 	it.Release()
 
 	// Generate the Merkle proofs for the first and last account
-	proof := light.NewNodeSet()
+	proof := trienode.NewProofSet()
 	if err := tr.Prove(req.Origin[:], proof); err != nil {
 		log.Warn("Failed to prove account range", "origin", req.Origin, "err", err)
 		return nil, nil
@@ -332,11 +325,7 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 			return nil, nil
 		}
 	}
-	var proofs [][]byte
-	for _, blob := range proof.NodeList() {
-		proofs = append(proofs, blob)
-	}
-	return accounts, proofs
+	return accounts, proof.List()
 }
 
 func ServiceGetStorageRangesQuery(chain *core.BlockChain, req *GetStorageRangesPacket) ([][]*StorageData, [][]byte) {
@@ -367,7 +356,7 @@ func ServiceGetStorageRangesQuery(chain *core.BlockChain, req *GetStorageRangesP
 		if len(req.Origin) > 0 {
 			origin, req.Origin = common.BytesToHash(req.Origin), nil
 		}
-		var limit = common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+		var limit = common.MaxHash
 		if len(req.Limit) > 0 {
 			limit, req.Limit = common.BytesToHash(req.Limit), nil
 		}
@@ -427,7 +416,7 @@ func ServiceGetStorageRangesQuery(chain *core.BlockChain, req *GetStorageRangesP
 			if err != nil {
 				return nil, nil
 			}
-			proof := light.NewNodeSet()
+			proof := trienode.NewProofSet()
 			if err := stTrie.Prove(origin[:], proof); err != nil {
 				log.Warn("Failed to prove storage range", "origin", req.Origin, "err", err)
 				return nil, nil
@@ -438,9 +427,7 @@ func ServiceGetStorageRangesQuery(chain *core.BlockChain, req *GetStorageRangesP
 					return nil, nil
 				}
 			}
-			for _, blob := range proof.NodeList() {
-				proofs = append(proofs, blob)
-			}
+			proofs = append(proofs, proof.List()...)
 			// Proof terminates the reply as proofs are only added if a node
 			// refuses to serve more data (exception when a contract fetch is
 			// finishing, but that's that).

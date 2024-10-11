@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/params"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -58,8 +57,6 @@ var allPrecompiles = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{8}):    &bn256PairingIstanbul{},
 	common.BytesToAddress([]byte{9}):    &blake2F{},
 	common.BytesToAddress([]byte{0x0a}): &kzgPointEvaluation{},
-	// SYSCOIN
-	common.BytesToAddress([]byte{0x63}): &datahash{},
 
 	common.BytesToAddress([]byte{0x0f, 0x0a}): &bls12381G1Add{},
 	common.BytesToAddress([]byte{0x0f, 0x0b}): &bls12381G1Mul{},
@@ -95,14 +92,14 @@ var blake2FMalformedInputTests = []precompiledFailureTest{
 		Name:          "vector 3: malformed final block indicator flag",
 	},
 }
+
 func testPrecompiled(addr string, test precompiledTest, t *testing.T) {
 	p := allPrecompiles[common.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
-	env := NewEVM(BlockContext{ReadDataHash: func(common.Hash) []byte { return []byte{} }}, TxContext{}, nil, params.TestChainConfig, Config{})
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
 		// SYSCOIN
-		if res, _, err := RunPrecompiledContract(p, in, gas, env.interpreter); err != nil {
+		if res, _, err := RunPrecompiledContract(p, in, gas, nil, nil); err != nil {
 			t.Error(err)
 		} else if common.Bytes2Hex(res) != test.Expected {
 			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
@@ -122,9 +119,10 @@ func testPrecompiledOOG(addr string, test precompiledTest, t *testing.T) {
 	p := allPrecompiles[common.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in) - 1
-	env := NewEVM(BlockContext{ReadDataHash: func(common.Hash) []byte { return []byte{} }}, TxContext{}, nil, params.TestChainConfig, Config{})
+
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
-		_, _, err := RunPrecompiledContract(p, in, gas, env.interpreter)
+		// SYSCOIN
+		_, _, err := RunPrecompiledContract(p, in, gas, nil, nil)
 		if err.Error() != "out of gas" {
 			t.Errorf("Expected error [out of gas], got [%v]", err)
 		}
@@ -140,9 +138,9 @@ func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing
 	p := allPrecompiles[common.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
-	env := NewEVM(BlockContext{ReadDataHash: func(common.Hash) []byte { return []byte{} }}, TxContext{}, nil, params.TestChainConfig, Config{})
 	t.Run(test.Name, func(t *testing.T) {
-		_, _, err := RunPrecompiledContract(p, in, gas, env.interpreter)
+		// SYSCOIN
+		_, _, err := RunPrecompiledContract(p, in, gas, nil, nil)
 		if err.Error() != test.ExpectedError {
 			t.Errorf("Expected error [%v], got [%v]", test.ExpectedError, err)
 		}
@@ -167,14 +165,15 @@ func benchmarkPrecompiled(addr string, test precompiledTest, bench *testing.B) {
 		err  error
 		data = make([]byte, len(in))
 	)
-	env := NewEVM(BlockContext{ReadDataHash: func(common.Hash) []byte { return []byte{} }}, TxContext{}, nil, params.TestChainConfig, Config{})
+
 	bench.Run(fmt.Sprintf("%s-Gas=%d", test.Name, reqGas), func(bench *testing.B) {
 		bench.ReportAllocs()
 		start := time.Now()
 		bench.ResetTimer()
 		for i := 0; i < bench.N; i++ {
 			copy(data, in)
-			res, _, err = RunPrecompiledContract(p, data, reqGas, env.interpreter)
+			// SYSCOIN
+			res, _, err = RunPrecompiledContract(p, data, reqGas, nil, nil)
 		}
 		bench.StopTimer()
 		elapsed := uint64(time.Since(start))
@@ -228,7 +227,7 @@ func BenchmarkPrecompiledRipeMD(bench *testing.B) {
 	benchmarkPrecompiled("03", t, bench)
 }
 
-// Benchmarks the sample inputs from the identiy precompile.
+// Benchmarks the sample inputs from the identity precompile.
 func BenchmarkPrecompiledIdentity(bench *testing.B) {
 	t := precompiledTest{
 		Input:    "38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e000000000000000000000000000000000000000000000000000000000000001b38d18acb67d25c8bb9942764b62f18e17054f66a817bd4295423adf9ed98873e789d1dd423d25f0772d2748d60f7e4b81bb14d086eba8e8e8efb6dcff8a4ae02",
@@ -321,6 +320,8 @@ func TestPrecompiledBLS12381MapG2(t *testing.T)      { testJson("blsMapG2", "f12
 
 func TestPrecompiledPointEvaluation(t *testing.T) { testJson("pointEvaluation", "0a", t) }
 
+func BenchmarkPrecompiledPointEvaluation(b *testing.B) { benchJson("pointEvaluation", "0a", b) }
+
 func BenchmarkPrecompiledBLS12381G1Add(b *testing.B)      { benchJson("blsG1Add", "f0a", b) }
 func BenchmarkPrecompiledBLS12381G1Mul(b *testing.B)      { benchJson("blsG1Mul", "f0b", b) }
 func BenchmarkPrecompiledBLS12381G1MultiExp(b *testing.B) { benchJson("blsG1MultiExp", "f0c", b) }
@@ -377,7 +378,7 @@ func BenchmarkPrecompiledBLS12381G1MultiExpWorstCase(b *testing.B) {
 		Name:        "WorstCaseG1",
 		NoBenchmark: false,
 	}
-	benchmarkPrecompiled("0c", testcase, b)
+	benchmarkPrecompiled("f0c", testcase, b)
 }
 
 // BenchmarkPrecompiledBLS12381G2MultiExpWorstCase benchmarks the worst case we could find that still fits a gaslimit of 10MGas.
@@ -398,7 +399,5 @@ func BenchmarkPrecompiledBLS12381G2MultiExpWorstCase(b *testing.B) {
 		Name:        "WorstCaseG2",
 		NoBenchmark: false,
 	}
-	benchmarkPrecompiled("0f", testcase, b)
+	benchmarkPrecompiled("f0f", testcase, b)
 }
-
-func TestPrecompiledDataHashEvaluation(t *testing.T)  { testJson("dataHash", "0x63", t) }

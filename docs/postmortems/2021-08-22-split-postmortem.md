@@ -62,7 +62,7 @@ Since we had merged the removal of `ETH65`, if the entire network were to upgrad
 
 - Announce an upcoming security release on Tuesday (August 24th), via Twitter and official channels, plus reach out to downstream projects.
 - Temporarily revert the `ETH65`-removal.
-- Place the fix into the PR optimizing the jumpdest analysis [233381](https://github.com/ethereum/go-ethereum/pull/23381). 
+- Place the fix into the PR optimizing the jumpdest analysis [23381](https://github.com/ethereum/go-ethereum/pull/23381). 
 - After 4-8 weeks, release details about the vulnerability. 
 
 
@@ -87,7 +87,7 @@ The blocks on the 'bad' chain were investigated, and Tim Beiko reached out to th
 
 ### Disclosure decision
 
-The geth-team have an official policy regarding [vulnerability disclosure](https://geth.ethereum.org/docs/vulnerabilities/vulnerabilities). 
+The geth-team have an official policy regarding [vulnerability disclosure](https://geth.ethereum.org/docs/developers/geth-developer/disclosures). 
 
 > The primary goal for the Geth team is the health of the Ethereum network as a whole, and the decision whether or not to publish details about a serious vulnerability boils down to minimizing the risk and/or impact of discovery and exploitation.
 

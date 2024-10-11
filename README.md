@@ -1,12 +1,12 @@
 ## Go Ethereum
 
-Official Golang execution layer implementation of the Ethereum protocol.
+Golang execution layer implementation of the Ethereum protocol.
 
 [![API Reference](
-https://camo.githubusercontent.com/915b7be44ada53c290eb157634330494ebe3e30a/68747470733a2f2f676f646f632e6f72672f6769746875622e636f6d2f676f6c616e672f6764646f3f7374617475732e737667
+https://pkg.go.dev/badge/github.com/ethereum/go-ethereum
 )](https://pkg.go.dev/github.com/ethereum/go-ethereum?tab=doc)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ethereum/go-ethereum)](https://goreportcard.com/report/github.com/ethereum/go-ethereum)
-[![Travis](https://travis-ci.com/ethereum/go-ethereum.svg?branch=master)](https://travis-ci.com/ethereum/go-ethereum)
+[![Travis](https://app.travis-ci.com/ethereum/go-ethereum.svg?branch=master)](https://app.travis-ci.com/github/ethereum/go-ethereum)
 [![Discord](https://img.shields.io/badge/discord-join%20chat-blue.svg)](https://discord.gg/nthXNEv)
 
 Automated builds are available for stable releases and the unstable master branch. Binary
@@ -16,7 +16,7 @@ archives are published at https://geth.ethereum.org/downloads/.
 
 For prerequisites and detailed build instructions please read the [Installation Instructions](https://geth.ethereum.org/docs/getting-started/installing-geth).
 
-Building `geth` requires both a Go (version 1.19 or later) and a C compiler. You can install
+Building `geth` requires both a Go (version 1.22 or later) and a C compiler. You can install
 them using your favourite package manager. Once the dependencies are installed, run
 
 ```shell
@@ -42,7 +42,7 @@ directory.
 |  `abigen`  | Source code generator to convert Ethereum contract definitions into easy-to-use, compile-time type-safe Go packages. It operates on plain [Ethereum contract ABIs](https://docs.soliditylang.org/en/develop/abi-spec.html) with expanded functionality if the contract bytecode is also available. However, it also accepts Solidity source files, making development much more streamlined. Please see our [Native DApps](https://geth.ethereum.org/docs/developers/dapp-developer/native-bindings) page for details.                                  |
 | `bootnode` | Stripped down version of our Ethereum client implementation that only takes part in the network node discovery protocol, but does not run any of the higher level application protocols. It can be used as a lightweight bootstrap node to aid in finding peers in private networks.                                                                                                                                                                                                                                               |
 |   `evm`    | Developer utility version of the EVM (Ethereum Virtual Machine) that is capable of running bytecode snippets within a configurable environment and execution mode. Its purpose is to allow isolated, fine-grained debugging of EVM opcodes (e.g. `evm --code 60ff60ff --debug run`).                                                                                                                                                                                                                                               |
-| `rlpdump`  | Developer utility tool to convert binary RLP ([Recursive Length Prefix](https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp)) dumps (data encoding used by the Ethereum protocol both network as well as consensus wise) to user-friendlier hierarchical representation (e.g. `rlpdump --hex CE0183FFFFFFC4C304050583616263`).                                                                                                                                                  |
+| `rlpdump`  | Developer utility tool to convert binary RLP ([Recursive Length Prefix](https://ethereum.org/en/developers/docs/data-structures-and-encoding/rlp)) dumps (data encoding used by the Ethereum protocol both network as well as consensus wise) to user-friendlier hierarchical representation (e.g. `rlpdump --hex CE0183FFFFFFC4C304050583616263`).                                                                                                                                                                                |
 
 ## Running `geth`
 
@@ -89,7 +89,7 @@ This command will:
    This tool is optional and if you leave it out you can always attach it to an already running
    `geth` instance with `geth attach`.
 
-### A Full node on the Görli test network
+### A Full node on the Holesky test network
 
 Transitioning towards developers, if you'd like to play around with creating Ethereum
 contracts, you almost certainly would like to do that without any real money involved until
@@ -98,23 +98,23 @@ network, you want to join the **test** network with your node, which is fully eq
 the main network, but with play-Ether only.
 
 ```shell
-$ geth --goerli console
+$ geth --holesky console
 ```
 
 The `console` subcommand has the same meaning as above and is equally
 useful on the testnet too.
 
-Specifying the `--goerli` flag, however, will reconfigure your `geth` instance a bit:
+Specifying the `--holesky` flag, however, will reconfigure your `geth` instance a bit:
 
- * Instead of connecting to the main Ethereum network, the client will connect to the Görli
+ * Instead of connecting to the main Ethereum network, the client will connect to the Holesky 
    test network, which uses different P2P bootnodes, different network IDs and genesis
    states.
  * Instead of using the default data directory (`~/.ethereum` on Linux for example), `geth`
-   will nest itself one level deeper into a `goerli` subfolder (`~/.ethereum/goerli` on
+   will nest itself one level deeper into a `holesky` subfolder (`~/.ethereum/holesky` on
    Linux). Note, on OSX and Linux this also means that attaching to a running testnet node
    requires the use of a custom endpoint since `geth attach` will try to attach to a
    production node endpoint by default, e.g.,
-   `geth attach <datadir>/goerli/geth.ipc`. Windows users are not affected by
+   `geth attach <datadir>/holesky/geth.ipc`. Windows users are not affected by
    this.
 
 *Note: Although some internal protective measures prevent transactions from

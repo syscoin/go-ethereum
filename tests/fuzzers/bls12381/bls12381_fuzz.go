@@ -14,8 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build gofuzz
-// +build gofuzz
+//go:build cgo
+// +build cgo
 
 package bls
 
@@ -31,11 +31,47 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto/bls12381"
+	bls12381 "github.com/kilic/bls12-381"
 	blst "github.com/supranational/blst/bindings/go"
 )
 
-func FuzzCrossPairing(data []byte) int {
+func fuzzG1SubgroupChecks(data []byte) int {
+	input := bytes.NewReader(data)
+	kpG1, cpG1, blG1, err := getG1Points(input)
+	if err != nil {
+		return 0
+	}
+	inSubGroupKilic := bls12381.NewG1().InCorrectSubgroup(kpG1)
+	inSubGroupGnark := cpG1.IsInSubGroup()
+	inSubGroupBLST := blG1.InG1()
+	if inSubGroupKilic != inSubGroupGnark {
+		panic(fmt.Sprintf("differing subgroup check, kilic %v, gnark %v", inSubGroupKilic, inSubGroupGnark))
+	}
+	if inSubGroupKilic != inSubGroupBLST {
+		panic(fmt.Sprintf("differing subgroup check, kilic %v, blst %v", inSubGroupKilic, inSubGroupBLST))
+	}
+	return 1
+}
+
+func fuzzG2SubgroupChecks(data []byte) int {
+	input := bytes.NewReader(data)
+	kpG2, cpG2, blG2, err := getG2Points(input)
+	if err != nil {
+		return 0
+	}
+	inSubGroupKilic := bls12381.NewG2().InCorrectSubgroup(kpG2)
+	inSubGroupGnark := cpG2.IsInSubGroup()
+	inSubGroupBLST := blG2.InG2()
+	if inSubGroupKilic != inSubGroupGnark {
+		panic(fmt.Sprintf("differing subgroup check, kilic %v, gnark %v", inSubGroupKilic, inSubGroupGnark))
+	}
+	if inSubGroupKilic != inSubGroupBLST {
+		panic(fmt.Sprintf("differing subgroup check, kilic %v, blst %v", inSubGroupKilic, inSubGroupBLST))
+	}
+	return 1
+}
+
+func fuzzCrossPairing(data []byte) int {
 	input := bytes.NewReader(data)
 
 	// get random G1 points
@@ -51,7 +87,7 @@ func FuzzCrossPairing(data []byte) int {
 	}
 
 	// compute pairing using geth
-	engine := bls12381.NewPairingEngine()
+	engine := bls12381.NewEngine()
 	engine.AddPair(kpG1, kpG2)
 	kResult := engine.Result()
 
@@ -101,7 +137,7 @@ func massageBLST(in []byte) []byte {
 	return out
 }
 
-func FuzzCrossG1Add(data []byte) int {
+func fuzzCrossG1Add(data []byte) int {
 	input := bytes.NewReader(data)
 
 	// get random G1 points
@@ -139,7 +175,7 @@ func FuzzCrossG1Add(data []byte) int {
 	return 1
 }
 
-func FuzzCrossG2Add(data []byte) int {
+func fuzzCrossG2Add(data []byte) int {
 	input := bytes.NewReader(data)
 
 	// get random G2 points
@@ -177,10 +213,10 @@ func FuzzCrossG2Add(data []byte) int {
 	return 1
 }
 
-func FuzzCrossG1MultiExp(data []byte) int {
+func fuzzCrossG1MultiExp(data []byte) int {
 	var (
 		input        = bytes.NewReader(data)
-		gethScalars  []*big.Int
+		gethScalars  []*bls12381.Fr
 		gnarkScalars []fr.Element
 		gethPoints   []*bls12381.PointG1
 		gnarkPoints  []gnark.G1Affine
@@ -197,7 +233,7 @@ func FuzzCrossG1MultiExp(data []byte) int {
 		if err != nil {
 			break
 		}
-		gethScalars = append(gethScalars, s)
+		gethScalars = append(gethScalars, bls12381.NewFr().FromBytes(s.Bytes()))
 		var gnarkScalar = &fr.Element{}
 		gnarkScalar = gnarkScalar.SetBigInt(s)
 		gnarkScalars = append(gnarkScalars, *gnarkScalar)

@@ -20,7 +20,6 @@ package rawdb
 import (
 	"bytes"
 	"encoding/binary"
-
 	// SYSCOIN
 	"math/big"
 
@@ -83,6 +82,8 @@ var (
 	txIndexTailKey = []byte("TransactionIndexTail")
 
 	// fastTxLookupLimitKey tracks the transaction lookup limit during fast sync.
+	// This flag is deprecated, it's kept to avoid reporting errors when inspect
+	// database.
 	fastTxLookupLimitKey = []byte("FastTransactionLookupLimit")
 
 	// badBlockKey tracks the list of bad blocks seen by local
@@ -106,21 +107,29 @@ var (
 	blockBodyPrefix     = []byte("b") // blockBodyPrefix + num (uint64 big endian) + hash -> block body
 	blockReceiptsPrefix = []byte("r") // blockReceiptsPrefix + num (uint64 big endian) + hash -> block receipts
 
-	txLookupPrefix         = []byte("l") // txLookupPrefix + hash -> transaction/receipt lookup metadata
-	bloomBitsPrefix        = []byte("B") // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
-	SnapshotAccountPrefix  = []byte("a") // SnapshotAccountPrefix + account hash -> account trie value
-	SnapshotStoragePrefix  = []byte("o") // SnapshotStoragePrefix + account hash + storage hash -> storage trie value
-	CodePrefix             = []byte("c") // CodePrefix + code hash -> account code
-	nevmToSysPrefix        = []byte("x") // nevmToSysPrefix + nevm block hash -> nevmBlock
+	txLookupPrefix        = []byte("l") // txLookupPrefix + hash -> transaction/receipt lookup metadata
+	bloomBitsPrefix       = []byte("B") // bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
+	SnapshotAccountPrefix = []byte("a") // SnapshotAccountPrefix + account hash -> account trie value
+	SnapshotStoragePrefix = []byte("o") // SnapshotStoragePrefix + account hash + storage hash -> storage trie value
+	CodePrefix            = []byte("c") // CodePrefix + code hash -> account code
+	skeletonHeaderPrefix  = []byte("S") // skeletonHeaderPrefix + num (uint64 big endian) -> header
+
+	// SYSCOIN
 	blockNumToSysKeyPrefix = []byte("z") // blockNumToSysKeyPrefix + block number -> SYS block hash
 	dataHashesKeyPrefix    = []byte("y") // dataHashesKeyPrefix + block number -> versioned hashes
 	dataHashKeyPrefix      = []byte("w") // dataHashKeyPrefix + versioned hash -> versioned hash
-	skeletonHeaderPrefix   = []byte("S") // skeletonHeaderPrefix + num (uint64 big endian) -> header
 
 	// Path-based storage scheme of merkle patricia trie.
-	trieNodeAccountPrefix = []byte("A") // trieNodeAccountPrefix + hexPath -> trie node
-	trieNodeStoragePrefix = []byte("O") // trieNodeStoragePrefix + accountHash + hexPath -> trie node
+	TrieNodeAccountPrefix = []byte("A") // TrieNodeAccountPrefix + hexPath -> trie node
+	TrieNodeStoragePrefix = []byte("O") // TrieNodeStoragePrefix + accountHash + hexPath -> trie node
 	stateIDPrefix         = []byte("L") // stateIDPrefix + state root -> state id
+
+	// VerklePrefix is the database prefix for Verkle trie data, which includes:
+	// (a) Trie nodes
+	// (b) In-memory trie node journal
+	// (c) Persistent state ID
+	// (d) State ID lookups, etc.
+	VerklePrefix = []byte("v")
 
 	PreimagePrefix = []byte("secure-key-")       // PreimagePrefix + hash -> preimage
 	configPrefix   = []byte("ethereum-config-")  // config prefix for the db
@@ -138,6 +147,10 @@ var (
 	BloomTrieIndexPrefix = []byte("bltIndex-")
 
 	CliqueSnapshotPrefix = []byte("clique-")
+
+	BestUpdateKey         = []byte("update-")    // bigEndian64(syncPeriod) -> RLP(types.LightClientUpdate)  (nextCommittee only referenced by root hash)
+	FixedCommitteeRootKey = []byte("fixedRoot-") // bigEndian64(syncPeriod) -> committee root hash
+	SyncCommitteeKey      = []byte("committee-") // bigEndian64(syncPeriod) -> serialized committee
 
 	preimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
 	preimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
@@ -256,27 +269,6 @@ func configKey(hash common.Hash) []byte {
 	return append(configPrefix, hash.Bytes()...)
 }
 
-// SYSCOIN
-// nevmToSysKey = nevmToSysPrefix + hash
-func nevmToSysKey(hash common.Hash) []byte {
-	return append(nevmToSysPrefix, hash.Bytes()...)
-}
-
-// blockNumToSysKey = blockNumToSysKeyPrefix + blocknumber
-func blockNumToSysKey(n uint64) []byte {
-	return append(blockNumToSysKeyPrefix, []byte(new(big.Int).SetUint64(n).String())...)
-}
-// nevmAddressKey generates the key for storing NEVM addresses
-func nevmAddressKey() []byte {
-	return []byte("nevm-addresses")
-}
-func dataHashesKey(n uint64) []byte {
-	return append(dataHashesKeyPrefix, []byte(new(big.Int).SetUint64(n).String())...)
-}
-func dataHashKey(hash common.Hash) []byte {
-	return append(dataHashKeyPrefix, hash.Bytes()...)
-}
-
 // genesisStateSpecKey = genesisPrefix + hash
 func genesisStateSpecKey(hash common.Hash) []byte {
 	return append(genesisPrefix, hash.Bytes()...)
@@ -287,15 +279,15 @@ func stateIDKey(root common.Hash) []byte {
 	return append(stateIDPrefix, root.Bytes()...)
 }
 
-// accountTrieNodeKey = trieNodeAccountPrefix + nodePath.
+// accountTrieNodeKey = TrieNodeAccountPrefix + nodePath.
 func accountTrieNodeKey(path []byte) []byte {
-	return append(trieNodeAccountPrefix, path...)
+	return append(TrieNodeAccountPrefix, path...)
 }
 
-// storageTrieNodeKey = trieNodeStoragePrefix + accountHash + nodePath.
+// storageTrieNodeKey = TrieNodeStoragePrefix + accountHash + nodePath.
 func storageTrieNodeKey(accountHash common.Hash, path []byte) []byte {
-	buf := make([]byte, len(trieNodeStoragePrefix)+common.HashLength+len(path))
-	n := copy(buf, trieNodeStoragePrefix)
+	buf := make([]byte, len(TrieNodeStoragePrefix)+common.HashLength+len(path))
+	n := copy(buf, TrieNodeStoragePrefix)
 	n += copy(buf[n:], accountHash.Bytes())
 	copy(buf[n:], path)
 	return buf
@@ -316,16 +308,16 @@ func IsLegacyTrieNode(key []byte, val []byte) bool {
 // account trie node in path-based state scheme, and returns the resolved
 // node path if so.
 func ResolveAccountTrieNodeKey(key []byte) (bool, []byte) {
-	if !bytes.HasPrefix(key, trieNodeAccountPrefix) {
+	if !bytes.HasPrefix(key, TrieNodeAccountPrefix) {
 		return false, nil
 	}
 	// The remaining key should only consist a hex node path
 	// whose length is in the range 0 to 64 (64 is excluded
 	// since leaves are always wrapped with shortNode).
-	if len(key) >= len(trieNodeAccountPrefix)+common.HashLength*2 {
+	if len(key) >= len(TrieNodeAccountPrefix)+common.HashLength*2 {
 		return false, nil
 	}
-	return true, key[len(trieNodeAccountPrefix):]
+	return true, key[len(TrieNodeAccountPrefix):]
 }
 
 // IsAccountTrieNode reports whether a provided database entry is an account
@@ -339,20 +331,20 @@ func IsAccountTrieNode(key []byte) bool {
 // trie node in path-based state scheme, and returns the resolved account hash
 // and node path if so.
 func ResolveStorageTrieNode(key []byte) (bool, common.Hash, []byte) {
-	if !bytes.HasPrefix(key, trieNodeStoragePrefix) {
+	if !bytes.HasPrefix(key, TrieNodeStoragePrefix) {
 		return false, common.Hash{}, nil
 	}
 	// The remaining key consists of 2 parts:
 	// - 32 bytes account hash
 	// - hex node path whose length is in the range 0 to 64
-	if len(key) < len(trieNodeStoragePrefix)+common.HashLength {
+	if len(key) < len(TrieNodeStoragePrefix)+common.HashLength {
 		return false, common.Hash{}, nil
 	}
-	if len(key) >= len(trieNodeStoragePrefix)+common.HashLength+common.HashLength*2 {
+	if len(key) >= len(TrieNodeStoragePrefix)+common.HashLength+common.HashLength*2 {
 		return false, common.Hash{}, nil
 	}
-	accountHash := common.BytesToHash(key[len(trieNodeStoragePrefix) : len(trieNodeStoragePrefix)+common.HashLength])
-	return true, accountHash, key[len(trieNodeStoragePrefix)+common.HashLength:]
+	accountHash := common.BytesToHash(key[len(TrieNodeStoragePrefix) : len(TrieNodeStoragePrefix)+common.HashLength])
+	return true, accountHash, key[len(TrieNodeStoragePrefix)+common.HashLength:]
 }
 
 // IsStorageTrieNode reports whether a provided database entry is a storage
@@ -360,4 +352,20 @@ func ResolveStorageTrieNode(key []byte) (bool, common.Hash, []byte) {
 func IsStorageTrieNode(key []byte) bool {
 	ok, _, _ := ResolveStorageTrieNode(key)
 	return ok
+}
+
+// SYSCOIN
+// blockNumToSysKey = blockNumToSysKeyPrefix + blocknumber
+func blockNumToSysKey(n uint64) []byte {
+    return append(blockNumToSysKeyPrefix, []byte(new(big.Int).SetUint64(n).String())...)
+}
+// nevmAddressKey generates the key for storing NEVM addresses
+func nevmAddressKey() []byte {
+    return []byte("nevm-addresses")
+}
+func dataHashesKey(n uint64) []byte {
+    return append(dataHashesKeyPrefix, []byte(new(big.Int).SetUint64(n).String())...)
+}
+func dataHashKey(hash common.Hash) []byte {
+    return append(dataHashKeyPrefix, hash.Bytes()...)
 }

@@ -41,7 +41,9 @@ var customGenesisTests = []struct {
 			"mixhash"    : "0x0000000000000000000000000000000000000000000000000000000000000000",
 			"parentHash" : "0x0000000000000000000000000000000000000000000000000000000000000000",
 			"timestamp"  : "0x00",
-			"config"     : {}
+			"config"     : {
+				"terminalTotalDifficultyPassed": true
+			}
 		}`,
 		query:  "eth.getBlock(0).nonce",
 		result: "0x0000000000001338",
@@ -59,9 +61,10 @@ var customGenesisTests = []struct {
 			"parentHash" : "0x0000000000000000000000000000000000000000000000000000000000000000",
 			"timestamp"  : "0x00",
 			"config"     : {
-				"homesteadBlock" : 42,
-				"daoForkBlock"   : 141,
-				"daoForkSupport" : true
+				"homesteadBlock"                : 42,
+				"daoForkBlock"                  : 141,
+				"daoForkSupport"                : true,
+				"terminalTotalDifficultyPassed" : true
 			}
 		}`,
 		query:  "eth.getBlock(0).nonce",
@@ -111,8 +114,10 @@ func TestCustomBackend(t *testing.T) {
 			"mixhash"    : "0x0000000000000000000000000000000000000000000000000000000000000000",
 			"parentHash" : "0x0000000000000000000000000000000000000000000000000000000000000000",
 			"timestamp"  : "0x00",
-			"config"     : {}
-	}`
+			"config"     : {
+				"terminalTotalDifficultyPassed": true
+			}
+		}`
 	type backendTest struct {
 		initArgs   []string
 		initExpect string
@@ -171,19 +176,19 @@ func TestCustomBackend(t *testing.T) {
 		{ // Can't start pebble on top of leveldb
 			initArgs:   []string{"--db.engine", "leveldb"},
 			execArgs:   []string{"--db.engine", "pebble"},
-			execExpect: `Fatal: Could not open database: db.engine choice was pebble but found pre-existing leveldb database in specified data directory`,
+			execExpect: `Fatal: Failed to register the Ethereum service: db.engine choice was pebble but found pre-existing leveldb database in specified data directory`,
 		},
 		{ // Can't start leveldb on top of pebble
 			initArgs:   []string{"--db.engine", "pebble"},
 			execArgs:   []string{"--db.engine", "leveldb"},
-			execExpect: `Fatal: Could not open database: db.engine choice was leveldb but found pre-existing pebble database in specified data directory`,
+			execExpect: `Fatal: Failed to register the Ethereum service: db.engine choice was leveldb but found pre-existing pebble database in specified data directory`,
 		},
 		{ // Reject invalid backend choice
 			initArgs:   []string{"--db.engine", "mssql"},
 			initExpect: `Fatal: Invalid choice for db.engine 'mssql', allowed 'leveldb' or 'pebble'`,
-			// SYSCOIN Since the init fails, this will return the (default) mainnet genesis
+			// Since the init fails, this will return the (default) mainnet genesis
 			// block nonce
-			execExpect: `0x0000000000000000`,
+			execExpect: `0x0000000000000042`,
 		},
 	} {
 		if err := testfunc(t, tt); err != nil {

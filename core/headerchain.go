@@ -17,12 +17,9 @@
 package core
 
 import (
-	crand "crypto/rand"
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
-	mrand "math/rand"
 	"sync/atomic"
 	"time"
 
@@ -45,51 +42,44 @@ const (
 	SYSBlockCacheLimit = 50001
 )
 
-// HeaderChain implements the basic block header chain logic that is shared by
-// core.BlockChain and light.LightChain. It is not usable in itself, only as
-// a part of either structure.
+// HeaderChain implements the basic block header chain logic. It is not usable
+// in itself, but rather an internal structure of core.Blockchain.
 //
 // HeaderChain is responsible for maintaining the header chain including the
 // header query and updating.
 //
-// The components maintained by headerchain includes: (1) total difficulty
-// (2) header (3) block hash -> number mapping (4) canonical number -> hash mapping
-// and (5) head header flag.
+// The data components maintained by HeaderChain include:
 //
-// It is not thread safe either, the encapsulating chain structures should do
-// the necessary mutex locking/unlocking.
+// - total difficulty
+// - header
+// - block hash -> number mapping
+// - canonical number -> hash mapping
+// - head header flag.
+//
+// It is not thread safe, the encapsulating chain structures should do the
+// necessary mutex locking/unlocking.
 type HeaderChain struct {
 	config        *params.ChainConfig
 	chainDb       ethdb.Database
 	genesisHeader *types.Header
 
-	currentHeader     atomic.Value // Current head of the header chain (may be above the block chain!)
-	currentHeaderHash common.Hash  // Hash of the current head of the header chain (prevent recomputing all the time)
+	currentHeader     atomic.Pointer[types.Header] // Current head of the header chain (maybe above the block chain!)
+	currentHeaderHash common.Hash                  // Hash of the current head of the header chain (prevent recomputing all the time)
 
 	headerCache *lru.Cache[common.Hash, *types.Header]
 	tdCache     *lru.Cache[common.Hash, *big.Int] // most recent total difficulties
 	numberCache *lru.Cache[common.Hash, uint64]   // most recent block numbers
 	// SYSCOIN
-	NEVMCache     *lru.Cache[common.Hash, []byte] // Cache for NEVM blocks existing
 	SYSHashCache  *lru.Cache[uint64, []byte] // Cache for SYS hash
 	DataHashCache *lru.Cache[common.Hash, []byte] // Cache for Data availability
 	NEVMAddressCache *rawdb.NEVMAddressMapping
 	procInterrupt func() bool
-
-	rand   *mrand.Rand
-	engine consensus.Engine
-	// SYSCOIN
-	NevmBlockConnect *types.NEVMBlockConnect
+	engine        consensus.Engine
 }
 
 // NewHeaderChain creates a new HeaderChain structure. ProcInterrupt points
 // to the parent's interrupt semaphore.
 func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine consensus.Engine, procInterrupt func() bool) (*HeaderChain, error) {
-	// Seed a fast but crypto originating random generator
-	seed, err := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
-	if err != nil {
-		return nil, err
-	}
 	hc := &HeaderChain{
 		config:        config,
 		chainDb:       chainDb,
@@ -99,9 +89,7 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 		// SYSCOIN
 		SYSHashCache:  lru.NewCache[uint64, []byte](SYSBlockCacheLimit),
 		DataHashCache: lru.NewCache[common.Hash, []byte](SYSBlockCacheLimit),
-		NEVMCache:     lru.NewCache[common.Hash, []byte](headerCacheLimit),
 		procInterrupt: procInterrupt,
-		rand:          mrand.New(mrand.NewSource(seed.Int64())),
 		engine:        engine,
 	}
 	hc.genesisHeader = hc.GetHeaderByNumber(0)
@@ -255,32 +243,6 @@ func (hc *HeaderChain) WriteHeaders(headers []*types.Header) (int, error) {
 		}
 		parentKnown = alreadyKnown
 	}
-	// SYSCOIN
-	nevmBlockConnect := hc.NevmBlockConnect
-	if nevmBlockConnect != nil {
-		// Update the NEVM address mappings based on the block's diff
-		hasDiff := nevmBlockConnect.HasDiff()
-		if hasDiff {
-			// Retrieve the current NEVM address mappings from the database
-			mapping := hc.ReadNEVMAddressMapping()
-			for _, entry := range nevmBlockConnect.Diff.AddedMNNEVM {
-				mapping.AddNEVMAddress(common.BytesToAddress(entry.Address), entry.CollateralHeight)
-			}
-			for _, entry := range nevmBlockConnect.Diff.UpdatedMNNEVM {
-				mapping.UpdateNEVMAddress(common.BytesToAddress(entry.OldAddress), common.BytesToAddress(entry.NewAddress))
-			}
-			for _, entry := range nevmBlockConnect.Diff.RemovedMNNEVM {
-				mapping.RemoveNEVMAddress(common.BytesToAddress(entry.Address))
-			}
-		
-			// Persist the updated NEVM address mappings to the database
-			hc.WriteNEVMAddressMapping(batch, mapping)
-		}
-		proposedBlockNumber := nevmBlockConnect.Block.NumberU64()
-		hc.WriteNEVMMapping(batch, nevmBlockConnect.Block.Hash())
-		hc.WriteDataHashes(batch, proposedBlockNumber, nevmBlockConnect.VersionHashes)
-		hc.WriteSYSHash(batch, nevmBlockConnect.Sysblockhash, proposedBlockNumber)
-	}
 	// Skip the slow disk write of all headers if interrupted.
 	if hc.procInterrupt() {
 		log.Debug("Premature abort during headers import")
@@ -300,7 +262,7 @@ func (hc *HeaderChain) WriteHeaders(headers []*types.Header) (int, error) {
 // without the real blocks. Hence, writing headers directly should only be done
 // in two scenarios: pure-header mode of operation (light clients), or properly
 // separated header/block phases (non-archive clients).
-func (hc *HeaderChain) writeHeadersAndSetHead(headers []*types.Header, forker *ForkChoice) (*headerWriteResult, error) {
+func (hc *HeaderChain) writeHeadersAndSetHead(headers []*types.Header) (*headerWriteResult, error) {
 	inserted, err := hc.WriteHeaders(headers)
 	if err != nil {
 		return nil, err
@@ -316,15 +278,6 @@ func (hc *HeaderChain) writeHeadersAndSetHead(headers []*types.Header, forker *F
 			lastHeader: lastHeader,
 		}
 	)
-	// Ask the fork choicer if the reorg is necessary
-	if reorg, err := forker.ReorgNeeded(hc.CurrentHeader(), lastHeader); err != nil {
-		return nil, err
-	} else if !reorg {
-		if inserted != 0 {
-			result.status = SideStatTy
-		}
-		return result, nil
-	}
 	// Special case, all the inserted headers are already on the canonical
 	// header chain, skip the reorg operation.
 	if hc.GetCanonicalHash(lastHeader.Number.Uint64()) == lastHash && lastHeader.Number.Uint64() <= hc.CurrentHeader().Number.Uint64() {
@@ -338,7 +291,7 @@ func (hc *HeaderChain) writeHeadersAndSetHead(headers []*types.Header, forker *F
 	return result, nil
 }
 
-func (hc *HeaderChain) ValidateHeaderChain(chain []*types.Header, checkFreq int) (int, error) {
+func (hc *HeaderChain) ValidateHeaderChain(chain []*types.Header) (int, error) {
 	// Do a sanity check that the provided chain is actually ordered and linked
 	for i := 1; i < len(chain); i++ {
 		if chain[i].Number.Uint64() != chain[i-1].Number.Uint64()+1 {
@@ -351,32 +304,9 @@ func (hc *HeaderChain) ValidateHeaderChain(chain []*types.Header, checkFreq int)
 			return 0, fmt.Errorf("non contiguous insert: item %d is #%d [%x..], item %d is #%d [%x..] (parent [%x..])", i-1, chain[i-1].Number,
 				parentHash.Bytes()[:4], i, chain[i].Number, hash.Bytes()[:4], chain[i].ParentHash[:4])
 		}
-		// If the header is a banned one, straight out abort
-		if BadHashes[chain[i].ParentHash] {
-			return i - 1, ErrBannedHash
-		}
-		// If it's the last header in the cunk, we need to check it too
-		if i == len(chain)-1 && BadHashes[chain[i].Hash()] {
-			return i, ErrBannedHash
-		}
 	}
-
-	// Generate the list of seal verification requests, and start the parallel verifier
-	seals := make([]bool, len(chain))
-	if checkFreq != 0 {
-		// In case of checkFreq == 0 all seals are left false.
-		for i := 0; i <= len(seals)/checkFreq; i++ {
-			index := i*checkFreq + hc.rand.Intn(checkFreq)
-			if index >= len(seals) {
-				index = len(seals) - 1
-			}
-			seals[index] = true
-		}
-		// Last should always be verified to avoid junk.
-		seals[len(seals)-1] = true
-	}
-
-	abort, results := hc.engine.VerifyHeaders(hc, chain, seals)
+	// Start the parallel verifier
+	abort, results := hc.engine.VerifyHeaders(hc, chain)
 	defer close(abort)
 
 	// Iterate over the headers and ensure they all check out
@@ -405,11 +335,11 @@ func (hc *HeaderChain) ValidateHeaderChain(chain []*types.Header, checkFreq int)
 //
 // The returned 'write status' says if the inserted headers are part of the canonical chain
 // or a side chain.
-func (hc *HeaderChain) InsertHeaderChain(chain []*types.Header, start time.Time, forker *ForkChoice) (WriteStatus, error) {
+func (hc *HeaderChain) InsertHeaderChain(chain []*types.Header, start time.Time) (WriteStatus, error) {
 	if hc.procInterrupt() {
 		return 0, errors.New("aborted")
 	}
-	res, err := hc.writeHeadersAndSetHead(chain, forker)
+	res, err := hc.writeHeadersAndSetHead(chain)
 	if err != nil {
 		return 0, err
 	}
@@ -512,6 +442,70 @@ func (hc *HeaderChain) GetHeaderByHash(hash common.Hash) *types.Header {
 	return hc.GetHeader(hash, *number)
 }
 
+// HasHeader checks if a block header is present in the database or not.
+// In theory, if header is present in the database, all relative components
+// like td and hash->number should be present too.
+func (hc *HeaderChain) HasHeader(hash common.Hash, number uint64) bool {
+	if hc.numberCache.Contains(hash) || hc.headerCache.Contains(hash) {
+		return true
+	}
+	return rawdb.HasHeader(hc.chainDb, hash, number)
+}
+
+// GetHeaderByNumber retrieves a block header from the database by number,
+// caching it (associated with its hash) if found.
+func (hc *HeaderChain) GetHeaderByNumber(number uint64) *types.Header {
+	hash := rawdb.ReadCanonicalHash(hc.chainDb, number)
+	if hash == (common.Hash{}) {
+		return nil
+	}
+	return hc.GetHeader(hash, number)
+}
+
+// GetHeadersFrom returns a contiguous segment of headers, in rlp-form, going
+// backwards from the given number.
+// If the 'number' is higher than the highest local header, this method will
+// return a best-effort response, containing the headers that we do have.
+func (hc *HeaderChain) GetHeadersFrom(number, count uint64) []rlp.RawValue {
+	// If the request is for future headers, we still return the portion of
+	// headers that we are able to serve
+	if current := hc.CurrentHeader().Number.Uint64(); current < number {
+		if count > number-current {
+			count -= number - current
+			number = current
+		} else {
+			return nil
+		}
+	}
+	var headers []rlp.RawValue
+	// If we have some of the headers in cache already, use that before going to db.
+	hash := rawdb.ReadCanonicalHash(hc.chainDb, number)
+	if hash == (common.Hash{}) {
+		return nil
+	}
+	for count > 0 {
+		header, ok := hc.headerCache.Get(hash)
+		if !ok {
+			break
+		}
+		rlpData, _ := rlp.EncodeToBytes(header)
+		headers = append(headers, rlpData)
+		hash = header.ParentHash
+		count--
+		number--
+	}
+	// Read remaining from db
+	if count > 0 {
+		headers = append(headers, rawdb.ReadHeaderRange(hc.chainDb, number, count)...)
+	}
+	return headers
+}
+
+func (hc *HeaderChain) GetCanonicalHash(number uint64) common.Hash {
+	return rawdb.ReadCanonicalHash(hc.chainDb, number)
+}
+
+
 func (hc *HeaderChain) WriteNEVMAddressMapping(db ethdb.KeyValueWriter, mapping *rawdb.NEVMAddressMapping) {
 	rawdb.WriteNEVMAddressMapping(db, mapping)
 	hc.NEVMAddressCache = mapping
@@ -583,92 +577,11 @@ func (hc *HeaderChain) DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
 	rawdb.DeleteSYSHash(db, n)
 	hc.SYSHashCache.Remove(n)
 }
-func (hc *HeaderChain) HasNEVMMapping(hash common.Hash) bool {
-	if hc.NEVMCache.Contains(hash) {
-		return true
-	}
-	hasMapping := rawdb.HasNEVMMapping(hc.chainDb, hash)
-	if hasMapping {
-		hc.NEVMCache.Add(hash, []byte{0})
-	}
-	return hasMapping
-}
-func (hc *HeaderChain) DeleteNEVMMapping(db ethdb.KeyValueWriter, hash common.Hash) {
-	rawdb.DeleteNEVMMapping(db, hash)
-	hc.NEVMCache.Remove(hash)
-}
-func (hc *HeaderChain) WriteNEVMMapping(db ethdb.KeyValueWriter, hash common.Hash) {
-	rawdb.WriteNEVMMapping(db, hash)
-	hc.NEVMCache.Add(hash, []byte{0})
-}
-
-// HasHeader checks if a block header is present in the database or not.
-// In theory, if header is present in the database, all relative components
-// like td and hash->number should be present too.
-func (hc *HeaderChain) HasHeader(hash common.Hash, number uint64) bool {
-	if hc.numberCache.Contains(hash) || hc.headerCache.Contains(hash) {
-		return true
-	}
-	return rawdb.HasHeader(hc.chainDb, hash, number)
-}
-
-// GetHeaderByNumber retrieves a block header from the database by number,
-// caching it (associated with its hash) if found.
-func (hc *HeaderChain) GetHeaderByNumber(number uint64) *types.Header {
-	hash := rawdb.ReadCanonicalHash(hc.chainDb, number)
-	if hash == (common.Hash{}) {
-		return nil
-	}
-	return hc.GetHeader(hash, number)
-}
-
-// GetHeadersFrom returns a contiguous segment of headers, in rlp-form, going
-// backwards from the given number.
-// If the 'number' is higher than the highest local header, this method will
-// return a best-effort response, containing the headers that we do have.
-func (hc *HeaderChain) GetHeadersFrom(number, count uint64) []rlp.RawValue {
-	// If the request is for future headers, we still return the portion of
-	// headers that we are able to serve
-	if current := hc.CurrentHeader().Number.Uint64(); current < number {
-		if count > number-current {
-			count -= number - current
-			number = current
-		} else {
-			return nil
-		}
-	}
-	var headers []rlp.RawValue
-	// If we have some of the headers in cache already, use that before going to db.
-	hash := rawdb.ReadCanonicalHash(hc.chainDb, number)
-	if hash == (common.Hash{}) {
-		return nil
-	}
-	for count > 0 {
-		header, ok := hc.headerCache.Get(hash)
-		if !ok {
-			break
-		}
-		rlpData, _ := rlp.EncodeToBytes(header)
-		headers = append(headers, rlpData)
-		hash = header.ParentHash
-		count--
-		number--
-	}
-	// Read remaining from db
-	if count > 0 {
-		headers = append(headers, rawdb.ReadHeaderRange(hc.chainDb, number, count)...)
-	}
-	return headers
-}
-
-func (hc *HeaderChain) GetCanonicalHash(number uint64) common.Hash {
-	return rawdb.ReadCanonicalHash(hc.chainDb, number)
-}
 
 // CurrentHeader retrieves the current head header of the canonical chain. The
 // header is retrieved from the HeaderChain's internal cache.
 func (hc *HeaderChain) CurrentHeader() *types.Header {
-	return hc.currentHeader.Load().(*types.Header)
+	return hc.currentHeader.Load()
 }
 
 // SetCurrentHeader sets the in-memory head header marker of the canonical chan
@@ -803,7 +716,6 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 	hc.numberCache.Purge()
 	// SYSCOIN
 	hc.SYSHashCache.Purge()
-	hc.NEVMCache.Purge()
 	hc.DataHashCache.Purge()
 }
 

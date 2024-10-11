@@ -10,7 +10,6 @@
     "number": "995200",
     "stateRoot": "0x3579328470dd2aef5b9da69f5480cbe0d375e653b530ab3c1aee0da5e1ff4c94",
     "timestamp": "1455322761",
-    "totalDifficulty": "7077231809278509672",
     "alloc": {
       "0x200edd17f30485a8735878661960cd7a9a95733f": {
         "balance": "0x0",
@@ -95,14 +94,16 @@
             "topics": [
               "0xe1c52dc63b719ade82e8bea94cc41a0d5d28e4aaf536adb5e9cccc9ff8c1aeda"
             ],
-            "data": "0x0000000000000000000000004f5777744b500616697cb655dcb02ee6cd51deb5be96016bb57376da7a6d296e0a405ee1501778227dfa604df0a81cb1ae018598"
+            "data": "0x0000000000000000000000004f5777744b500616697cb655dcb02ee6cd51deb5be96016bb57376da7a6d296e0a405ee1501778227dfa604df0a81cb1ae018598",
+            "position": "0x0"
           },
           {
             "address": "0x200edd17f30485a8735878661960cd7a9a95733f",
             "topics": [
               "0xacbdb084c721332ac59f9b8e392196c9eb0e4932862da8eb9beaf0dad4f550da"
             ],
-            "data": "0x0000000000000000000000000000000000000000000000000000000000000000"
+            "data": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "position": "0x0"
           }
         ],
         "value": "0x8ac7230489e80000",
