@@ -1491,7 +1491,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		bc.WriteDataHashes(blockBatch, proposedBlockNumber, nevmBlockConnect.VersionHashes)
 		bc.WriteSYSHash(blockBatch, nevmBlockConnect.Sysblockhash, proposedBlockNumber)
 	} else if bc.GetChainConfig().SyscoinBlock != nil {
-		return errors.New("No SYS block connect provided")
+		return errors.New("no SYS block connect provided")
 	}
 	if err := blockBatch.Write(); err != nil {
 		log.Crit("Failed to write block into disk", "err", err)
