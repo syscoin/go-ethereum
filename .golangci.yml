@@ -24,9 +24,16 @@ linters:
     - staticcheck
     - bidichk
     - durationcheck
-    - exportloopref
+    - copyloopvar
     - whitespace
-
+    - revive # only certain checks enabled
+    - durationcheck
+    - gocheckcompilerdirectives
+    - reassign
+    - mirror
+    - tenv
+    ### linters we tried and will not be using:
+    ###
     # - structcheck # lots of false positives
     # - errcheck #lot of false positives
     # - contextcheck
