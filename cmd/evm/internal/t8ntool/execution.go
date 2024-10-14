@@ -367,9 +367,9 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		statedb.AddBalance(w.Address, uint256.MustFromBig(amount), tracing.BalanceIncreaseWithdrawal)
 	}
 
-	// Gather the execution-layer triggered requests.
+	// SYSCOIN Gather the execution-layer triggered requests.
 	var requests [][]byte
-	if chainConfig.IsPrague(vmContext.BlockNumber, vmContext.Time) {
+	if !chainConfig.IsSyscoin(vmContext.BlockNumber) && chainConfig.IsPrague(vmContext.BlockNumber, vmContext.Time) {
 		// EIP-6110 deposits
 		var allLogs []*types.Log
 		for _, receipt := range receipts {
