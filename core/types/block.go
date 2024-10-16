@@ -228,7 +228,7 @@ type Block struct {
 	// inter-peer block relay.
 	ReceivedAt   time.Time
 	ReceivedFrom interface{}
-		// SYSCOIN
+	// SYSCOIN
 	NevmBlockConnect *NEVMBlockConnect
 }
 
