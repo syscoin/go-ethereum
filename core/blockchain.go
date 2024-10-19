@@ -1433,9 +1433,9 @@ func (bc *BlockChain) writeBlockWithoutState(block *types.Block, td *big.Int) (e
 	return nil
 }
 
-// SYSCOIN WriteKnownBlock updates the head block flag with a known block
+// writeKnownBlock updates the head block flag with a known block
 // and introduces chain reorg if necessary.
-func (bc *BlockChain) WriteKnownBlock(block *types.Block) error {
+func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 	current := bc.CurrentBlock()
 	if block.ParentHash() != current.Hash() {
 		if err := bc.reorg(current, block); err != nil {
@@ -1445,27 +1445,7 @@ func (bc *BlockChain) WriteKnownBlock(block *types.Block) error {
 	bc.writeHeadBlock(block)
 	return nil
 }
-
-// writeBlockWithState writes block, metadata and corresponding state data to the
-// database.
-func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, statedb *state.StateDB) error {
-	// Calculate the total difficulty of the block
-	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
-	if ptd == nil {
-		return consensus.ErrUnknownAncestor
-	}
-	// Make sure no inconsistent state is leaked during insertion
-	externTd := new(big.Int).Add(block.Difficulty(), ptd)
-
-	// Irrelevant of the canonical status, write the block itself to the database.
-	//
-	// Note all the components of block(td, hash->number map, header, body, receipts)
-	// should be written atomically. BlockBatch is used for containing all components.
-	blockBatch := bc.db.NewBatch()
-	rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
-	rawdb.WriteBlock(blockBatch, block)
-	rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
-	rawdb.WritePreimages(blockBatch, statedb.Preimages())
+func (bc *BlockChain) writeNEVMData(blockBatch ethdb.KeyValueWriter, block* types.Block) error {
 	// SYSCOIN
 	nevmBlockConnect := block.NevmBlockConnect
 	if nevmBlockConnect != nil {
@@ -1493,7 +1473,33 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	} else if bc.GetChainConfig().SyscoinBlock != nil {
 		return errors.New("no SYS block connect provided")
 	}
-	if err := blockBatch.Write(); err != nil {
+	return nil
+}
+// writeBlockWithState writes block, metadata and corresponding state data to the
+// database.
+func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, statedb *state.StateDB) error {
+	// Calculate the total difficulty of the block
+	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
+	if ptd == nil {
+		return consensus.ErrUnknownAncestor
+	}
+	// Make sure no inconsistent state is leaked during insertion
+	externTd := new(big.Int).Add(block.Difficulty(), ptd)
+
+	// Irrelevant of the canonical status, write the block itself to the database.
+	//
+	// Note all the components of block(td, hash->number map, header, body, receipts)
+	// should be written atomically. BlockBatch is used for containing all components.
+	blockBatch := bc.db.NewBatch()
+	rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
+	rawdb.WriteBlock(blockBatch, block)
+	rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
+	rawdb.WritePreimages(blockBatch, statedb.Preimages())
+	err := bc.writeNEVMData(blockBatch, block)
+	if err != nil {
+		log.Crit("Failed to write block into disk", "err", err)
+	}
+	if err = blockBatch.Write(); err != nil {
 		log.Crit("Failed to write block into disk", "err", err)
 	}
 	// Commit all cached state changes into underlying memory database.
@@ -1695,8 +1701,18 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		// head full block(new pivot point).
 		for block != nil && bc.skipBlock(err, it) {
 			log.Debug("Writing previously known block", "number", block.Number(), "hash", block.Hash())
+			if err := bc.writeKnownBlock(block); err != nil {
+				return nil, it.index, err
+			}
 			// SYSCOIN
-			if err := bc.WriteKnownBlock(block); err != nil {
+			blockBatch := bc.db.NewBatch()
+			err = bc.writeNEVMData(blockBatch, block)
+			if err != nil {
+				log.Crit("Failed to previously known block into disk", "err", err)
+				return nil, it.index, err
+			}
+			if err = blockBatch.Write(); err != nil {
+				log.Crit("Failed to previously known block into disk", "err", err)
 				return nil, it.index, err
 			}
 			lastCanon = block
@@ -1740,7 +1756,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 
 	// Track the singleton witness from this chain insertion (if any)
 	var witness *stateless.Witness
-
 	for ; block != nil && err == nil || errors.Is(err, ErrKnownBlock); block, err = it.next() {
 		// If the chain is terminating, stop processing blocks
 		if bc.insertStopped() {
@@ -1776,8 +1791,18 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 				log.Error("Please file an issue, skip known block execution without receipt",
 					"hash", block.Hash(), "number", block.NumberU64())
 			}
+			if err := bc.writeKnownBlock(block); err != nil {
+				return nil, it.index, err
+			}
 			// SYSCOIN
-			if err := bc.WriteKnownBlock(block); err != nil {
+			blockBatch := bc.db.NewBatch()
+			err = bc.writeNEVMData(blockBatch, block)
+			if err != nil {
+				log.Crit("Failed to previously known block into disk", "err", err)
+				return nil, it.index, err
+			}
+			if err = blockBatch.Write(); err != nil {
+				log.Crit("Failed to previously known block into disk", "err", err)
 				return nil, it.index, err
 			}
 			stats.processed++
@@ -1843,7 +1868,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 				}(time.Now(), followup, throwaway)
 			}
 		}
-
 		// The traced section of block import.
 		res, err := bc.processBlock(block, statedb, start, setHead)
 		followupInterrupt.Store(true)
@@ -2297,7 +2321,9 @@ func (bc *BlockChain) reorg(oldHead *types.Header, newHead *types.Block) error {
 	} else {
 		// len(newChain) == 0 && len(oldChain) > 0
 		// rewind the canonical chain to a lower point.
-		log.Error("Impossible reorg, please file an issue", "oldnum", oldBlock.Number(), "oldhash", oldBlock.Hash(), "oldblocks", len(oldChain), "newnum", newBlock.Number(), "newhash", newBlock.Hash(), "newblocks", len(newChain))
+		if bc.GetChainConfig().SyscoinBlock == nil {
+			log.Error("Impossible reorg, please file an issue", "oldnum", oldBlock.Number(), "oldhash", oldBlock.Hash(), "oldblocks", len(oldChain), "newnum", newBlock.Number(), "newhash", newBlock.Hash(), "newblocks", len(newChain))
+		}
 	}
 	// Acquire the tx-lookup lock before mutation. This step is essential
 	// as the txlookups should be changed atomically, and all subsequent

@@ -392,11 +392,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if parent == nil {
 			return errors.New("deleteBlock: NEVM tip parent block not found")
 		}
-		err := eth.blockchain.WriteKnownBlock(parent)
+		headHash, err := eth.blockchain.SetCanonical(parent)
 		if err != nil {
 			return err
 		}
-		if eth.blockchain.CurrentBlock().Number.Uint64() != (currentNumber - 1) {
+		if parent.Hash() != headHash {
 			return errors.New("deleteBlock: Block number post-write does not match")
 		}
 		batch := eth.ChainDb().NewBatch()
