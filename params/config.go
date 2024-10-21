@@ -109,6 +109,8 @@ var (
 		NexusBlock:          big.NewInt(600000),
 		LondonBlock:         big.NewInt(1),
 		CancunTime:          newUint64(1675118284),
+		TerminalTotalDifficulty: big.NewInt(1),
+		TerminalTotalDifficultyPassed: true,
 		Ethash:              nil,
 	}
 	// HoleskyChainConfig contains the chain parameters to run a node on the Holesky test network.
