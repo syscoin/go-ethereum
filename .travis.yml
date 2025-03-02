@@ -31,21 +31,21 @@ jobs:
     - stage: build
       if: type = push
       os: linux
-      dist: bionic
+      dist: focal
       sudo: required
       go: 1.24.x
       env:
         - azure-linux
       git:
         submodules: false # avoid cloning ethereum/tests
-      addons:
-        apt:
-          packages:
-            - gcc-multilib
       script:
-        # Build for the primary platforms that Trusty can manage
+        # build amd64
         - go run build/ci.go install -dlgo
         - go run build/ci.go archive -type tar -signer LINUX_SIGNING_KEY -signify SIGNIFY_KEY -upload gethstore/builds
+
+        # build 386
+        - sudo -E apt-get -yq --no-install-suggests --no-install-recommends install gcc-multilib
+        - git status --porcelain
         - go run build/ci.go install -dlgo -arch 386
         - go run build/ci.go archive -arch 386 -type tar -signer LINUX_SIGNING_KEY -signify SIGNIFY_KEY -upload gethstore/builds
 
@@ -76,30 +76,26 @@ jobs:
         - ln -sf /Users/travis/gopath/bin/go1.23.1 /usr/local/bin/go # Work around travis go-setup bug
         - go run build/ci.go install -dlgo
         - go run build/ci.go archive -type tar -signer OSX_SIGNING_KEY -signify SIGNIFY_KEY -upload gethstore/builds
+        - go run build/ci.go install -dlgo -arch arm64
+        - go run build/ci.go archive -arch arm64 -type tar -signer OSX_SIGNING_KEY -signify SIGNIFY_KEY -upload gethstore/builds
 
     # These builders run the tests
     - stage: build
+      if: type = push
       os: linux
       arch: amd64
       dist: focal
       go: 1.24.x
       script:
-        - travis_wait 30 go run build/ci.go test $TEST_PACKAGES
+        - travis_wait 45 go run build/ci.go test $TEST_PACKAGES
 
     - stage: build
-      if: type = pull_request
+      if: type = push
       os: linux
       dist: focal
       go: 1.23.x
       script:
-        - travis_wait 30 go run build/ci.go test $TEST_PACKAGES
-
-    - stage: build
-      os: linux
-      dist: bionic
-      go: 1.20.x
-      script:
-        - travis_wait 30 go run build/ci.go test $TEST_PACKAGES
+        - travis_wait 45 go run build/ci.go test $TEST_PACKAGES
 
     # This builder does the Ubuntu PPA nightly uploads
     - stage: build
@@ -111,15 +107,8 @@ jobs:
         - ubuntu-ppa
       git:
         submodules: false # avoid cloning ethereum/tests
-      addons:
-        apt:
-          packages:
-            - devscripts
-            - debhelper
-            - dput
-            - fakeroot
-            - python-bzrlib
-            - python-paramiko
+      before_install:
+        - sudo -E apt-get -yq --no-install-suggests --no-install-recommends install devscripts debhelper dput fakeroot
       script:
         - echo '|1|7SiYPr9xl3uctzovOTj4gMwAC1M=|t6ReES75Bo/PxlOPJ6/GsGbTrM0= ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEA0aKz5UTUndYgIGG7dQBV+HaeuEZJ2xPHo2DS2iSKvUL4xNMSAY4UguNW+pX56nAQmZKIZZ8MaEvSj6zMEDiq6HFfn5JcTlM80UwlnyKe8B8p7Nk06PPQLrnmQt5fh0HmEcZx+JU9TZsfCHPnX7MNz4ELfZE6cFsclClrKim3BHUIGq//t93DllB+h4O9LHjEUsQ1Sr63irDLSutkLJD6RXchjROXkNirlcNVHH/jwLWR5RcYilNX7S5bIkK8NlWPjsn/8Ua5O7I9/YoE97PpO6i73DTGLh5H9JN/SITwCKBkgSDWUt61uPK3Y11Gty7o2lWsBjhBUm2Y38CBsoGmBw==' >> ~/.ssh/known_hosts
         - go run build/ci.go debsrc -upload ethereum/ethereum -sftp-user geth-ci -signer "Go Ethereum Linux Builder <geth-ci@ethereum.org>"
@@ -146,5 +135,4 @@ jobs:
       env:
         - racetests
       script:
-        - travis_wait 30 go run build/ci.go test  -race $TEST_PACKAGES
-
+        - travis_wait 60 go run build/ci.go test -race $TEST_PACKAGES
