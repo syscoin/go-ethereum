@@ -12,7 +12,7 @@
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>
+// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 package trienode
 
@@ -151,6 +151,15 @@ func (set *NodeSet) AddLeaf(parent common.Hash, blob []byte) {
 // Size returns the number of dirty nodes in set.
 func (set *NodeSet) Size() (int, int) {
 	return set.updates, set.deletes
+}
+
+// HashSet returns a set of trie nodes keyed by node hash.
+func (set *NodeSet) HashSet() map[common.Hash][]byte {
+	ret := make(map[common.Hash][]byte, len(set.Nodes))
+	for _, n := range set.Nodes {
+		ret[n.Hash] = n.Blob
+	}
+	return ret
 }
 
 // Summary returns a string-representation of the NodeSet.

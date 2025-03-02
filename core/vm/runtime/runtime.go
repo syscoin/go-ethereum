@@ -65,31 +65,30 @@ func setDefaults(cfg *Config) {
 			cancunTime   = uint64(0)
 		)
 		cfg.ChainConfig = &params.ChainConfig{
-			ChainID:                       big.NewInt(1),
-			HomesteadBlock:                new(big.Int),
-			DAOForkBlock:                  new(big.Int),
-			DAOForkSupport:                false,
-			EIP150Block:                   new(big.Int),
-			EIP155Block:                   new(big.Int),
-			EIP158Block:                   new(big.Int),
-			ByzantiumBlock:                new(big.Int),
-			ConstantinopleBlock:           new(big.Int),
-			PetersburgBlock:               new(big.Int),
-			IstanbulBlock:                 new(big.Int),
-			MuirGlacierBlock:              new(big.Int),
-			BerlinBlock:                   new(big.Int),
-			LondonBlock:                   new(big.Int),
+			ChainID:                 big.NewInt(1),
+			HomesteadBlock:          new(big.Int),
+			DAOForkBlock:            new(big.Int),
+			DAOForkSupport:          false,
+			EIP150Block:             new(big.Int),
+			EIP155Block:             new(big.Int),
+			EIP158Block:             new(big.Int),
+			ByzantiumBlock:          new(big.Int),
+			ConstantinopleBlock:     new(big.Int),
+			PetersburgBlock:         new(big.Int),
+			IstanbulBlock:           new(big.Int),
+			MuirGlacierBlock:        new(big.Int),
+			BerlinBlock:             new(big.Int),
+			LondonBlock:             new(big.Int),
 			// SYSCOIN
 			SyscoinBlock: nil,
 			RolluxBlock:  nil,
 			NexusBlock:   nil,
-			ArrowGlacierBlock:             nil,
-			GrayGlacierBlock:              nil,
-			TerminalTotalDifficulty:       big.NewInt(0),
-			TerminalTotalDifficultyPassed: true,
-			MergeNetsplitBlock:            nil,
-			ShanghaiTime:                  &shanghaiTime,
-			CancunTime:                    &cancunTime}
+			ArrowGlacierBlock:       nil,
+			GrayGlacierBlock:        nil,
+			TerminalTotalDifficulty: big.NewInt(0),
+			MergeNetsplitBlock:      nil,
+			ShanghaiTime:            &shanghaiTime,
+			CancunTime:              &cancunTime}
 	}
 	if cfg.Difficulty == nil {
 		cfg.Difficulty = new(big.Int)
@@ -133,10 +132,7 @@ func setDefaults(cfg *Config) {
 	if cfg.BlobBaseFee == nil {
 		cfg.BlobBaseFee = big.NewInt(params.BlobTxMinBlobGasprice)
 	}
-	// Merge indicators
-	if t := cfg.ChainConfig.ShanghaiTime; cfg.ChainConfig.TerminalTotalDifficultyPassed || (t != nil && *t == 0) {
-		cfg.Random = &(common.Hash{})
-	}
+	cfg.Random = &(common.Hash{})
 }
 
 // Execute executes the code using the input as call data during the execution.
@@ -156,7 +152,6 @@ func Execute(code, input []byte, cfg *Config) ([]byte, *state.StateDB, error) {
 	var (
 		address = common.BytesToAddress([]byte("contract"))
 		vmenv   = NewEnv(cfg)
-		sender  = vm.AccountRef(cfg.Origin)
 		rules   = cfg.ChainConfig.Rules(vmenv.Context.BlockNumber, vmenv.Context.Random != nil, vmenv.Context.Time)
 	)
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
@@ -170,13 +165,16 @@ func Execute(code, input []byte, cfg *Config) ([]byte, *state.StateDB, error) {
 	// set the receiver's (the executing contract) code for execution.
 	cfg.State.SetCode(address, code)
 	// Call the code with the given configuration.
-	ret, _, err := vmenv.Call(
-		sender,
+	ret, leftOverGas, err := vmenv.Call(
+		cfg.Origin,
 		common.BytesToAddress([]byte("contract")),
 		input,
 		cfg.GasLimit,
 		uint256.MustFromBig(cfg.Value),
 	)
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
+		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas}, err)
+	}
 	return ret, cfg.State, err
 }
 
@@ -191,9 +189,8 @@ func Create(input []byte, cfg *Config) ([]byte, common.Address, uint64, error) {
 		cfg.State, _ = state.New(types.EmptyRootHash, state.NewDatabaseForTesting())
 	}
 	var (
-		vmenv  = NewEnv(cfg)
-		sender = vm.AccountRef(cfg.Origin)
-		rules  = cfg.ChainConfig.Rules(vmenv.Context.BlockNumber, vmenv.Context.Random != nil, vmenv.Context.Time)
+		vmenv = NewEnv(cfg)
+		rules = cfg.ChainConfig.Rules(vmenv.Context.BlockNumber, vmenv.Context.Random != nil, vmenv.Context.Time)
 	)
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
 		cfg.EVMConfig.Tracer.OnTxStart(vmenv.GetVMContext(), types.NewTx(&types.LegacyTx{Data: input, Value: cfg.Value, Gas: cfg.GasLimit}), cfg.Origin)
@@ -204,11 +201,14 @@ func Create(input []byte, cfg *Config) ([]byte, common.Address, uint64, error) {
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, nil, vm.ActivePrecompiles(rules), nil)
 	// Call the code with the given configuration.
 	code, address, leftOverGas, err := vmenv.Create(
-		sender,
+		cfg.Origin,
 		input,
 		cfg.GasLimit,
 		uint256.MustFromBig(cfg.Value),
 	)
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
+		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas}, err)
+	}
 	return code, address, leftOverGas, err
 }
 
@@ -222,7 +222,6 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 
 	var (
 		vmenv   = NewEnv(cfg)
-		sender  = vm.AccountRef(cfg.Origin)
 		statedb = cfg.State
 		rules   = cfg.ChainConfig.Rules(vmenv.Context.BlockNumber, vmenv.Context.Random != nil, vmenv.Context.Time)
 	)
@@ -236,11 +235,14 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 
 	// Call the code with the given configuration.
 	ret, leftOverGas, err := vmenv.Call(
-		sender,
+		cfg.Origin,
 		address,
 		input,
 		cfg.GasLimit,
 		uint256.MustFromBig(cfg.Value),
 	)
+	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
+		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas}, err)
+	}
 	return ret, leftOverGas, err
 }
