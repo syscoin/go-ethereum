@@ -69,10 +69,6 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(statedb)
 	}
-	// SYSCOIN
-	if p.config.NexusBlock != nil && p.config.NexusBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyNexusHardFork(statedb)
-	}
 	var (
 		context vm.BlockContext
 		signer  = types.MakeSigner(p.config, header.Number, header.Time)

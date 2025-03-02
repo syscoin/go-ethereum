@@ -461,7 +461,7 @@ func (b *simBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte
 }
 func (b *simBackend) GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error) {
 	return []byte{}, nil
-
+}
 func (b *simBackend) ChainConfig() *params.ChainConfig {
 	return b.b.ChainConfig()
 }
