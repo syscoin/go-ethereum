@@ -117,6 +117,7 @@ type Ethereum struct {
 	shutdownTracker *shutdowncheck.ShutdownTracker // Tracks if and when the node has shutdown ungracefully
 	// SYSCOIN
 	wgNEVM            sync.WaitGroup
+	wg     			  sync.WaitGroup
 	zmqRep            *ZMQRep
 	timeLastBlock     int64
 }
@@ -359,39 +360,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil
 	}
 	
-	// start networking sync once we start inserting chain meaning we are likely finished with IBD
-	go func(eth *Ethereum) {
-		sub := eth.eventMux.Subscribe(downloader.StartNetworkEvent{})
-		defer sub.Unsubscribe()
-		for {
-			event := <-sub.Chan()
-			if event == nil {
-				continue
-			}
-			switch event.Data.(type) {
-			case downloader.StartNetworkEvent:
-				eth.lock.Lock()
-				eth.timeLastBlock = time.Now().Unix()
-				eth.lock.Unlock()
-				log.Info("Attempt to start networking/peering...")
-				for {
-					time.Sleep(100 * time.Millisecond)
-					eth.lock.Lock()
-					// ensure 5 seconds has passed between blocks before we start peering so we are sure sync has finished
-					if time.Now().Unix()-eth.timeLastBlock >= 5 {
-						log.Info("Networking and peering start...")
-						eth.handler.peers.SetOpen()
-						eth.p2pServer.Start()
-						eth.Downloader().DoneEvent()
-						eth.handler.synced.Store(true)
-						eth.lock.Unlock()
-						return
-					}
-					eth.lock.Unlock()
-				}
-			}
-		}
-	}(eth)
+	
 
 	deleteBlock := func(nevmBlockDisconnect *types.NEVMBlockDisconnect, eth *Ethereum) error {
 		current := eth.blockchain.CurrentBlock()
@@ -444,6 +413,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if eth.blockchain.GetChainConfig().SyscoinBlock != nil {
 		eth.zmqRep = NewZMQRep(stack, eth, config.NEVMPubEP, NEVMIndex{createBlock, addBlock, deleteBlock})
 	}
+	// SYSCOIN
+	eth.wg.Add(1)
+    go eth.networkingLoop()
 	return eth, nil
 }
 
@@ -462,6 +434,58 @@ func makeExtraData(extra []byte) []byte {
 		extra = nil
 	}
 	return extra
+}
+// SYSCOIN start networking sync once we start inserting chain meaning we are likely finished with IBD
+func (eth *Ethereum) networkingLoop() {
+	defer eth.wg.Done()
+
+	sub := eth.eventMux.Subscribe(downloader.StartNetworkEvent{})
+	defer sub.Unsubscribe()
+
+	for {
+		select {
+		case <-eth.closeBloomHandler:
+			return
+
+		case event, ok := <-sub.Chan():
+			if !ok || event == nil {
+				continue
+			}
+			switch event.Data.(type) {
+			case downloader.StartNetworkEvent:
+				log.Info("Received StartNetworkEvent, waiting for block arrival to finish (5 seconds of inactivity)...")
+				if eth.waitForSyncCompletion() {
+					log.Info("5 seconds passed without new blocks. Starting network...")
+					eth.handler.peers.SetOpen()
+					eth.p2pServer.Start()
+					eth.Downloader().DoneEvent()
+					eth.handler.synced.Store(true)
+				}
+				return
+			}
+		}
+	}
+}
+
+// Waits until no new blocks arrive for 5 consecutive seconds
+func (eth *Ethereum) waitForSyncCompletion() bool {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-eth.closeBloomHandler:
+			return false
+		case <-ticker.C:
+			eth.lock.Lock()
+			elapsed := time.Now().Unix() - eth.timeLastBlock
+			eth.lock.Unlock()
+
+			if elapsed >= 5 {
+				return true
+			}
+		}
+	}
 }
 
 // APIs return the collection of RPC services the ethereum package offers.
@@ -597,6 +621,7 @@ func (s *Ethereum) Stop() error {
 	s.chainDb.Close()
 	s.eventMux.Stop()
 	// SYSCOIN
+	s.wg.Wait()
 	s.wgNEVM.Wait()
 	if s.zmqRep != nil {
 		s.zmqRep.Close()
