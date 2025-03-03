@@ -492,9 +492,6 @@ func (hc *HeaderChain) ReadNEVMAddressMapping() *rawdb.NEVMAddressMapping {
 	}
 	// sanity in case it doesn't exist in cache
 	addressMapping := rawdb.ReadNEVMAddressMapping(hc.chainDb)
-	if len(addressMapping.AddressMappings) == 0 {
-		return nil
-	}
 	hc.NEVMAddressCache = addressMapping
 	return addressMapping
 }
