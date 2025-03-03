@@ -124,8 +124,8 @@ func (beacon *Beacon) VerifyHeader(chain consensus.ChainHeaderReader, header *ty
 	if parent.Difficulty.Sign() == 0 && header.Difficulty.Sign() > 0 {
 		return consensus.ErrInvalidTerminalBlock
 	}
-	// Check >0 TDs with pre-merge, --0 TDs with post-merge rules
-	if header.Difficulty.Sign() > 0 {
+	// SYSCOIN Check >0 TDs with pre-merge, --0 TDs with post-merge rules
+	if chain.Config().SyscoinBlock == nil && header.Difficulty.Sign() > 0 {
 		return beacon.ethone.VerifyHeader(chain, header)
 	}
 	// SYSCOIN
@@ -156,6 +156,10 @@ func (beacon *Beacon) splitHeaders(headers []*types.Header) ([]*types.Header, []
 // a results channel to retrieve the async verifications.
 // VerifyHeaders expect the headers to be ordered and continuous.
 func (beacon *Beacon) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header) (chan<- struct{}, <-chan error) {
+	// SYSCOIN
+	if chain.Config().SyscoinBlock != nil {
+		return beacon.verifyHeaders(chain, headers, nil)
+	}
 	preHeaders, postHeaders := beacon.splitHeaders(headers)
 	if len(postHeaders) == 0 {
 		return beacon.ethone.VerifyHeaders(chain, headers)

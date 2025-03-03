@@ -85,7 +85,7 @@ var (
 		BerlinBlock:         big.NewInt(0),
 		SyscoinBlock:        big.NewInt(0),
 		RolluxBlock:         big.NewInt(268500),
-		NexusBlock:          big.NewInt(600000),
+		NexusBlock:          big.NewInt(690000),
 		LondonBlock:         big.NewInt(1),
 		TerminalTotalDifficulty: big.NewInt(1),
 		ShanghaiTime:                  newUint64(1679618404),
