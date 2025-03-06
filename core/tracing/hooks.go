@@ -250,7 +250,9 @@ const (
 	BalanceIncreaseDaoContract BalanceChangeReason = 8
 	// BalanceDecreaseDaoAccount is ether taken from a DAO account to be moved to the refund contract.
 	BalanceDecreaseDaoAccount BalanceChangeReason = 9
-
+	// SYSCOIN
+	BalanceIncreaseVaultManagerContract BalanceChangeReason = 100
+	BalanceDecreaseVaultManagerAccount BalanceChangeReason = 101
 	// BalanceChangeTransfer is ether transferred via a call.
 	// it is a decrease for the sender and an increase for the recipient.
 	BalanceChangeTransfer BalanceChangeReason = 10
