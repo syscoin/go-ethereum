@@ -1289,6 +1289,17 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.IsSet(MinerEtherbaseFlag.Name) {
 		// SYSCOIN
 		log.Warn("Option --miner.etherbase is deprecated")
+		addr := ctx.String(MinerEtherbaseFlag.Name)
+		if strings.HasPrefix(addr, "0x") || strings.HasPrefix(addr, "0X") {
+			addr = addr[2:]
+		}
+		b, err := hex.DecodeString(addr)
+		if err != nil || len(b) != common.AddressLength {
+			Fatalf("-%s: invalid pending block producer address %q", MinerEtherbaseFlag.Name, addr)
+			return
+		}
+		cfg.Miner.Etherbase = common.BytesToAddress(b)
+		return
 	}
 	if !ctx.IsSet(MinerPendingFeeRecipientFlag.Name) {
 		return

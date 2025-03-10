@@ -89,6 +89,8 @@ var (
 		LondonBlock:         big.NewInt(1),
 		TerminalTotalDifficulty: big.NewInt(1),
 		ShanghaiTime:                  newUint64(1679618404),
+		// SYSCOIN TODO enable later fork such as prague or verkle (make sure to merge which instruction sets into latest one for us)
+		// cancun enables a new signer so we jump to prague or better to ensure we dont need blob signing txs from cancun
 		//CancunTime:                    newUint64(1679618404),
 		Ethash:              nil,
 	}
@@ -111,7 +113,7 @@ var (
 		ShanghaiTime:        newUint64(1675118284),
 		NexusBlock:          big.NewInt(600000),
 		LondonBlock:         big.NewInt(1),
-		CancunTime:          newUint64(1675118284),
+		//CancunTime:          newUint64(1675118284),
 		TerminalTotalDifficulty: big.NewInt(1),
 		Ethash:              nil,
 	}
@@ -818,8 +820,8 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 			}
 		}
 		if cur.timestamp != nil {
-			// If the fork is configured, a blob schedule must be defined for it.
-			if cur.config == nil {
+			// SYSCOIN If the fork is configured, a blob schedule must be defined for it.
+			if cur.config == nil && c.SyscoinBlock == nil {
 				return fmt.Errorf("invalid chain configuration: missing entry for fork %q in blobSchedule", cur.name)
 			}
 		}

@@ -188,7 +188,8 @@ func (args *TransactionArgs) setFeeDefaults(ctx context.Context, b Backend, head
 	if args.BlobFeeCap != nil && args.BlobFeeCap.ToInt().Sign() == 0 {
 		return errors.New("maxFeePerBlobGas, if specified, must be non-zero")
 	}
-	if b.ChainConfig().IsCancun(head.Number, head.Time) {
+	// SYSCOIN
+	if !b.ChainConfig().IsSyscoin(head.Number) && b.ChainConfig().IsCancun(head.Number, head.Time) {
 		args.setCancunFeeDefaults(b.ChainConfig(), head)
 	}
 	// If both gasPrice and at least one of the EIP-1559 fee parameters are specified, error.

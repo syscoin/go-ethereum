@@ -309,7 +309,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	createBlock := func(eth *Ethereum) *types.Block {
 		eth.wgNEVM.Add(1)
 		defer eth.wgNEVM.Done()
-		return eth.miner.GenerateWorkSyscoin(eth.blockchain.CurrentBlock().Hash(), eth.config.Miner.PendingFeeRecipient, crypto.Keccak256Hash([]byte{byte(123)}))
+		return eth.miner.GenerateWorkSyscoin(eth.blockchain.CurrentBlock().Hash(), eth.config.Miner.Etherbase, crypto.Keccak256Hash([]byte{byte(123)}))
 	}
 	var (
 		batchSize         = 100 // Number of blocks to batch before processing

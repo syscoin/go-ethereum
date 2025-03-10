@@ -380,10 +380,10 @@ func (miner *Miner) commitTransactions(env *environment, plainTxs, blobTxs *tran
 			continue
 		}
 
-		// Most of the blob gas logic here is agnostic as to if the chain supports
+		// SYSCOIN Most of the blob gas logic here is agnostic as to if the chain supports
 		// blobs or not, however the max check panics when called on a chain without
 		// a defined schedule, so we need to verify it's safe to call.
-		if miner.chainConfig.IsCancun(env.header.Number, env.header.Time) {
+		if !miner.chainConfig.IsSyscoin(env.header.Number) && miner.chainConfig.IsCancun(env.header.Number, env.header.Time) {
 			left := eip4844.MaxBlobsPerBlock(miner.chainConfig, env.header.Time) - env.blobs
 			if left < int(ltx.BlobGas/params.BlobTxBlobGasPerBlob) {
 				log.Trace("Not enough blob space left for transaction", "hash", ltx.Hash, "left", left, "needed", ltx.BlobGas/params.BlobTxBlobGasPerBlob)

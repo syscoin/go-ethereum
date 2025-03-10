@@ -177,8 +177,8 @@ type Signer interface {
 	// Equal returns true if the given signer is the same as the receiver.
 	Equal(Signer) bool
 }
-
-type pragueSigner struct{ cancunSigner }
+// SYSCOIN
+type pragueSigner struct{ londonSigner }
 
 // NewPragueSigner returns a signer that accepts
 // - EIP-7702 set code transactions
@@ -188,13 +188,15 @@ type pragueSigner struct{ cancunSigner }
 // - EIP-155 replay protected transactions, and
 // - legacy Homestead transactions.
 func NewPragueSigner(chainId *big.Int) Signer {
-	signer, _ := NewCancunSigner(chainId).(cancunSigner)
+	// SYSCOIN
+	signer, _ := NewLondonSigner(chainId).(londonSigner)
 	return pragueSigner{signer}
 }
 
 func (s pragueSigner) Sender(tx *Transaction) (common.Address, error) {
 	if tx.Type() != SetCodeTxType {
-		return s.cancunSigner.Sender(tx)
+		// SYSCOIN
+		return s.londonSigner.Sender(tx)
 	}
 	V, R, S := tx.RawSignatureValues()
 
@@ -215,7 +217,8 @@ func (s pragueSigner) Equal(s2 Signer) bool {
 func (s pragueSigner) SignatureValues(tx *Transaction, sig []byte) (R, S, V *big.Int, err error) {
 	txdata, ok := tx.inner.(*SetCodeTx)
 	if !ok {
-		return s.cancunSigner.SignatureValues(tx, sig)
+		// SYSCOIN
+		return s.londonSigner.SignatureValues(tx, sig)
 	}
 	// Check that chain ID of tx matches the signer. We also accept ID zero here,
 	// because it indicates that the chain ID was not specified in the tx.
@@ -231,7 +234,8 @@ func (s pragueSigner) SignatureValues(tx *Transaction, sig []byte) (R, S, V *big
 // It does not uniquely identify the transaction.
 func (s pragueSigner) Hash(tx *Transaction) common.Hash {
 	if tx.Type() != SetCodeTxType {
-		return s.cancunSigner.Hash(tx)
+		// SYSCOIN
+		return s.londonSigner.Hash(tx)
 	}
 	return prefixedRlpHash(
 		tx.Type(),
