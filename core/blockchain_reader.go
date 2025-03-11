@@ -443,15 +443,18 @@ func (bc *BlockChain) SubscribeBlockProcessingEvent(ch chan<- bool) event.Subscr
 func (bc *BlockChain) ReadSYSHash(n uint64) []byte {
 	return bc.hc.ReadSYSHash(n)
 }
+
 func (bc *BlockChain) GetNEVMAddress(address common.Address) []byte {
 	return bc.hc.GetNEVMAddress(address)
 }
-func (bc *BlockChain) WriteNEVMAddressMapping(db ethdb.KeyValueWriter, mapping *rawdb.NEVMAddressMapping) {
-	bc.hc.WriteNEVMAddressMapping(db, mapping)
+func (bc *BlockChain) StoreNEVMAddress(db ethdb.KeyValueWriter, address common.Address, height uint32) {
+	bc.hc.StoreNEVMAddress(db, address, height)
 }
-func (bc *BlockChain) ReadNEVMAddressMapping() *rawdb.NEVMAddressMapping {
-	return bc.hc.ReadNEVMAddressMapping()
+
+func (bc *BlockChain) RemoveNEVMAddress(db ethdb.KeyValueWriter, address common.Address) {
+	bc.hc.RemoveNEVMAddress(db, address)
 }
+
 func (bc *BlockChain) ReadDataHash(hash common.Hash) []byte {
 	return bc.hc.ReadDataHash(hash)
 }

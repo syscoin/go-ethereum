@@ -359,8 +359,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	
 		return nil
 	}
-	
-	
 
 	deleteBlock := func(nevmBlockDisconnect *types.NEVMBlockDisconnect, eth *Ethereum) error {
 		current := eth.blockchain.CurrentBlock()
@@ -368,48 +366,52 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return errors.New("deleteBlock: Current block is nil")
 		}
 		currentNumber := current.Number.Uint64()
-		if current.Number.Uint64() == 0 {
+		if currentNumber == 0 {
 			log.Warn("Trying to disconnect block 0")
 			return nil
 		}
 		parent := eth.blockchain.GetBlock(current.ParentHash, currentNumber-1)
 		if parent == nil {
-			return errors.New("deleteBlock: NEVM tip parent block not found")
+			return errors.New("deleteBlock: Parent block not found")
 		}
 		headHash, err := eth.blockchain.SetCanonical(parent)
 		if err != nil {
 			return err
 		}
 		if parent.Hash() != headHash {
-			return errors.New("deleteBlock: Block number post-write does not match")
+			return errors.New("deleteBlock: Mismatch after setting canonical head")
 		}
+	
 		batch := eth.ChainDb().NewBatch()
-		// Update the NEVM address mappings based on the block's diff
-		hasDiff := nevmBlockDisconnect.HasDiff()
-		if hasDiff {
-			// Retrieve the current NEVM address mappings from the database
-			mapping := eth.blockchain.ReadNEVMAddressMapping()
+		if nevmBlockDisconnect.HasDiff() {
+			// Simply apply the inverse diff as-is:
 			for _, entry := range nevmBlockDisconnect.Diff.AddedMNNEVM {
-				mapping.AddNEVMAddress(common.BytesToAddress(entry.Address), entry.CollateralHeight)
+				addr := common.BytesToAddress(entry.Address)
+				eth.blockchain.StoreNEVMAddress(batch, addr, entry.CollateralHeight)
 			}
-			for _, entry := range nevmBlockDisconnect.Diff.UpdatedMNNEVM {
-				mapping.UpdateNEVMAddress(common.BytesToAddress(entry.OldAddress), common.BytesToAddress(entry.NewAddress))
+			for _, entry := range nevmBlockDisconnect.Diff.UpdatedMNNEVM {		
+				oldAddr := common.BytesToAddress(entry.OldAddress)
+				newAddr := common.BytesToAddress(entry.NewAddress)
+				eth.blockchain.RemoveNEVMAddress(batch, oldAddr)
+				eth.blockchain.StoreNEVMAddress(batch, newAddr, entry.CollateralHeight)
 			}
 			for _, entry := range nevmBlockDisconnect.Diff.RemovedMNNEVM {
-				mapping.RemoveNEVMAddress(common.BytesToAddress(entry.Address))
+				// Nodes previously added (during connect), remove now
+				addr := common.BytesToAddress(entry.Address)
+				eth.blockchain.RemoveNEVMAddress(batch, addr)
 			}
-		
-			// Persist the updated NEVM address mappings to the database
-			eth.blockchain.WriteNEVMAddressMapping(batch, mapping)
 		}
-
+	
+		// Clean up related hashes
 		eth.blockchain.DeleteSYSHash(batch, currentNumber)
 		eth.blockchain.DeleteDataHashes(batch, currentNumber)
+	
 		if err := batch.Write(); err != nil {
-			log.Crit("Failed to delete NEVM index data", "err", err)
+			log.Crit("Failed to write NEVM batch during block disconnect", "err", err)
 		}
+	
 		return nil
-	}
+	}	
 	if eth.blockchain.GetChainConfig().SyscoinBlock != nil {
 		eth.zmqRep = NewZMQRep(stack, eth, config.NEVMPubEP, NEVMIndex{createBlock, addBlock, deleteBlock})
 	}

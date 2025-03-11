@@ -31,6 +31,8 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
+	// SYSCOIN
+	"encoding/binary"
 )
 
 const (
@@ -38,6 +40,7 @@ const (
 	numberCacheLimit = 2048
 	// SYSCOIN
 	SYSBlockCacheLimit = 50001
+	NEVMAddressCacheLimit = 5000
 )
 
 // HeaderChain implements the basic block header chain logic. It is not usable
@@ -69,7 +72,7 @@ type HeaderChain struct {
 	// SYSCOIN
 	SYSHashCache  *lru.Cache[uint64, []byte] // Cache for SYS hash
 	DataHashCache *lru.Cache[common.Hash, []byte] // Cache for Data availability
-	NEVMAddressCache *rawdb.NEVMAddressMapping
+	NEVMAddressCache *lru.Cache[common.Address, []byte]
 
 	procInterrupt func() bool
 	engine        consensus.Engine
@@ -86,6 +89,7 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 		// SYSCOIN
 		SYSHashCache:  lru.NewCache[uint64, []byte](SYSBlockCacheLimit),
 		DataHashCache: lru.NewCache[common.Hash, []byte](SYSBlockCacheLimit),
+		NEVMAddressCache: lru.NewCache[common.Address, []byte](NEVMAddressCacheLimit),
 		procInterrupt: procInterrupt,
 		engine:        engine,
 	}
@@ -479,26 +483,30 @@ func (hc *HeaderChain) GetCanonicalHash(number uint64) common.Hash {
 	return rawdb.ReadCanonicalHash(hc.chainDb, number)
 }
 
-
-func (hc *HeaderChain) WriteNEVMAddressMapping(db ethdb.KeyValueWriter, mapping *rawdb.NEVMAddressMapping) {
-	rawdb.WriteNEVMAddressMapping(db, mapping)
-	hc.NEVMAddressCache = mapping
+// Store NEVM address mapping
+func (hc *HeaderChain) StoreNEVMAddress(db ethdb.KeyValueWriter, addr common.Address, height uint32) {
+	buf := make([]byte, 4)
+	binary.BigEndian.PutUint32(buf, height)
+	rawdb.StoreNEVMAddress(db, addr, buf)
+	hc.NEVMAddressCache.Add(addr, buf)
 }
 
-// ReadNEVMAddressMapping retrieves the NEVM address mapping from the database
-func (hc *HeaderChain) ReadNEVMAddressMapping() *rawdb.NEVMAddressMapping {
-	if hc.NEVMAddressCache != nil {
-		return hc.NEVMAddressCache
+func (hc *HeaderChain) RemoveNEVMAddress(db ethdb.KeyValueWriter, addr common.Address) {
+	hc.NEVMAddressCache.Remove(addr)
+	rawdb.RemoveNEVMAddress(db, addr)
+}
+
+// GetNEVMAddress retrieves height as bytes directly (ideal for precompile)
+func (hc *HeaderChain) GetNEVMAddress(addr common.Address) []byte {
+	if data, ok := hc.NEVMAddressCache.Get(addr); ok {
+		return data
 	}
-	// sanity in case it doesn't exist in cache
-	addressMapping := rawdb.ReadNEVMAddressMapping(hc.chainDb)
-	hc.NEVMAddressCache = addressMapping
-	return addressMapping
-}
-
-func (hc *HeaderChain) GetNEVMAddress(address common.Address) []byte {
-	mapping := hc.ReadNEVMAddressMapping()
-	return mapping.GetNEVMAddress(address)	
+	data := rawdb.GetNEVMAddress(hc.chainDb, addr)
+	if len(data) == 0 {
+		return []byte{}
+	}
+	hc.NEVMAddressCache.Add(addr, data)
+	return data
 }
 
 func (hc *HeaderChain) ReadSYSHash(n uint64) []byte {

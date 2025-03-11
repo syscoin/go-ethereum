@@ -1445,36 +1445,37 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 	bc.writeHeadBlock(block)
 	return nil
 }
-func (bc *BlockChain) writeNEVMData(blockBatch ethdb.KeyValueWriter, block* types.Block) error {
-	// SYSCOIN
+func (bc *BlockChain) writeNEVMData(blockBatch ethdb.KeyValueWriter, block *types.Block) error {
 	nevmBlockConnect := block.NevmBlockConnect
 	if nevmBlockConnect != nil {
-		// Update the NEVM address mappings based on the block's diff
-		hasDiff := nevmBlockConnect.HasDiff()
-		if hasDiff {
-			// Retrieve the current NEVM address mappings from the database
-			mapping := bc.ReadNEVMAddressMapping()
+		if(nevmBlockConnect.HasDiff()) {
 			for _, entry := range nevmBlockConnect.Diff.AddedMNNEVM {
-				mapping.AddNEVMAddress(common.BytesToAddress(entry.Address), entry.CollateralHeight)
+				addr := common.BytesToAddress(entry.Address)
+				bc.StoreNEVMAddress(blockBatch, addr, entry.CollateralHeight)
+		
 			}
 			for _, entry := range nevmBlockConnect.Diff.UpdatedMNNEVM {
-				mapping.UpdateNEVMAddress(common.BytesToAddress(entry.OldAddress), common.BytesToAddress(entry.NewAddress))
+				oldAddr := common.BytesToAddress(entry.OldAddress)
+				newAddr := common.BytesToAddress(entry.NewAddress)	
+				bc.RemoveNEVMAddress(blockBatch, oldAddr)
+				bc.StoreNEVMAddress(blockBatch, newAddr, entry.CollateralHeight)
+
 			}
 			for _, entry := range nevmBlockConnect.Diff.RemovedMNNEVM {
-				mapping.RemoveNEVMAddress(common.BytesToAddress(entry.Address))
+				addr := common.BytesToAddress(entry.Address)
+				bc.RemoveNEVMAddress(blockBatch, addr)
 			}
-		
-			// Persist the updated NEVM address mappings to the database
-			bc.WriteNEVMAddressMapping(blockBatch, mapping)
+
+			proposedBlockNumber := nevmBlockConnect.Block.NumberU64()
+			bc.WriteDataHashes(blockBatch, proposedBlockNumber, nevmBlockConnect.VersionHashes)
+			bc.WriteSYSHash(blockBatch, nevmBlockConnect.Sysblockhash, proposedBlockNumber)
 		}
-		proposedBlockNumber := nevmBlockConnect.Block.NumberU64()
-		bc.WriteDataHashes(blockBatch, proposedBlockNumber, nevmBlockConnect.VersionHashes)
-		bc.WriteSYSHash(blockBatch, nevmBlockConnect.Sysblockhash, proposedBlockNumber)
 	} else if bc.GetChainConfig().SyscoinBlock != nil {
 		return errors.New("no SYS block connect provided")
 	}
 	return nil
 }
+
 // writeBlockWithState writes block, metadata and corresponding state data to the
 // database.
 func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, statedb *state.StateDB) error {

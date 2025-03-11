@@ -733,30 +733,29 @@ func writeAncientBlock(op ethdb.AncientWriteOp, block *types.Block, header *type
 }
 
 // SYSCOIN
-// WriteNEVMAddressMapping stores the NEVM address mapping into the database
-func WriteNEVMAddressMapping(db ethdb.KeyValueWriter, mapping *NEVMAddressMapping) {
-	data, err := rlp.EncodeToBytes(mapping.AddressMappings)
+// Add or Update a mapping
+func StoreNEVMAddress(db ethdb.KeyValueWriter, addr common.Address, height []byte) {
+	if err := db.Put(nevmAddressKey(addr), height); err != nil {
+		log.Crit("Failed to store nevmAddressKey", "err", err)
+	}
+}
+// Remove a mapping
+func RemoveNEVMAddress(db ethdb.KeyValueWriter, addr common.Address) {
+	if err := db.Delete(nevmAddressKey(addr)); err != nil {
+		log.Crit("Failed to store nevmAddressKey", "err", err)
+	}
+}
+// Get height directly by address
+func GetNEVMAddress(db ethdb.Reader, addr common.Address) []byte {
+	data, err := db.Get(nevmAddressKey(addr))
 	if err != nil {
-		log.Crit("Failed to RLP encode NEVM address mappings", "err", err)
+		return []byte{}
 	}
-	if err := db.Put(nevmAddressKey(), data); err != nil {
-		log.Crit("Failed to store NEVM address mappings", "err", err)
+	if len(data) != 4 {
+		return []byte{}
 	}
+	return data
 }
-
-// ReadNEVMAddressMapping retrieves the NEVM address mapping from the database
-func ReadNEVMAddressMapping(db ethdb.Reader) *NEVMAddressMapping {
-	data, err := db.Get(nevmAddressKey())
-	if err != nil || len(data) == 0 {
-		return NewNEVMAddressMapping()
-	}
-	var mappings map[common.Address]uint32
-	if err := rlp.DecodeBytes(data, &mappings); err != nil {
-		log.Crit("Failed to decode NEVM address mappings", "err", err)
-	}
-	return &NEVMAddressMapping{AddressMappings: mappings}
-}
-
 
 func WriteSYSHash(db ethdb.KeyValueWriter, sysBlockhash string, n uint64) {
 	if err := db.Put(blockNumToSysKey(n), []byte(sysBlockhash)); err != nil {
