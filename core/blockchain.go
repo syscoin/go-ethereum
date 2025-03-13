@@ -1465,13 +1465,13 @@ func (bc *BlockChain) writeNEVMData(blockBatch ethdb.KeyValueWriter, block *type
 				addr := common.BytesToAddress(entry.Address)
 				bc.RemoveNEVMAddress(blockBatch, addr)
 			}
-
-			proposedBlockNumber := nevmBlockConnect.Block.NumberU64()
-			bc.WriteDataHashes(blockBatch, proposedBlockNumber, nevmBlockConnect.VersionHashes)
-			bc.WriteSYSHash(blockBatch, nevmBlockConnect.Sysblockhash, proposedBlockNumber)
 		}
+		proposedBlockNumber := nevmBlockConnect.Block.NumberU64()
+		bc.WriteDataHashes(blockBatch, proposedBlockNumber, nevmBlockConnect.VersionHashes)
+		bc.WriteSYSHash(blockBatch, nevmBlockConnect.Sysblockhash, proposedBlockNumber)
 	} else if bc.GetChainConfig().SyscoinBlock != nil {
-		return errors.New("no SYS block connect provided")
+		log.Debug("Skipping NEVM data; no connect info for block", 
+              "number", block.NumberU64(), "hash", block.Hash())
 	}
 	return nil
 }
@@ -1492,7 +1492,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	rawdb.WritePreimages(blockBatch, statedb.Preimages())
 	err := bc.writeNEVMData(blockBatch, block)
 	if err != nil {
-		log.Crit("Failed to write block into disk", "err", err)
+		log.Crit("Failed to NEVM data into disk", "err", err)
 	}
 	if err = blockBatch.Write(); err != nil {
 		log.Crit("Failed to write block into disk", "err", err)
