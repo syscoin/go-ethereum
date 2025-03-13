@@ -1237,8 +1237,7 @@ func (c *nevmaddress) Run(input []byte, interpreter *EVMInterpreter) ([]byte, er
 	if len(input) != 20 {
 		return nil, errNEVMAddressInvalidInputLength
 	}
-
-	return interpreter.evm.Context.GetNEVMAddress(common.BytesToAddress(input)), nil
+	return common.LeftPadBytes(interpreter.evm.Context.GetNEVMAddress(common.BytesToAddress(input)), 32), nil
 }
 
 // kzgPointEvaluation implements the EIP-4844 point evaluation precompile.
