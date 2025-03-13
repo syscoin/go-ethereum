@@ -383,20 +383,20 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	
 		batch := eth.ChainDb().NewBatch()
-		if nevmBlockDisconnect.HasDiff() {
-			// Simply apply the inverse diff as-is:
+		if(nevmBlockDisconnect.HasDiff()) {
 			for _, entry := range nevmBlockDisconnect.Diff.AddedMNNEVM {
 				addr := common.BytesToAddress(entry.Address)
 				eth.blockchain.StoreNEVMAddress(batch, addr, entry.CollateralHeight)
+		
 			}
-			for _, entry := range nevmBlockDisconnect.Diff.UpdatedMNNEVM {		
+			for _, entry := range nevmBlockDisconnect.Diff.UpdatedMNNEVM {
 				oldAddr := common.BytesToAddress(entry.OldAddress)
-				newAddr := common.BytesToAddress(entry.NewAddress)
+				newAddr := common.BytesToAddress(entry.NewAddress)	
 				eth.blockchain.RemoveNEVMAddress(batch, oldAddr)
 				eth.blockchain.StoreNEVMAddress(batch, newAddr, entry.CollateralHeight)
+
 			}
 			for _, entry := range nevmBlockDisconnect.Diff.RemovedMNNEVM {
-				// Nodes previously added (during connect), remove now
 				addr := common.BytesToAddress(entry.Address)
 				eth.blockchain.RemoveNEVMAddress(batch, addr)
 			}
