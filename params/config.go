@@ -111,7 +111,7 @@ var (
 		SyscoinBlock:        big.NewInt(0),
 		RolluxBlock:         big.NewInt(182500),
 		ShanghaiTime:        newUint64(1675118284),
-		NexusBlock:          big.NewInt(600000),
+		NexusBlock:          big.NewInt(665001),
 		LondonBlock:         big.NewInt(1),
 		//CancunTime:          newUint64(1675118284),
 		TerminalTotalDifficulty: big.NewInt(1),
