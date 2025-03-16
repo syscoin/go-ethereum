@@ -19,5 +19,5 @@ package params
 import (
 	"github.com/ethereum/go-ethereum/common"
 )
-var VaultManager = common.HexToAddress("0xd819731dfEb4C9c8E8327bc27CD162BA89D3fD95")
+var VaultManager = common.HexToAddress("0x7904299b3D3dC1b03d1DdEb45E9fDF3576aCBd5f")
 var VaultManagerOld = common.HexToAddress("0xA738a563F9ecb55e0b2245D1e9E380f0fE455ea1")
