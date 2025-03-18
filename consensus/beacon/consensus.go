@@ -85,7 +85,7 @@ func isPostMerge(config *params.ChainConfig, blockNum uint64, timestamp uint64) 
 	mergedAtGenesis := config.TerminalTotalDifficulty != nil && config.TerminalTotalDifficulty.Sign() == 0
 	return mergedAtGenesis ||
 		config.MergeNetsplitBlock != nil && blockNum >= config.MergeNetsplitBlock.Uint64() ||
-		config.ShanghaiTime != nil && timestamp >= *config.ShanghaiTime
+		config.ShanghaiTime != nil && timestamp >= *config.ShanghaiTime  || config.ShanghaiBlock != nil && blockNum >= config.ShanghaiBlock.Uint64()
 }
 
 // Author implements consensus.Engine, returning the verified author of the block.
@@ -416,7 +416,6 @@ func (beacon *Beacon) FinalizeAndAssemble(chain consensus.ChainHeaderReader, hea
 	}
 	// Finalize and assemble the block.
 	beacon.Finalize(chain, header, state, body)
-
 	// Assign the final state root to header.
 	header.Root = state.IntermediateRoot(true)
 
@@ -507,8 +506,7 @@ func (beacon *Beacon) IsPoSHeader(header *types.Header) bool {
 	if header.Difficulty == nil {
 		panic("IsPoSHeader called with invalid difficulty")
 	}
-	// SYSCOIN
-	return header.Difficulty.Cmp(big.NewInt(1)) <= 0
+	return header.Difficulty.Cmp(beaconDifficulty) == 0
 }
 
 // InnerEngine returns the embedded eth1 consensus engine.
