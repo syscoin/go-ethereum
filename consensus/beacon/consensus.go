@@ -83,6 +83,7 @@ func New(ethone consensus.Engine) *Beacon {
 // PoA chain for unit testing purposes.
 func isPostMerge(config *params.ChainConfig, blockNum uint64, timestamp uint64) bool {
 	mergedAtGenesis := config.TerminalTotalDifficulty != nil && config.TerminalTotalDifficulty.Sign() == 0
+	// SYSCOIN
 	return mergedAtGenesis ||
 		config.MergeNetsplitBlock != nil && blockNum >= config.MergeNetsplitBlock.Uint64() ||
 		config.ShanghaiTime != nil && timestamp >= *config.ShanghaiTime  || config.ShanghaiBlock != nil && blockNum >= config.ShanghaiBlock.Uint64()
@@ -506,7 +507,8 @@ func (beacon *Beacon) IsPoSHeader(header *types.Header) bool {
 	if header.Difficulty == nil {
 		panic("IsPoSHeader called with invalid difficulty")
 	}
-	return header.Difficulty.Cmp(beaconDifficulty) == 0
+	// SYSCOIN, 1 or 0 difficulty
+	return header.Difficulty.Cmp(big.NewInt(1)) <= 0
 }
 
 // InnerEngine returns the embedded eth1 consensus engine.
