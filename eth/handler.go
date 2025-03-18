@@ -123,6 +123,8 @@ type handler struct {
 
 	handlerStartCh chan struct{}
 	handlerDoneCh  chan struct{}
+	// SYSCOIN
+	running atomic.Bool
 }
 
 // newHandler returns a handler for all Ethereum chain management protocol.
@@ -420,6 +422,11 @@ func (h *handler) unregisterPeer(id string) {
 }
 
 func (h *handler) Start(maxPeers int) {
+	// SYSCOIN
+	if h.running.Load() {
+        log.Warn("Handler already started")
+        return
+    }
 	h.maxPeers = maxPeers
 
 	// broadcast and announce transactions (only new ones, not resurrected ones)
@@ -433,9 +440,15 @@ func (h *handler) Start(maxPeers int) {
 	// start peer handler tracker
 	h.wg.Add(1)
 	go h.protoTracker()
+	// SYSCOIN
+	h.running.Store(true)
 }
 
 func (h *handler) Stop() {
+	if !h.running.Load() {
+        log.Warn("Handler not started or already stopped")
+        return
+    }
 	h.txsSub.Unsubscribe() // quits txBroadcastLoop
 	h.txFetcher.Stop()
 	h.downloader.Terminate()
@@ -450,7 +463,8 @@ func (h *handler) Stop() {
 	// will exit when they try to register.
 	h.peers.close()
 	h.wg.Wait()
-
+	// SYSCOIN
+	h.running.Store(false)
 	log.Info("Ethereum protocol stopped")
 }
 
