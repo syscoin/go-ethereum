@@ -82,6 +82,7 @@ func setDefaults(cfg *Config) {
 			// SYSCOIN
 			SyscoinBlock: nil,
 			RolluxBlock:  nil,
+			ShanghaiBlock:  nil,
 			NexusBlock:   nil,
 			ArrowGlacierBlock:       nil,
 			GrayGlacierBlock:        nil,

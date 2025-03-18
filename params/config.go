@@ -85,10 +85,11 @@ var (
 		BerlinBlock:         big.NewInt(0),
 		SyscoinBlock:        big.NewInt(0),
 		RolluxBlock:         big.NewInt(268500),
+		ShanghaiBlock:       big.NewInt(268500),
 		NexusBlock:          big.NewInt(690000),
 		LondonBlock:         big.NewInt(1),
 		TerminalTotalDifficulty: big.NewInt(1),
-		ShanghaiTime:                  newUint64(1679618404),
+		//ShanghaiTime:                  newUint64(1679618404),
 		// SYSCOIN TODO enable later fork such as prague or verkle (make sure to merge which instruction sets into latest one for us)
 		// cancun enables a new signer so we jump to prague or better to ensure we dont need blob signing txs from cancun
 		//CancunTime:                    newUint64(1679618404),
@@ -110,7 +111,8 @@ var (
 		BerlinBlock:         big.NewInt(0),
 		SyscoinBlock:        big.NewInt(0),
 		RolluxBlock:         big.NewInt(182500),
-		ShanghaiTime:        newUint64(1675118284),
+		ShanghaiBlock:       big.NewInt(223000),
+		//ShanghaiTime:        newUint64(1675118284),
 		NexusBlock:          big.NewInt(665001),
 		LondonBlock:         big.NewInt(1),
 		//CancunTime:          newUint64(1675118284),
@@ -426,6 +428,7 @@ type ChainConfig struct {
 	// SYSCOIN
 	SyscoinBlock        *big.Int `json:"syscoinBlock,omitempty"`        // Syscoin switch block (nil = no fork, 0 = already on syscoin)
 	RolluxBlock         *big.Int `json:"rolluxBlock,omitempty"`         // Rollux switch block (nil = no fork, 0 = already on syscoin)
+	ShanghaiBlock       *big.Int `json:"shanghaiBlock,omitempty"`       // Rollux switch block (nil = no fork, 0 = already on syscoin)
 	NexusBlock          *big.Int `json:"nexusBlock,omitempty"`          // Nexus switch block (nil = no fork, 0 = already on syscoin)
 	// Fork scheduling was switched from blocks to timestamps here
 
@@ -666,6 +669,10 @@ func (c *ChainConfig) IsNexus(num *big.Int) bool {
 }
 // IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
 func (c *ChainConfig) IsShanghai(num *big.Int, time uint64) bool {
+	// SYSCOIN
+	if c.IsSyscoin(num) {
+		return isBlockForked(c.ShanghaiBlock, num)
+	}
 	return c.IsLondon(num) && isTimestampForked(c.ShanghaiTime, time)
 }
 
@@ -901,8 +908,11 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkBlockIncompatible(c.RolluxBlock, newcfg.RolluxBlock, headNumber) {
 		return newBlockCompatError("Rollux fork block", c.RolluxBlock, newcfg.RolluxBlock)
 	}
+	if isForkBlockIncompatible(c.ShanghaiBlock, newcfg.ShanghaiBlock, headNumber) {
+		return newBlockCompatError("Shanghai fork block", c.ShanghaiBlock, newcfg.ShanghaiBlock)
+	}
 	if isForkBlockIncompatible(c.NexusBlock, newcfg.NexusBlock, headNumber) {
-		return newBlockCompatError("Nexus fork block", c.NexusBlock, newcfg.RolluxBlock)
+		return newBlockCompatError("Nexus fork block", c.NexusBlock, newcfg.NexusBlock)
 	}
 	if isForkTimestampIncompatible(c.ShanghaiTime, newcfg.ShanghaiTime, headTimestamp) {
 		return newTimestampCompatError("Shanghai fork timestamp", c.ShanghaiTime, newcfg.ShanghaiTime)
