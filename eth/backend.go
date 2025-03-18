@@ -120,6 +120,7 @@ type Ethereum struct {
 	wg     			  sync.WaitGroup
 	zmqRep            *ZMQRep
 	timeLastBlock     int64
+	stack             *node.Node
 }
 
 // New creates a new Ethereum object (including the initialisation of the common Ethereum object),
@@ -418,6 +419,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	// SYSCOIN
 	eth.wg.Add(1)
     go eth.networkingLoop()
+	eth.stack = stack
 	return eth, nil
 }
 
@@ -459,7 +461,10 @@ func (eth *Ethereum) networkingLoop() {
 				if eth.waitForSyncCompletion() {
 					log.Info("5 seconds passed without new blocks. Starting network...")
 					eth.handler.peers.SetOpen()
-					eth.p2pServer.Start()
+					if err := eth.p2pServer.Start(); err != nil {
+						log.Error("Error starting p2pServer", "err", err)
+					}
+					eth.handler.Start(eth.p2pServer.MaxPeers)
 					eth.Downloader().DoneEvent()
 					eth.handler.synced.Store(true)
 				}
@@ -559,15 +564,21 @@ func (s *Ethereum) Start() error {
 
 	// Regularly update shutdown marker
 	s.shutdownTracker.Start()
-	// Start the networking layer
-	s.handler.Start(s.p2pServer.MaxPeers)
-	// SYSCOIN
 	if s.blockchain.GetChainConfig().SyscoinBlock != nil {
-		log.Info("Skip networking and peering...")
+		log.Info("SYSCOIN mode active: skipping Ethereum networking and peers")
+
+		// Explicitly mark peers closed BEFORE calling any handler methods:
 		s.handler.peers.SetClosed()
 		s.p2pServer.Stop()
-	}
 
+		// Don't call s.handler.Start(), as it will try to sync peers
+		// instead, manually start minimal required handlers:
+		go s.zmqRep.InitZMQListener()
+
+	} else {
+		// Normal Ethereum networking startup
+		s.handler.Start(s.p2pServer.MaxPeers)
+	}
 	return nil
 }
 
@@ -629,6 +640,22 @@ func (s *Ethereum) Stop() error {
 		s.zmqRep.Close()
 	}
 	return nil
+}
+
+// SYSCOIN
+func (s *Ethereum) Shutdown() {
+    log.Info("Ethereum shutdown explicitly requested via ZMQ...")
+
+    go func() {
+        if err := s.stack.Close(); err != nil {
+            log.Error("Node stack Close error", "err", err)
+        } else {
+            log.Info("Node stack closed gracefully.")
+        }
+
+        s.stack.Wait()
+        log.Info("Node stack shutdown completed successfully.")
+    }()
 }
 
 // SyncMode retrieves the current sync mode, either explicitly set, or derived

@@ -28,7 +28,7 @@ import (
 )
 
 type ZMQRep struct {
-	stack       *node.Node
+	NEVMPubEP   string
 	eth         *Ethereum
 	rep         zmq4.Socket
 	nevmIndexer NEVMIndex
@@ -36,28 +36,27 @@ type ZMQRep struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 }
-// Close is idempotent
+
 func (zmq *ZMQRep) Close() {
-	if !zmq.inited {
-		return
-	}
+    if !zmq.inited {
+        return
+    }
+    zmq.inited = false
 
-	zmq.cancel()
+    zmq.cancel()
 
-	if err := zmq.rep.Close(); err != nil {
-		log.Error("ZMQ socket close error", "err", err)
-	} else {
-		log.Info("ZMQ socket closed successfully")
-	}
-
-	zmq.inited = false
+    if err := zmq.rep.Close(); err != nil {
+        log.Error("ZMQ socket close error", "err", err)
+    } else {
+        log.Info("ZMQ socket closed successfully")
+    }
 }
 
 
-func (zmq *ZMQRep) Init(nevmEP string) error {
-	err := zmq.rep.Listen(nevmEP)
+func (zmq *ZMQRep) InitZMQListener() error {
+	err := zmq.rep.Listen(zmq.NEVMPubEP)
 	if err != nil {
-		log.Error("could not listen on NEVM REP point", "endpoint", nevmEP, "err", err)
+		log.Error("could not listen on NEVM REP point", "endpoint", zmq.NEVMPubEP, "err", err)
 		return err
 	}
 	go func(zmq *ZMQRep) {
@@ -84,20 +83,7 @@ func (zmq *ZMQRep) Init(nevmEP string) error {
 				if strTopic == "nevmcomms" {
 					if string(msg.Frames[1]) == "\ndisconnect" {
 						log.Info("ZMQ: exiting...")
-						if zmq.stack != nil {
-							go func() {
-								if err := zmq.stack.Close(); err != nil {
-									log.Error("Stack close error", "err", err)
-								} else {
-									log.Info("Stack closed gracefully")
-								}
-								zmq.stack.Wait()
-								log.Info("Stack shutdown completed successfully")
-							}()
-						} else {
-							log.Error("ZMQ: STACK EMPTY...")
-						}
-						zmq.Close()
+						go zmq.eth.Shutdown()
 						return
 					}
 					if string(msg.Frames[1]) == "\fstartnetwork" {
@@ -173,10 +159,10 @@ func (zmq *ZMQRep) Init(nevmEP string) error {
 	return nil
 }
 
-func NewZMQRep(stackIn *node.Node, ethIn *Ethereum, NEVMPubEP string, nevmIndexerIn NEVMIndex) *ZMQRep {
+func NewZMQRep(stackIn *node.Node, ethIn *Ethereum, NEVMPubEPIn string, nevmIndexerIn NEVMIndex) *ZMQRep {
 	ctx, cancel := context.WithCancel(context.Background())
 	zmq := &ZMQRep{
-		stack:       stackIn,
+		NEVMPubEP:       NEVMPubEPIn,
 		eth:         ethIn,
 		rep:         zmq4.NewRep(ctx),
 		nevmIndexer: nevmIndexerIn,
@@ -184,7 +170,6 @@ func NewZMQRep(stackIn *node.Node, ethIn *Ethereum, NEVMPubEP string, nevmIndexe
 		cancel:      cancel,
 	}
 	log.Info("zmq Init")
-	zmq.Init(NEVMPubEP)
 	return zmq
 }
 
