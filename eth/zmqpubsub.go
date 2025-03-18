@@ -33,15 +33,26 @@ type ZMQRep struct {
 	rep         zmq4.Socket
 	nevmIndexer NEVMIndex
 	inited      bool
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
-
+// Close is idempotent
 func (zmq *ZMQRep) Close() {
 	if !zmq.inited {
 		return
 	}
-	zmq.rep.Close()
-	log.Error("ZMQ socket closed")
+
+	zmq.cancel()
+
+	if err := zmq.rep.Close(); err != nil {
+		log.Error("ZMQ socket close error", "err", err)
+	} else {
+		log.Info("ZMQ socket closed successfully")
+	}
+
+	zmq.inited = false
 }
+
 
 func (zmq *ZMQRep) Init(nevmEP string) error {
 	err := zmq.rep.Listen(nevmEP)
@@ -51,80 +62,110 @@ func (zmq *ZMQRep) Init(nevmEP string) error {
 	}
 	go func(zmq *ZMQRep) {
 		for {
-			msg, err := zmq.rep.Recv()
-			if err != nil {
-				if err.Error() == "context canceled" {
-					return
-				}
-				log.Error("ZMQ: could not receive message", "err", err)
-				continue
-			}
-			if len(msg.Frames) != 2 {
-				log.Error("Invalid number of message frames", "len", len(msg.Frames))
-				continue
-			}
-			strTopic := string(msg.Frames[0])
-			if strTopic == "nevmcomms" {
-				if string(msg.Frames[1]) == "\ndisconnect" {
-					log.Info("ZMQ: exiting...")
-					zmq.stack.Close()
-					return
-				}
-				if string(msg.Frames[1]) == "\fstartnetwork" {
-					zmq.eth.Downloader().StartNetworkEvent()
-				}
-				msgSend := zmq4.NewMsgFrom([]byte("nevmcomms"), []byte("ack"))
-				zmq.rep.SendMulti(msgSend)
-			} else if strTopic == "nevmconnect" {
-				result := "connected"
-				var nevmBlockConnect types.NEVMBlockConnect
-				err = nevmBlockConnect.Deserialize(msg.Frames[1])
+			select {
+			case <-zmq.ctx.Done():
+				log.Info("ZMQ listener stopped due to context cancellation")
+				return
+			default:
+				msg, err := zmq.rep.Recv()
 				if err != nil {
-					log.Error("addBlockSub Deserialize", "err", err)
-					result = err.Error()
-				} else {
-					err = zmq.nevmIndexer.AddBlock(&nevmBlockConnect, zmq.eth)
+					if zmq.ctx.Err() != nil {
+						log.Info("ZMQ context cancelled, exiting loop")
+						return
+					}
+					log.Error("ZMQ receive error", "err", err)
+					continue
+				}
+				if len(msg.Frames) != 2 {
+					log.Error("Invalid number of message frames", "len", len(msg.Frames))
+					continue
+				}
+				strTopic := string(msg.Frames[0])
+				if strTopic == "nevmcomms" {
+					if string(msg.Frames[1]) == "\ndisconnect" {
+						log.Info("ZMQ: exiting...")
+						if zmq.stack != nil {
+							go func() {
+								if err := zmq.stack.Close(); err != nil {
+									log.Error("Stack close error", "err", err)
+								} else {
+									log.Info("Stack closed gracefully")
+								}
+								zmq.stack.Wait()
+								log.Info("Stack shutdown completed successfully")
+							}()
+						} else {
+							log.Error("ZMQ: STACK EMPTY...")
+						}
+						zmq.Close()
+						return
+					}
+					if string(msg.Frames[1]) == "\fstartnetwork" {
+						zmq.eth.Downloader().StartNetworkEvent()
+					}
+					msgSend := zmq4.NewMsgFrom([]byte("nevmcomms"), []byte("ack"))
+					if err := zmq.rep.SendMulti(msgSend); err != nil {
+						log.Error("ZMQ send error", "topic", strTopic, "err", err)
+					}					
+				} else if strTopic == "nevmconnect" {
+					result := "connected"
+					var nevmBlockConnect types.NEVMBlockConnect
+					err = nevmBlockConnect.Deserialize(msg.Frames[1])
 					if err != nil {
-						log.Error("addBlockSub AddBlock", "err", err)
+						log.Error("addBlockSub Deserialize", "err", err)
 						result = err.Error()
+					} else {
+						err = zmq.nevmIndexer.AddBlock(&nevmBlockConnect, zmq.eth)
+						if err != nil {
+							log.Error("addBlockSub AddBlock", "err", err)
+							result = err.Error()
+						}
 					}
-				}
-				msgSend := zmq4.NewMsgFrom([]byte("nevmconnect"), []byte(result))
-				zmq.rep.SendMulti(msgSend)
-			} else if strTopic == "nevmdisconnect" {
-				result := "disconnected"
-				var nevmBlockDisconnect types.NEVMBlockDisconnect
-				err = nevmBlockDisconnect.Deserialize(msg.Frames[1])
-				if err != nil {
-					log.Error("deleteBlockSub Deserialize", "err", err)
-					result = err.Error()
-				} else {
-					err = zmq.nevmIndexer.DeleteBlock(&nevmBlockDisconnect, zmq.eth)
+					msgSend := zmq4.NewMsgFrom([]byte("nevmconnect"), []byte(result))
+					if err := zmq.rep.SendMulti(msgSend); err != nil {
+						log.Error("ZMQ send error", "topic", strTopic, "err", err)
+					}					
+				} else if strTopic == "nevmdisconnect" {
+					result := "disconnected"
+					var nevmBlockDisconnect types.NEVMBlockDisconnect
+					err = nevmBlockDisconnect.Deserialize(msg.Frames[1])
 					if err != nil {
-						log.Error("deleteBlockSub DeleteBlock", "err", err)
+						log.Error("deleteBlockSub Deserialize", "err", err)
 						result = err.Error()
+					} else {
+						err = zmq.nevmIndexer.DeleteBlock(&nevmBlockDisconnect, zmq.eth)
+						if err != nil {
+							log.Error("deleteBlockSub DeleteBlock", "err", err)
+							result = err.Error()
+						}
 					}
-				}
-				msgSend := zmq4.NewMsgFrom([]byte("nevmdisconnect"), []byte(result))
-				zmq.rep.SendMulti(msgSend)
-			} else if strTopic == "nevmblock" {
-				var nevmBlockConnectBytes []byte
-				block := zmq.nevmIndexer.CreateBlock(zmq.eth)
-				if block != nil {
-					var NEVMBlockConnect types.NEVMBlockConnect
-					nevmBlockConnectBytes, err = NEVMBlockConnect.Serialize(block)
-					if err != nil {
-						log.Error("createBlockSub", "err", err)
-						nevmBlockConnectBytes = make([]byte, 0)
+					msgSend := zmq4.NewMsgFrom([]byte("nevmdisconnect"), []byte(result))
+					if err := zmq.rep.SendMulti(msgSend); err != nil {
+						log.Error("ZMQ send error", "topic", strTopic, "err", err)
+					}	
+				} else if strTopic == "nevmblock" {
+					var nevmBlockConnectBytes []byte
+					block := zmq.nevmIndexer.CreateBlock(zmq.eth)
+					if block != nil {
+						var NEVMBlockConnect types.NEVMBlockConnect
+						nevmBlockConnectBytes, err = NEVMBlockConnect.Serialize(block)
+						if err != nil {
+							log.Error("createBlockSub", "err", err)
+							nevmBlockConnectBytes = make([]byte, 0)
+						}
 					}
+					msgSend := zmq4.NewMsgFrom([]byte("nevmblock"), nevmBlockConnectBytes)
+					if err := zmq.rep.SendMulti(msgSend); err != nil {
+						log.Error("ZMQ send error", "topic", strTopic, "err", err)
+					}	
+					nevmBlockConnectBytes = nil
+				} else if strTopic == "nevmblockinfo" {
+					str := strconv.FormatUint(zmq.eth.blockchain.CurrentBlock().Number.Uint64(), 10)
+					msgSend := zmq4.NewMsgFrom([]byte("nevmblockinfo"), []byte(str))
+					if err := zmq.rep.SendMulti(msgSend); err != nil {
+						log.Error("ZMQ send error", "topic", strTopic, "err", err)
+					}	
 				}
-				msgSend := zmq4.NewMsgFrom([]byte("nevmblock"), nevmBlockConnectBytes)
-				zmq.rep.SendMulti(msgSend)
-				nevmBlockConnectBytes = nil
-			} else if strTopic == "nevmblockinfo" {
-				str := strconv.FormatUint(zmq.eth.blockchain.CurrentBlock().Number.Uint64(), 10)
-				msgSend := zmq4.NewMsgFrom([]byte("nevmblockinfo"), []byte(str))
-				zmq.rep.SendMulti(msgSend)
 			}
 		}
 	}(zmq)
@@ -133,14 +174,17 @@ func (zmq *ZMQRep) Init(nevmEP string) error {
 }
 
 func NewZMQRep(stackIn *node.Node, ethIn *Ethereum, NEVMPubEP string, nevmIndexerIn NEVMIndex) *ZMQRep {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 	zmq := &ZMQRep{
 		stack:       stackIn,
 		eth:         ethIn,
 		rep:         zmq4.NewRep(ctx),
 		nevmIndexer: nevmIndexerIn,
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 	log.Info("zmq Init")
 	zmq.Init(NEVMPubEP)
 	return zmq
 }
+
