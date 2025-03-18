@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	// SYSCOIN
+	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
@@ -237,6 +239,11 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 	if err != nil {
 		log.Error("Failed to create sealing context", "err", err)
 		return nil, err
+	}
+	// SYSCOIN
+	if miner.chainConfig.NexusBlock != nil &&
+		miner.chainConfig.NexusBlock.Cmp(header.Number) == 0 {
+		misc.ApplyNexusHardFork(env.state)
 	}
 	if header.ParentBeaconRoot != nil {
 		core.ProcessBeaconBlockRoot(*header.ParentBeaconRoot, env.evm)
