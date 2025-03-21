@@ -37,7 +37,7 @@ import (
 	"github.com/ethereum/go-verkle"
 	// SYSCOIN
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/syscoin/btcd/wire"
+	"github.com/syscoin/syscoinwire/syscoin/wire"
 )
 
 // A BlockNonce is a 64-bit hash which proves (combined with the
