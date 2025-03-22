@@ -34,6 +34,16 @@ var SyscoinBootnodes = []string{
 var TanenbaumBootnodes = []string{
 	"enode://f0e3e91d3d28b808734ce08b10855b5e6b6bde8eb9e4bedaf8aababc2ceaa8f4134cec309a996765f183361f1e67bce341326c05b743ed5932a8e705149364e4@44.238.217.166:30303",
 }
+
+// HoodiBootnodes are the enode URLs of the P2P bootstrap nodes running on the
+// Hoodi test network.
+var HoodiBootnodes = []string{
+	// EF DevOps
+	"enode://2112dd3839dd752813d4df7f40936f06829fc54c0e051a93967c26e5f5d27d99d886b57b4ffcc3c475e930ec9e79c56ef1dbb7d86ca5ee83a9d2ccf36e5c240c@134.209.138.84:30303",
+	"enode://60203fcb3524e07c5df60a14ae1c9c5b24023ea5d47463dfae051d2c9f3219f309657537576090ca0ae641f73d419f53d8e8000d7a464319d4784acd7d2abc41@209.38.124.160:30303",
+	"enode://8ae4a48101b2299597341263da0deb47cc38aa4d3ef4b7430b897d49bfa10eb1ccfe1655679b1ed46928ef177fbf21b86837bd724400196c508427a6f41602cd@134.199.184.23:30303",
+}
+
 // HoleskyBootnodes are the enode URLs of the P2P bootstrap nodes running on the
 // Holesky test network.
 var HoleskyBootnodes = []string{
@@ -94,6 +104,8 @@ func KnownDNSNetwork(genesis common.Hash, protocol string) string {
 		net = "sepolia"
 	case HoleskyGenesisHash:
 		net = "holesky"
+	case HoodiGenesisHash:
+		net = "hoodi"
 	default:
 		return ""
 	}
