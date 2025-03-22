@@ -332,7 +332,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return eth.miner.GenerateWorkSyscoin(eth.blockchain.CurrentBlock().Hash(), eth.config.Miner.Etherbase, crypto.Keccak256Hash([]byte{byte(123)}))
 	}
 	var (
-		batchSize         = 100 // Number of blocks to batch before processing
+		batchSize          = 100 // Number of blocks to batch before processing
 		blockConnectBuffer = make([]*types.NEVMBlockConnect, 0, batchSize)
 	)
 	
@@ -340,25 +340,40 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if nevmBlockConnectIn == nil || nevmBlockConnectIn.Block == nil {
 			return errors.New("addBlock: Empty block")
 		}
-		currentHead := eth.blockchain.CurrentBlock()
-		incomingParentHash := nevmBlockConnectIn.Block.ParentHash()
+	
+		var lastBlockNumber *big.Int
+		var lastBlockHash common.Hash
+	
+		// If batch is empty, reference current head, else reference last block in batch
+		if len(blockConnectBuffer) == 0 {
+			currentHead := eth.blockchain.CurrentBlock()
+			lastBlockNumber = currentHead.Number
+			lastBlockHash = currentHead.Hash()
+		} else {
+			lastInBatch := blockConnectBuffer[len(blockConnectBuffer)-1].Block
+			lastBlockNumber = lastInBatch.Number()
+			lastBlockHash = lastInBatch.Hash()
+		}
+	
+		expectedBlockNumber := new(big.Int).Add(lastBlockNumber, big.NewInt(1))
 		incomingBlockNumber := nevmBlockConnectIn.Block.Number()
-		expectedBlockNumber := new(big.Int).Add(currentHead.Number, big.NewInt(1))
-
-		if incomingBlockNumber.Cmp(expectedBlockNumber) != 0 || incomingParentHash != currentHead.Hash() {
+		incomingParentHash := nevmBlockConnectIn.Block.ParentHash()
+	
+		if incomingBlockNumber.Cmp(expectedBlockNumber) != 0 || incomingParentHash != lastBlockHash {
 			log.Error("Non contiguous block insert",
-				"number", nevmBlockConnectIn.Block.Number(),
+				"number", incomingBlockNumber,
 				"hash", nevmBlockConnectIn.Block.Hash(),
-				"parent", nevmBlockConnectIn.Block.ParentHash(),
-				"prevnumber", currentHead.Number,
-				"prevhash", currentHead.Hash(),
+				"parent", incomingParentHash,
+				"prevnumber", lastBlockNumber,
+				"prevhash", lastBlockHash,
 			)
-			return fmt.Errorf("non contiguous insert: current block #%d [%x..], new block #%d [%x..] (parent [%x..])",
-				currentHead.Number, currentHead.Hash().Bytes()[:4],
+			return fmt.Errorf("non contiguous insert: last block #%d [%x..], new block #%d [%x..] (parent [%x..])",
+				lastBlockNumber.Uint64(), lastBlockHash.Bytes()[:4],
 				incomingBlockNumber.Uint64(), nevmBlockConnectIn.Block.Hash().Bytes()[:4],
 				incomingParentHash.Bytes()[:4],
 			)
 		}
+	
 		// Special case where miner process includes validating block in pre-packaging stage on SYS node
 		sysBlockHash := common.BytesToHash([]byte(nevmBlockConnectIn.Sysblockhash))
 		if sysBlockHash == (common.Hash{}) {
@@ -370,22 +385,22 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	
 		// Add block to the buffer
 		blockConnectBuffer = append(blockConnectBuffer, nevmBlockConnectIn)
+	
 		// Check if we should process the buffer (batch size reached or sync finished)
 		if eth.handler.peers.closed && len(blockConnectBuffer) < batchSize {
 			return nil
 		}
 	
-		// Process the buffer
+		// Process the batch
 		batch := blockConnectBuffer
-		blockConnectBuffer = make([]*types.NEVMBlockConnect, 0, batchSize) // Clear the buffer for next batch
+		blockConnectBuffer = make([]*types.NEVMBlockConnect, 0, batchSize)
 	
-		// Prepare the blocks for insertion
 		blockBuffer := make([]*types.Block, 0, len(batch))
 		for _, nevmBlockConnect := range batch {
 			nevmBlockConnect.Block.NevmBlockConnect = nevmBlockConnect
 			blockBuffer = append(blockBuffer, nevmBlockConnect.Block)
 		}
-		// Insert the batch of blocks into the blockchain
+	
 		if _, err := eth.blockchain.InsertChain(blockBuffer); err != nil {
 			return err
 		}
@@ -397,6 +412,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	
 		return nil
 	}
+	
 
 	deleteBlock := func(nevmBlockDisconnect *types.NEVMBlockDisconnect, eth *Ethereum) error {
 		current := eth.blockchain.CurrentBlock()
