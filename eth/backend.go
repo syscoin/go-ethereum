@@ -120,6 +120,7 @@ type Ethereum struct {
 	zmqRep            *ZMQRep
 	timeLastBlock     int64
 	stack             *node.Node
+	closeHandler chan struct{}
 }
 
 // New creates a new Ethereum object (including the initialisation of the common Ethereum object),
@@ -435,6 +436,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		eth.zmqRep = NewZMQRep(stack, eth, config.NEVMPubEP, NEVMIndex{createBlock, addBlock, deleteBlock})
 	}
 	// SYSCOIN
+	eth.closeHandler = make(chan struct{})
 	eth.wg.Add(1)
     go eth.networkingLoop()
 	eth.stack = stack
@@ -466,11 +468,15 @@ func (eth *Ethereum) networkingLoop() {
 
 	for {
 		select {
-		case <-eth.closeBloomHandler:
+		case <-eth.closeHandler:
 			return
 
 		case event, ok := <-sub.Chan():
-			if !ok || event == nil {
+			if !ok {
+				// Subscription was closed, exit the loop
+				return
+			}
+			if event == nil {
 				continue
 			}
 			switch event.Data.(type) {
@@ -499,7 +505,7 @@ func (eth *Ethereum) waitForSyncCompletion() bool {
 
 	for {
 		select {
-		case <-eth.closeBloomHandler:
+		case <-eth.closeHandler:
 			return false
 		case <-ticker.C:
 			eth.lock.Lock()
@@ -715,6 +721,9 @@ func (s *Ethereum) Stop() error {
 	s.wgNEVM.Wait()
 	if s.zmqRep != nil {
 		s.zmqRep.Close()
+	}
+	if s.closeHandler != nil {
+		close(s.closeHandler)
 	}
 	return nil
 }
