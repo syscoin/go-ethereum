@@ -340,7 +340,25 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if nevmBlockConnectIn == nil || nevmBlockConnectIn.Block == nil {
 			return errors.New("addBlock: Empty block")
 		}
-	
+		currentHead := eth.blockchain.CurrentBlock()
+		incomingParentHash := nevmBlockConnectIn.Block.ParentHash()
+		incomingBlockNumber := nevmBlockConnectIn.Block.Number()
+		expectedBlockNumber := new(big.Int).Add(currentHead.Number, big.NewInt(1))
+
+		if incomingBlockNumber.Cmp(expectedBlockNumber) != 0 || incomingParentHash != currentHead.Hash() {
+			log.Error("Non contiguous block insert",
+				"number", nevmBlockConnectIn.Block.Number(),
+				"hash", nevmBlockConnectIn.Block.Hash(),
+				"parent", nevmBlockConnectIn.Block.ParentHash(),
+				"prevnumber", currentHead.Number,
+				"prevhash", currentHead.Hash(),
+			)
+			return fmt.Errorf("non contiguous insert: current block #%d [%x..], new block #%d [%x..] (parent [%x..])",
+				currentHead.Number, currentHead.Hash().Bytes()[:4],
+				incomingBlockNumber.Uint64(), nevmBlockConnectIn.Block.Hash().Bytes()[:4],
+				incomingParentHash.Bytes()[:4],
+			)
+		}
 		// Special case where miner process includes validating block in pre-packaging stage on SYS node
 		sysBlockHash := common.BytesToHash([]byte(nevmBlockConnectIn.Sysblockhash))
 		if sysBlockHash == (common.Hash{}) {
