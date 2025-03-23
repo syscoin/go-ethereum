@@ -69,17 +69,6 @@ import (
 // Config contains the configuration options of the ETH protocol.
 // Deprecated: use ethconfig.Config instead.
 type Config = ethconfig.Config
-// SYSCOIN
-type NEVMCreateBlockFn func(*Ethereum) *types.Block
-type NEVMAddBlockFn func(*types.NEVMBlockConnect, *Ethereum) error
-type NEVMDeleteBlockFn func(*types.NEVMBlockDisconnect, *Ethereum) error
-
-type NEVMIndex struct {
-	// Callbacks
-	CreateBlock NEVMCreateBlockFn // Mines a block locally
-	AddBlock    NEVMAddBlockFn    // Connects a new NEVM block
-	DeleteBlock NEVMDeleteBlockFn // Disconnects NEVM tip
-}
 // Ethereum implements the Ethereum full node service.
 type Ethereum struct {
 	// core protocol objects
@@ -121,8 +110,10 @@ type Ethereum struct {
 	timeLastBlock     int64
 	stack             *node.Node
 	closeHandler chan struct{}
+	blockConnectBuffer []*types.NEVMBlockConnect
+	bufferLock         sync.Mutex
 }
-
+var batchSize = 100
 // New creates a new Ethereum object (including the initialisation of the common Ethereum object),
 // whose lifecycle will be managed by the provided node.
 func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
@@ -202,6 +193,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		p2pServer:       stack.Server(),
 		discmix:         enode.NewFairMix(0),
 		shutdownTracker: shutdowncheck.NewShutdownTracker(chainDb),
+		// SYSCOIN
+		closeHandler:        make(chan struct{}),
+		stack:               stack,
+		blockConnectBuffer:  make([]*types.NEVMBlockConnect, 0, batchSize),
 	}
 	bcVersion := rawdb.ReadDatabaseVersion(chainDb)
 	var dbVer = "<nil>"
@@ -325,155 +320,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	// Successful startup; push a marker and check previous unclean shutdowns.
 	eth.shutdownTracker.MarkStartup()
-	// SYSCOIN
-	createBlock := func(eth *Ethereum) *types.Block {
-		eth.wgNEVM.Add(1)
-		defer eth.wgNEVM.Done()
-		return eth.miner.GenerateWorkSyscoin(eth.blockchain.CurrentBlock().Hash(), eth.config.Miner.Etherbase, crypto.Keccak256Hash([]byte{byte(123)}))
-	}
-	var (
-		batchSize          = 100 // Number of blocks to batch before processing
-		blockConnectBuffer = make([]*types.NEVMBlockConnect, 0, batchSize)
-	)
-	
-	addBlock := func(nevmBlockConnectIn *types.NEVMBlockConnect, eth *Ethereum) error {
-		if nevmBlockConnectIn == nil || nevmBlockConnectIn.Block == nil {
-			return errors.New("addBlock: Empty block")
-		}
-	
-		var lastBlockNumber *big.Int
-		var lastBlockHash common.Hash
-	
-		// If batch is empty, reference current head, else reference last block in batch
-		if len(blockConnectBuffer) == 0 {
-			currentHead := eth.blockchain.CurrentBlock()
-			lastBlockNumber = currentHead.Number
-			lastBlockHash = currentHead.Hash()
-		} else {
-			lastInBatch := blockConnectBuffer[len(blockConnectBuffer)-1].Block
-			lastBlockNumber = lastInBatch.Number()
-			lastBlockHash = lastInBatch.Hash()
-		}
-	
-		expectedBlockNumber := new(big.Int).Add(lastBlockNumber, big.NewInt(1))
-		incomingBlockNumber := nevmBlockConnectIn.Block.Number()
-		incomingParentHash := nevmBlockConnectIn.Block.ParentHash()
-	
-		if incomingBlockNumber.Cmp(expectedBlockNumber) != 0 || incomingParentHash != lastBlockHash {
-			log.Error("Non contiguous block insert",
-				"number", incomingBlockNumber,
-				"hash", nevmBlockConnectIn.Block.Hash(),
-				"parent", incomingParentHash,
-				"prevnumber", lastBlockNumber,
-				"prevhash", lastBlockHash,
-			)
-			return fmt.Errorf("non contiguous insert: last block #%d [%x..], new block #%d [%x..] (parent [%x..])",
-				lastBlockNumber.Uint64(), lastBlockHash.Bytes()[:4],
-				incomingBlockNumber.Uint64(), nevmBlockConnectIn.Block.Hash().Bytes()[:4],
-				incomingParentHash.Bytes()[:4],
-			)
-		}
-	
-		// Special case where miner process includes validating block in pre-packaging stage on SYS node
-		sysBlockHash := common.BytesToHash([]byte(nevmBlockConnectIn.Sysblockhash))
-		if sysBlockHash == (common.Hash{}) {
-			if err := eth.engine.VerifyHeader(eth.blockchain, nevmBlockConnectIn.Block.Header()); err != nil {
-				return err
-			}
-			return nil
-		}
-	
-		// Add block to the buffer
-		blockConnectBuffer = append(blockConnectBuffer, nevmBlockConnectIn)
-	
-		// Check if we should process the buffer (batch size reached or sync finished)
-		if eth.handler.peers.closed && len(blockConnectBuffer) < batchSize {
-			return nil
-		}
-	
-		// Process the batch
-		batch := blockConnectBuffer
-		blockConnectBuffer = make([]*types.NEVMBlockConnect, 0, batchSize)
-	
-		blockBuffer := make([]*types.Block, 0, len(batch))
-		for _, nevmBlockConnect := range batch {
-			nevmBlockConnect.Block.NevmBlockConnect = nevmBlockConnect
-			blockBuffer = append(blockBuffer, nevmBlockConnect.Block)
-		}
-	
-		if _, err := eth.blockchain.InsertChain(blockBuffer); err != nil {
-			return err
-		}
-	
-		// Update the last block time
-		eth.lock.Lock()
-		eth.timeLastBlock = time.Now().Unix()
-		eth.lock.Unlock()
-	
-		return nil
-	}
-	
-
-	deleteBlock := func(nevmBlockDisconnect *types.NEVMBlockDisconnect, eth *Ethereum) error {
-		current := eth.blockchain.CurrentBlock()
-		if current == nil {
-			return errors.New("deleteBlock: Current block is nil")
-		}
-		currentNumber := current.Number.Uint64()
-		if currentNumber == 0 {
-			log.Warn("Trying to disconnect block 0")
-			return nil
-		}
-		parent := eth.blockchain.GetBlock(current.ParentHash, currentNumber-1)
-		if parent == nil {
-			return errors.New("deleteBlock: Parent block not found")
-		}
-		headHash, err := eth.blockchain.SetCanonical(parent)
-		if err != nil {
-			return err
-		}
-		if parent.Hash() != headHash {
-			return errors.New("deleteBlock: Mismatch after setting canonical head")
-		}
-	
-		batch := eth.ChainDb().NewBatch()
-		if(nevmBlockDisconnect.HasDiff()) {
-			for _, entry := range nevmBlockDisconnect.Diff.AddedMNNEVM {
-				addr := common.BytesToAddress(entry.Address)
-				eth.blockchain.StoreNEVMAddress(batch, addr, entry.CollateralHeight)
-		
-			}
-			for _, entry := range nevmBlockDisconnect.Diff.UpdatedMNNEVM {
-				oldAddr := common.BytesToAddress(entry.OldAddress)
-				newAddr := common.BytesToAddress(entry.NewAddress)	
-				eth.blockchain.RemoveNEVMAddress(batch, oldAddr)
-				eth.blockchain.StoreNEVMAddress(batch, newAddr, entry.CollateralHeight)
-
-			}
-			for _, entry := range nevmBlockDisconnect.Diff.RemovedMNNEVM {
-				addr := common.BytesToAddress(entry.Address)
-				eth.blockchain.RemoveNEVMAddress(batch, addr)
-			}
-		}
-	
-		// Clean up related hashes
-		eth.blockchain.DeleteSYSHash(batch, currentNumber)
-		eth.blockchain.DeleteDataHashes(batch, currentNumber)
-	
-		if err := batch.Write(); err != nil {
-			log.Crit("Failed to write NEVM batch during block disconnect", "err", err)
-		}
-	
-		return nil
-	}	
+	// SYSCOIN	
 	if eth.blockchain.GetChainConfig().SyscoinBlock != nil {
-		eth.zmqRep = NewZMQRep(stack, eth, config.NEVMPubEP, NEVMIndex{createBlock, addBlock, deleteBlock})
+		eth.zmqRep = NewZMQRep(stack, eth, config.NEVMPubEP)
+		eth.wg.Add(1)
+		go eth.networkingLoop()
 	}
-	// SYSCOIN
-	eth.closeHandler = make(chan struct{})
-	eth.wg.Add(1)
-    go eth.networkingLoop()
-	eth.stack = stack
 	return eth, nil
 }
 
@@ -492,6 +344,204 @@ func makeExtraData(extra []byte) []byte {
 		extra = nil
 	}
 	return extra
+}
+// SYSCOIN
+func (eth *Ethereum) CreateBlock() *types.Block {
+	eth.wgNEVM.Add(1)
+	defer eth.wgNEVM.Done()
+
+	if err := eth.flushBufferedBlocks(); err != nil {
+		log.Crit("Failed flushing buffer before createBlock", "err", err)
+		return nil
+	}
+
+	return eth.miner.GenerateWorkSyscoin(
+		eth.blockchain.CurrentBlock().Hash(),
+		eth.config.Miner.Etherbase,
+		crypto.Keccak256Hash([]byte{123}),
+	)
+}
+
+func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error {
+	if nevmBlockConnectIn == nil || nevmBlockConnectIn.Block == nil {
+		return errors.New("addBlock: Empty block")
+	}
+	var lastBlockNumber *big.Int
+	var lastBlockHash common.Hash
+
+	if len(eth.blockConnectBuffer) == 0 {
+		currentHead := eth.blockchain.CurrentBlock()
+		lastBlockNumber = currentHead.Number
+		lastBlockHash = currentHead.Hash()
+	} else {
+		lastInBatch := eth.blockConnectBuffer[len(eth.blockConnectBuffer)-1].Block
+		lastBlockNumber = lastInBatch.Number()
+		lastBlockHash = lastInBatch.Hash()
+	}
+
+	expectedBlockNumber := new(big.Int).Add(lastBlockNumber, big.NewInt(1))
+	incomingBlockNumber := nevmBlockConnectIn.Block.Number()
+	incomingParentHash := nevmBlockConnectIn.Block.ParentHash()
+
+	if incomingBlockNumber.Cmp(expectedBlockNumber) != 0 || incomingParentHash != lastBlockHash {
+		log.Error("Non contiguous block insert",
+			"number", incomingBlockNumber,
+			"hash", nevmBlockConnectIn.Block.Hash(),
+			"parent", incomingParentHash,
+			"prevnumber", lastBlockNumber,
+			"prevhash", lastBlockHash,
+		)
+		return fmt.Errorf("non contiguous insert: last block #%d [%x..], new block #%d [%x..] (parent [%x..])",
+			lastBlockNumber.Uint64(), lastBlockHash.Bytes()[:4],
+			incomingBlockNumber.Uint64(), nevmBlockConnectIn.Block.Hash().Bytes()[:4],
+			incomingParentHash.Bytes()[:4],
+		)
+	}
+
+	sysBlockHash := common.BytesToHash([]byte(nevmBlockConnectIn.Sysblockhash))
+	if sysBlockHash == (common.Hash{}) {
+		if err := eth.engine.VerifyHeader(eth.blockchain, nevmBlockConnectIn.Block.Header()); err != nil {
+			return err
+		}
+		return nil
+	}
+	eth.bufferLock.Lock()
+	eth.blockConnectBuffer = append(eth.blockConnectBuffer, nevmBlockConnectIn)
+	bufferLen := len(eth.blockConnectBuffer)
+	eth.bufferLock.Unlock() 
+	// Update timestamp immediately upon receiving each individual block
+	eth.lock.Lock()
+	eth.timeLastBlock = time.Now().Unix()
+	eth.lock.Unlock()
+
+	if eth.handler.peers.closed && bufferLen < batchSize {
+		return nil
+	}
+
+	return eth.flushBufferedBlocks()
+}
+
+func (eth *Ethereum) flushBufferedBlocks() error {
+    eth.bufferLock.Lock()
+    defer eth.bufferLock.Unlock()
+
+    if len(eth.blockConnectBuffer) == 0 {
+        return nil
+    }
+
+    blockBuffer := make([]*types.Block, 0, len(eth.blockConnectBuffer))
+    for _, nevmBlockConnect := range eth.blockConnectBuffer {
+        nevmBlockConnect.Block.NevmBlockConnect = nevmBlockConnect
+        blockBuffer = append(blockBuffer, nevmBlockConnect.Block)
+    }
+
+    if _, err := eth.blockchain.InsertChain(blockBuffer); err != nil {
+        return err
+    }
+
+    eth.blockConnectBuffer = eth.blockConnectBuffer[:0] // safely clear buffer
+    return nil
+}
+
+func (eth *Ethereum) disconnectBufferedBlock(blockHash common.Hash) (bool, error) {
+    eth.bufferLock.Lock()
+    defer eth.bufferLock.Unlock()
+
+    if len(eth.blockConnectBuffer) == 0 {
+        // Buffer empty, safely signal caller to proceed with disk rollback
+        log.Info("Buffer empty, block must be disconnected from persisted chain", "hash", blockHash)
+        return false, nil
+    }
+
+    foundIndex := -1
+    for i, buffered := range eth.blockConnectBuffer {
+        if common.BytesToHash([]byte(buffered.Sysblockhash)) == blockHash {
+            foundIndex = i
+            break
+        }
+    }
+
+    if foundIndex == -1 {
+        // Critical mismatch: buffer is non-empty but block not found
+        errMsg := fmt.Sprintf("Critical: buffer non-empty but block [%x] not found during disconnect", blockHash.Bytes()[:4])
+        log.Crit(errMsg)
+        return false, errors.New(errMsg)
+    }
+
+    // Remove the block and descendants from buffer
+    removedBlocks := eth.blockConnectBuffer[foundIndex:]
+    eth.blockConnectBuffer = eth.blockConnectBuffer[:foundIndex]
+
+    log.Info("Buffered blocks disconnected",
+        "removedCount", len(removedBlocks),
+        "disconnectedSysHash", blockHash,
+    )
+
+    return true, nil
+}
+
+// deleteBlock reverts the blockchain by one NEVM block
+func (eth *Ethereum) DeleteBlock(nevmBlockDisconnect *types.NEVMBlockDisconnect) error {
+	disconnectHash := common.BytesToHash([]byte(nevmBlockDisconnect.Sysblockhash))
+    // Attempt disconnect from buffer first
+    buffered, err := eth.disconnectBufferedBlock(disconnectHash)
+    if err != nil {
+        return err
+    }
+
+    if buffered {
+        // Block was found and disconnected from the buffer, no further action needed.
+        return nil
+    }
+
+	current := eth.blockchain.CurrentBlock()
+	if current == nil {
+		return errors.New("deleteBlock: Current block is nil")
+	}
+	currentNumber := current.Number.Uint64()
+	if currentNumber == 0 {
+		log.Warn("Trying to disconnect block 0")
+		return nil
+	}
+
+	parent := eth.blockchain.GetBlock(current.ParentHash, currentNumber-1)
+	if parent == nil {
+		return errors.New("deleteBlock: Parent block not found")
+	}
+	headHash, err := eth.blockchain.SetCanonical(parent)
+	if err != nil {
+		return err
+	}
+	if parent.Hash() != headHash {
+		return errors.New("deleteBlock: Mismatch after setting canonical head")
+	}
+
+	batch := eth.ChainDb().NewBatch()
+	if nevmBlockDisconnect.HasDiff() {
+		for _, entry := range nevmBlockDisconnect.Diff.AddedMNNEVM {
+			addr := common.BytesToAddress(entry.Address)
+			eth.blockchain.StoreNEVMAddress(batch, addr, entry.CollateralHeight)
+		}
+		for _, entry := range nevmBlockDisconnect.Diff.UpdatedMNNEVM {
+			oldAddr := common.BytesToAddress(entry.OldAddress)
+			newAddr := common.BytesToAddress(entry.NewAddress)
+			eth.blockchain.RemoveNEVMAddress(batch, oldAddr)
+			eth.blockchain.StoreNEVMAddress(batch, newAddr, entry.CollateralHeight)
+		}
+		for _, entry := range nevmBlockDisconnect.Diff.RemovedMNNEVM {
+			addr := common.BytesToAddress(entry.Address)
+			eth.blockchain.RemoveNEVMAddress(batch, addr)
+		}
+	}
+
+	eth.blockchain.DeleteSYSHash(batch, currentNumber)
+	eth.blockchain.DeleteDataHashes(batch, currentNumber)
+
+	if err := batch.Write(); err != nil {
+		log.Crit("Failed to write NEVM batch during block disconnect", "err", err)
+	}
+
+	return nil
 }
 // SYSCOIN start networking sync once we start inserting chain meaning we are likely finished with IBD
 func (eth *Ethereum) networkingLoop() {
@@ -732,6 +782,11 @@ func (s *Ethereum) setupDiscovery() error {
 // Stop implements node.Lifecycle, terminating all internal goroutines used by the
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
+	// SYSCOIN
+    // Flush buffered blocks first
+    if err := s.flushBufferedBlocks(); err != nil {
+        log.Error("Failed to flush buffered blocks on shutdown", "err", err)
+    }
 	// Stop all the peer-related stuff first.
 	s.discmix.Close()
 	s.handler.Stop()

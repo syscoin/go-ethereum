@@ -31,7 +31,6 @@ type ZMQRep struct {
 	NEVMPubEP   string
 	eth         *Ethereum
 	rep         zmq4.Socket
-	nevmIndexer NEVMIndex
 	inited      bool
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -101,7 +100,7 @@ func (zmq *ZMQRep) InitZMQListener() error {
 						log.Error("addBlockSub Deserialize", "err", err)
 						result = err.Error()
 					} else {
-						err = zmq.nevmIndexer.AddBlock(&nevmBlockConnect, zmq.eth)
+						err = zmq.eth.AddBlock(&nevmBlockConnect)
 						if err != nil {
 							log.Error("addBlockSub AddBlock", "err", err)
 							result = err.Error()
@@ -119,7 +118,7 @@ func (zmq *ZMQRep) InitZMQListener() error {
 						log.Error("deleteBlockSub Deserialize", "err", err)
 						result = err.Error()
 					} else {
-						err = zmq.nevmIndexer.DeleteBlock(&nevmBlockDisconnect, zmq.eth)
+						err = zmq.eth.DeleteBlock(&nevmBlockDisconnect)
 						if err != nil {
 							log.Error("deleteBlockSub DeleteBlock", "err", err)
 							result = err.Error()
@@ -131,19 +130,27 @@ func (zmq *ZMQRep) InitZMQListener() error {
 					}	
 				} else if strTopic == "nevmblock" {
 					var nevmBlockConnectBytes []byte
-					block := zmq.nevmIndexer.CreateBlock(zmq.eth)
-					if block != nil {
-						var NEVMBlockConnect types.NEVMBlockConnect
-						nevmBlockConnectBytes, err = NEVMBlockConnect.Serialize(block)
+				
+					block := zmq.eth.CreateBlock()
+					if block == nil {
+						log.Error("createBlockSub", "err", "block is nil")
+						nevmBlockConnectBytes = []byte{} // Explicitly empty to signal error clearly
+					} else {
+						var nevmBlockConnect types.NEVMBlockConnect
+						var err error
+						nevmBlockConnectBytes, err = nevmBlockConnect.Serialize(block)
 						if err != nil {
-							log.Error("createBlockSub", "err", err)
-							nevmBlockConnectBytes = make([]byte, 0)
+							log.Error("createBlockSub Serialize failed", "err", err)
+							nevmBlockConnectBytes = []byte{} // explicitly empty if serialization fails
 						}
 					}
+				
 					msgSend := zmq4.NewMsgFrom([]byte("nevmblock"), nevmBlockConnectBytes)
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
-					}	
+					}
+				
+					// explicitly clear bytes after send (optional, helps GC)
 					nevmBlockConnectBytes = nil
 				} else if strTopic == "nevmblockinfo" {
 					str := strconv.FormatUint(zmq.eth.blockchain.CurrentBlock().Number.Uint64(), 10)
@@ -159,13 +166,12 @@ func (zmq *ZMQRep) InitZMQListener() error {
 	return nil
 }
 
-func NewZMQRep(stackIn *node.Node, ethIn *Ethereum, NEVMPubEPIn string, nevmIndexerIn NEVMIndex) *ZMQRep {
+func NewZMQRep(stackIn *node.Node, ethIn *Ethereum, NEVMPubEPIn string) *ZMQRep {
 	ctx, cancel := context.WithCancel(context.Background())
 	zmq := &ZMQRep{
 		NEVMPubEP:       NEVMPubEPIn,
 		eth:         ethIn,
 		rep:         zmq4.NewRep(ctx),
-		nevmIndexer: nevmIndexerIn,
 		ctx:         ctx,
 		cancel:      cancel,
 	}
