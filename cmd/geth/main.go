@@ -335,7 +335,6 @@ func prepare(ctx *cli.Context) {
 		if !ctx.IsSet(utils.HoleskyFlag.Name) &&
 			!ctx.IsSet(utils.SepoliaFlag.Name) &&
 			// SYSCOIN
-			!ctx.IsSet(utils.SyscoinFlag.Name) &&
 			!ctx.IsSet(utils.TanenbaumFlag.Name) &&
 			!ctx.IsSet(utils.HoodiFlag.Name) &&
 			!ctx.IsSet(utils.DeveloperFlag.Name) {
