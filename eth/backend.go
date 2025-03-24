@@ -365,6 +365,22 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
 	if nevmBlockConnectIn == nil || nevmBlockConnectIn.Block == nil {
 		return errors.New("addBlock: Empty block")
 	}
+	incomingBlockNumber := nevmBlockConnectIn.Block.NumberU64()
+
+	// Check if block already exists at this height
+	existingBlock := eth.blockchain.GetBlockByNumber(incomingBlockNumber)
+	if existingBlock != nil && existingBlock.Hash() == nevmBlockConnectIn.Block.Hash() {
+		log.Info("Block already exists, skipping insert", "number", incomingBlockNumber, "hash", existingBlock.Hash())
+		return nil // Already exists, nothing further to do
+	} else if existingBlock != nil && existingBlock.Hash() != nevmBlockConnectIn.Block.Hash() {
+		log.Warn("Block height collision with different hash",
+			"number", incomingBlockNumber,
+			"existingHash", existingBlock.Hash(),
+			"incomingHash", nevmBlockConnectIn.Block.Hash())
+		return fmt.Errorf("block collision at height %d: existing [%x..], incoming [%x..]",
+		incomingBlockNumber, existingBlock.Hash().Bytes()[:4], nevmBlockConnectIn.Block.Hash().Bytes()[:4])
+	}
+
 	var lastBlockNumber uint64
 	var lastBlockHash common.Hash
 
@@ -378,7 +394,6 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
 		lastBlockHash = lastInBatch.Hash()
 	}
 
-	incomingBlockNumber := nevmBlockConnectIn.Block.NumberU64()
 	incomingParentHash := nevmBlockConnectIn.Block.ParentHash()
 
 	if incomingBlockNumber != lastBlockNumber+1 || incomingParentHash != lastBlockHash {
