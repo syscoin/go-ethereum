@@ -113,7 +113,7 @@ type Ethereum struct {
 	blockConnectBuffer []*types.NEVMBlockConnect
 	bufferLock         sync.Mutex
 }
-var batchSize = 2000
+var batchSize = 100
 // New creates a new Ethereum object (including the initialisation of the common Ethereum object),
 // whose lifecycle will be managed by the provided node.
 func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
