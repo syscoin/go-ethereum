@@ -95,11 +95,10 @@ type generateParams struct {
 	noTxs       bool              // Flag whether an empty block without any transaction is expected
 }
 // SYSCOIN generates a sealing block based on the given parameters.
-func (miner *Miner) GenerateWorkSyscoin(parentHash common.Hash, coinbase common.Address, random common.Hash) *types.Block {
+func (miner *Miner) GenerateWorkSyscoin(coinbase common.Address, random common.Hash) *types.Block {
 	result := miner.generateWork(&generateParams{
 		timestamp:   uint64(time.Now().Unix()),
 		forceTime:   true,
-		parentHash:  parentHash,
 		coinbase:    coinbase,
 		random:      random,
 		withdrawals: nil,
