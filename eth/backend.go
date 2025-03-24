@@ -356,7 +356,6 @@ func (eth *Ethereum) CreateBlock() *types.Block {
 	}
 
 	return eth.miner.GenerateWorkSyscoin(
-		eth.blockchain.CurrentBlock().Hash(),
 		eth.config.Miner.Etherbase,
 		crypto.Keccak256Hash([]byte{123}),
 	)
@@ -366,24 +365,23 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
 	if nevmBlockConnectIn == nil || nevmBlockConnectIn.Block == nil {
 		return errors.New("addBlock: Empty block")
 	}
-	var lastBlockNumber *big.Int
+	var lastBlockNumber uint64
 	var lastBlockHash common.Hash
 
 	if len(eth.blockConnectBuffer) == 0 {
 		currentHead := eth.blockchain.CurrentBlock()
-		lastBlockNumber = currentHead.Number
+		lastBlockNumber = currentHead.Number.Uint64()
 		lastBlockHash = currentHead.Hash()
 	} else {
 		lastInBatch := eth.blockConnectBuffer[len(eth.blockConnectBuffer)-1].Block
-		lastBlockNumber = lastInBatch.Number()
+		lastBlockNumber = lastInBatch.NumberU64()
 		lastBlockHash = lastInBatch.Hash()
 	}
 
-	expectedBlockNumber := new(big.Int).Add(lastBlockNumber, big.NewInt(1))
-	incomingBlockNumber := nevmBlockConnectIn.Block.Number()
+	incomingBlockNumber := nevmBlockConnectIn.Block.NumberU64()
 	incomingParentHash := nevmBlockConnectIn.Block.ParentHash()
 
-	if incomingBlockNumber.Cmp(expectedBlockNumber) != 0 || incomingParentHash != lastBlockHash {
+	if incomingBlockNumber != lastBlockNumber+1 || incomingParentHash != lastBlockHash {
 		log.Error("Non contiguous block insert",
 			"number", incomingBlockNumber,
 			"hash", nevmBlockConnectIn.Block.Hash(),
@@ -392,8 +390,8 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
 			"prevhash", lastBlockHash,
 		)
 		return fmt.Errorf("non contiguous insert: last block #%d [%x..], new block #%d [%x..] (parent [%x..])",
-			lastBlockNumber.Uint64(), lastBlockHash.Bytes()[:4],
-			incomingBlockNumber.Uint64(), nevmBlockConnectIn.Block.Hash().Bytes()[:4],
+			lastBlockNumber, lastBlockHash.Bytes()[:4],
+			incomingBlockNumber, nevmBlockConnectIn.Block.Hash().Bytes()[:4],
 			incomingParentHash.Bytes()[:4],
 		)
 	}
