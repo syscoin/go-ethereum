@@ -362,77 +362,95 @@ func (eth *Ethereum) CreateBlock() *types.Block {
 }
 
 func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error {
-	if nevmBlockConnectIn == nil || nevmBlockConnectIn.Block == nil {
-		return errors.New("addBlock: Empty block")
-	}
-	incomingBlockNumber := nevmBlockConnectIn.Block.NumberU64()
+    if nevmBlockConnectIn == nil || nevmBlockConnectIn.Block == nil {
+        return errors.New("addBlock: Empty block")
+    }
 
-	// Check if block already exists at this height
-	existingBlock := eth.blockchain.GetBlockByNumber(incomingBlockNumber)
-	if existingBlock != nil && existingBlock.Hash() == nevmBlockConnectIn.Block.Hash() {
-		log.Info("Block already exists, skipping insert", "number", incomingBlockNumber, "hash", existingBlock.Hash())
-		return nil // Already exists, nothing further to do
-	} else if existingBlock != nil && existingBlock.Hash() != nevmBlockConnectIn.Block.Hash() {
-		log.Warn("Block height collision with different hash",
-			"number", incomingBlockNumber,
-			"existingHash", existingBlock.Hash(),
-			"incomingHash", nevmBlockConnectIn.Block.Hash())
-		return fmt.Errorf("block collision at height %d: existing [%x..], incoming [%x..]",
-		incomingBlockNumber, existingBlock.Hash().Bytes()[:4], nevmBlockConnectIn.Block.Hash().Bytes()[:4])
-	}
+    incomingBlockNumber := nevmBlockConnectIn.Block.NumberU64()
+    incomingBlockHash := nevmBlockConnectIn.Block.Hash()
 
-	var lastBlockNumber uint64
-	var lastBlockHash common.Hash
+    // Check persisted blockchain first to avoid duplicates or collisions
+    existingBlock := eth.blockchain.GetBlockByNumber(incomingBlockNumber)
+    if existingBlock != nil {
+        if existingBlock.Hash() == incomingBlockHash {
+            log.Info("Block already exists in chain, skipping insert", "number", incomingBlockNumber, "hash", existingBlock.Hash())
+            return nil
+        }
+        log.Warn("Block height collision in chain",
+            "number", incomingBlockNumber,
+            "existingHash", existingBlock.Hash(),
+            "incomingHash", incomingBlockHash)
+        return fmt.Errorf("block collision at height %d: existing [%x..], incoming [%x..]",
+            incomingBlockNumber, existingBlock.Hash().Bytes()[:4], incomingBlockHash.Bytes()[:4])
+    }
 
-	if len(eth.blockConnectBuffer) == 0 {
-		currentHead := eth.blockchain.CurrentBlock()
-		lastBlockNumber = currentHead.Number.Uint64()
-		lastBlockHash = currentHead.Hash()
-	} else {
-		lastInBatch := eth.blockConnectBuffer[len(eth.blockConnectBuffer)-1].Block
-		lastBlockNumber = lastInBatch.NumberU64()
-		lastBlockHash = lastInBatch.Hash()
-	}
+    // Determine last block for continuity check
+    var lastBlockNumber uint64
+    var lastBlockHash common.Hash
 
-	incomingParentHash := nevmBlockConnectIn.Block.ParentHash()
+    eth.bufferLock.Lock()
+    bufferLen := len(eth.blockConnectBuffer)
+    if bufferLen == 0 {
+        currentHead := eth.blockchain.CurrentBlock()
+        lastBlockNumber = currentHead.Number.Uint64()
+        lastBlockHash = currentHead.Hash()
+    } else {
+        lastInBatch := eth.blockConnectBuffer[bufferLen-1].Block
+        lastBlockNumber = lastInBatch.NumberU64()
+        lastBlockHash = lastInBatch.Hash()
 
-	if incomingBlockNumber != lastBlockNumber+1 || incomingParentHash != lastBlockHash {
-		log.Error("Non contiguous block insert",
-			"number", incomingBlockNumber,
-			"hash", nevmBlockConnectIn.Block.Hash(),
-			"parent", incomingParentHash,
-			"prevnumber", lastBlockNumber,
-			"prevhash", lastBlockHash,
-		)
-		return fmt.Errorf("non contiguous insert: last block #%d [%x..], new block #%d [%x..] (parent [%x..])",
-			lastBlockNumber, lastBlockHash.Bytes()[:4],
-			incomingBlockNumber, nevmBlockConnectIn.Block.Hash().Bytes()[:4],
-			incomingParentHash.Bytes()[:4],
-		)
-	}
+        // Check last buffered block directly for duplicate
+        if incomingBlockNumber == lastBlockNumber && incomingBlockHash == lastBlockHash {
+            eth.bufferLock.Unlock()
+            log.Info("Block already buffered as last, skipping insert", "number", incomingBlockNumber, "hash", incomingBlockHash)
+            return nil
+        }
+    }
+    eth.bufferLock.Unlock()
 
-	sysBlockHash := common.BytesToHash([]byte(nevmBlockConnectIn.Sysblockhash))
-	if sysBlockHash == (common.Hash{}) {
-		if err := eth.engine.VerifyHeader(eth.blockchain, nevmBlockConnectIn.Block.Header()); err != nil {
-			return err
-		}
-		return nil
-	}
-	eth.bufferLock.Lock()
-	eth.blockConnectBuffer = append(eth.blockConnectBuffer, nevmBlockConnectIn)
-	bufferLen := len(eth.blockConnectBuffer)
-	eth.bufferLock.Unlock() 
-	// Update timestamp immediately upon receiving each individual block
-	eth.lock.Lock()
-	eth.timeLastBlock = time.Now().Unix()
-	eth.lock.Unlock()
+    incomingParentHash := nevmBlockConnectIn.Block.ParentHash()
 
-	if eth.handler.peers.closed && bufferLen < batchSize {
-		return nil
-	}
+    if incomingBlockNumber != lastBlockNumber+1 || incomingParentHash != lastBlockHash {
+        log.Error("Non contiguous block insert",
+            "number", incomingBlockNumber,
+            "hash", incomingBlockHash,
+            "parent", incomingParentHash,
+            "prevnumber", lastBlockNumber,
+            "prevhash", lastBlockHash,
+        )
+        return fmt.Errorf("non contiguous insert: last block #%d [%x..], new block #%d [%x..] (parent [%x..])",
+            lastBlockNumber, lastBlockHash.Bytes()[:4],
+            incomingBlockNumber, incomingBlockHash.Bytes()[:4],
+            incomingParentHash.Bytes()[:4],
+        )
+    }
 
-	return eth.flushBufferedBlocks()
+    sysBlockHash := common.BytesToHash([]byte(nevmBlockConnectIn.Sysblockhash))
+    if sysBlockHash == (common.Hash{}) {
+        if err := eth.engine.VerifyHeader(eth.blockchain, nevmBlockConnectIn.Block.Header()); err != nil {
+            return err
+        }
+        return nil
+    }
+
+    // Add to buffer
+    eth.bufferLock.Lock()
+    eth.blockConnectBuffer = append(eth.blockConnectBuffer, nevmBlockConnectIn)
+    bufferLen = len(eth.blockConnectBuffer)
+    eth.bufferLock.Unlock()
+
+    // Update timestamp
+    eth.lock.Lock()
+    eth.timeLastBlock = time.Now().Unix()
+    eth.lock.Unlock()
+
+    if eth.handler.peers.closed && bufferLen < batchSize {
+        return nil
+    }
+
+    return eth.flushBufferedBlocks()
 }
+
 
 func (eth *Ethereum) flushBufferedBlocks() error {
     eth.bufferLock.Lock()
