@@ -89,6 +89,8 @@ type Backend interface {
 	ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error)
 	ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error)
 	GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error)
+	HistoryPruningCutoff() uint64
+
 	// This is copied from filters.Backend
 	// eth/filters needs to be initialized from this backend type, so methods needed by
 	// it must also be included here.

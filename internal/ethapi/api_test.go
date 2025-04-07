@@ -520,8 +520,12 @@ func (b testBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) 
 	if number == rpc.PendingBlockNumber {
 		return b.pending, nil
 	}
+	if number == rpc.EarliestBlockNumber {
+		number = 0
+	}
 	return b.chain.GetBlockByNumber(uint64(number)), nil
 }
+
 func (b testBackend) BlockByHash(ctx context.Context, hash common.Hash) (*types.Block, error) {
 	return b.chain.GetBlockByHash(hash), nil
 }
@@ -627,6 +631,10 @@ func (b testBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte
 }
 func (b testBackend) GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error) {
 	return []byte{}, nil
+}
+func (b testBackend) HistoryPruningCutoff() uint64 {
+	bn, _ := b.chain.HistoryPruningCutoff()
+	return bn
 }
 
 func TestEstimateGas(t *testing.T) {
