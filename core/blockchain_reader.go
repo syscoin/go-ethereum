@@ -261,6 +261,14 @@ func (bc *BlockChain) GetReceiptsByHash(hash common.Hash) types.Receipts {
 	return receipts
 }
 
+func (bc *BlockChain) GetRawReceiptsByHash(hash common.Hash) types.Receipts {
+	number := rawdb.ReadHeaderNumber(bc.db, hash)
+	if number == nil {
+		return nil
+	}
+	return rawdb.ReadRawReceipts(bc.db, hash, *number)
+}
+
 // GetUnclesInChain retrieves all the uncles from a given block backwards until
 // a specific distance is reached.
 func (bc *BlockChain) GetUnclesInChain(block *types.Block, length int) []*types.Header {
@@ -437,7 +445,11 @@ func (bc *BlockChain) TxIndexProgress() (TxIndexProgress, error) {
 // HistoryPruningCutoff returns the configured history pruning point.
 // Blocks before this might not be available in the database.
 func (bc *BlockChain) HistoryPruningCutoff() (uint64, common.Hash) {
-	return bc.cacheConfig.HistoryPruningCutoffNumber, bc.cacheConfig.HistoryPruningCutoffHash
+	pt := bc.historyPrunePoint.Load()
+	if pt == nil {
+		return 0, bc.genesisBlock.Hash()
+	}
+	return pt.BlockNumber, pt.BlockHash
 }
 
 // TrieDB retrieves the low level trie database used for data storage.

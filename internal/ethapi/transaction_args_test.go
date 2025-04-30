@@ -411,6 +411,7 @@ func (b *backendMock) GetNEVMAddress(ctx context.Context, address common.Address
 	return []byte{}, nil
 }
 
+func (b *backendMock) CurrentView() *filtermaps.ChainView           { return nil }
 func (b *backendMock) NewMatcherBackend() filtermaps.MatcherBackend { return nil }
 
 func (b *backendMock) HistoryPruningCutoff() uint64 { return 0 }
