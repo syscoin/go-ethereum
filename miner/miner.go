@@ -53,8 +53,8 @@ type Config struct {
 // DefaultConfig contains default settings for miner.
 var DefaultConfig = Config{
 	// SYSCOIN
-	GasCeil:  8_000_000,
-	GasPrice: big.NewInt(100 * params.Wei),
+	GasCeil:  16_000_000,
+	GasPrice: big.NewInt(10000 * params.Wei),
 
 	// The default recommit time is chosen as two seconds since
 	// consensus-layer usually will wait a half slot of time(6s)
