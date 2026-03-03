@@ -692,8 +692,8 @@ func (hc *HeaderChain) DeleteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64) {
 	if idx == 0 {
 		return
 	}
-	// BTC prev hash is only stored on checkpoint carrier blocks, so delete it
-	// alongside the checkpoint mappings (and only in that case).
+	// b2i exists only for carrier blocks that wrote checkpoint metadata, so
+	// mapping cleanup below applies only to those blocks.
 	rawdb.DeleteBTCCheckpointIndexByBlockNumber(db, n)
 	hashBytes := rawdb.ReadBTCCheckpointHashByIndex(hc.chainDb, idx)
 	btcHash := common.BytesToHash(hashBytes)

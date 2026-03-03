@@ -183,4 +183,3 @@ func TestBTCLastCheckpointIndex_OutputAndErrors(t *testing.T) {
 		t.Fatalf("expected 123, got %d", got)
 	}
 }
-

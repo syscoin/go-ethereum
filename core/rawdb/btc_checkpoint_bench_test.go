@@ -73,6 +73,38 @@ func BenchmarkBTCCheckpointReadIndexByHash_WarmPebble(b *testing.B) {
 	}
 }
 
+func BenchmarkBTCCheckpointReadIndexByHashMiss_WarmPebble(b *testing.B) {
+	dir := b.TempDir()
+	kv, err := pebble.New(dir, 64, 64, "", false, false)
+	if err != nil {
+		b.Fatal(err)
+	}
+	db := NewDatabase(kv)
+	defer db.Close()
+
+	const (
+		nTotal = uint64(1000)
+		nRead  = uint64(100)
+	)
+	benchBTCCheckpointPopulate(b, db, nTotal)
+
+	// Deterministic set of absent hashes (warm DB, no reopen).
+	missHashes := make([]common.Hash, nRead)
+	for i := uint64(0); i < nRead; i++ {
+		var h common.Hash
+		binary.BigEndian.PutUint64(h[24:], nTotal+1+i)
+		missHashes[i] = h
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for j := uint64(0); j < nRead; j++ {
+			_ = ReadBTCCheckpointIndexByHash(db, missHashes[j])
+		}
+	}
+}
+
 func BenchmarkBTCCheckpointReadHashByIndex_ReopenPebble(b *testing.B) {
 	dir := b.TempDir()
 
@@ -103,4 +135,3 @@ func BenchmarkBTCCheckpointReadHashByIndex_ReopenPebble(b *testing.B) {
 		db.Close()
 	}
 }
-
