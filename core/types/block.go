@@ -27,6 +27,7 @@ import (
 	"slices"
 	"sync/atomic"
 	"time"
+
 	// SYSCOIN
 	"bytes"
 	"errors"
@@ -35,6 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-verkle"
+
 	// SYSCOIN
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/syscoin/syscoinwire/syscoin/wire"
@@ -239,10 +241,11 @@ type extblock struct {
 	Uncles      []*Header
 	Withdrawals []*Withdrawal `rlp:"optional"`
 }
+
 // SYSCOIN
 type NEVMBlockDisconnect struct {
-	Sysblockhash  string
-	Diff          *wire.NEVMAddressDiff
+	Sysblockhash string
+	Diff         *wire.NEVMAddressDiff
 }
 
 func (n *NEVMBlockDisconnect) Deserialize(bytesIn []byte) error {
@@ -253,7 +256,7 @@ func (n *NEVMBlockDisconnect) Deserialize(bytesIn []byte) error {
 		log.Error("NEVMBlockDisconnect: could not deserialize", "err", err)
 		return err
 	}
-	
+
 	// Assign deserialized fields to NEVMDisconnectBlock fields
 	n.Sysblockhash = string(NEVMBlockWire.SYSBlockHash)
 
@@ -262,13 +265,18 @@ func (n *NEVMBlockDisconnect) Deserialize(bytesIn []byte) error {
 
 	return nil
 }
+
 type NEVMBlockConnect struct {
-	Blockhash     common.Hash
-	Sysblockhash  string
+	Blockhash    common.Hash
+	Sysblockhash string
+	// BTCPrevHash is the auxpow parent prev-block hash selected by Syscoin chainlocks (from CL receipt).
+	// It is forwarded by syscoind as a trailing 32-byte field in the nevmconnect payload.
+	BTCPrevHash   common.Hash
 	Block         *Block
 	VersionHashes []*common.Hash
 	Diff          *wire.NEVMAddressDiff
 }
+
 func (n *NEVMBlockConnect) HasDiff() bool {
 	return len(n.Diff.AddedMNNEVM) > 0 || len(n.Diff.RemovedMNNEVM) > 0 || len(n.Diff.UpdatedMNNEVM) > 0
 }
@@ -283,15 +291,16 @@ func (n *NEVMBlockConnect) Deserialize(bytesIn []byte) error {
 		log.Error("NEVMBlockConnect: could not deserialize", "err", err)
 		return err
 	}
-	
+
 	// Assign deserialized fields to NEVMBlockConnect fields
 	n.Blockhash = common.BytesToHash(NEVMBlockWire.NEVMBlockHash)
 	n.Sysblockhash = string(NEVMBlockWire.SYSBlockHash)
-	
+	n.BTCPrevHash = common.BytesToHash(NEVMBlockWire.BTCPrevHash)
+
 	if len(NEVMBlockWire.NEVMBlockData) == 0 {
 		return errors.New("empty block data")
 	}
-	
+
 	// Decode the raw block inside of NEVM data
 	var block Block
 	err = rlp.DecodeBytes(NEVMBlockWire.NEVMBlockData, &block)
@@ -302,7 +311,7 @@ func (n *NEVMBlockConnect) Deserialize(bytesIn []byte) error {
 
 	// Create NEVMBlockConnect object from deserialized block and NEVM wire data
 	n.Block = &block
-	
+
 	// Validate that tx root and receipt root is correct based on the block
 	txRootHash := common.BytesToHash(NEVMBlockWire.TxRoot)
 	if txRootHash != block.TxHash() {
@@ -317,7 +326,7 @@ func (n *NEVMBlockConnect) Deserialize(bytesIn []byte) error {
 	if n.Blockhash != block.Hash() {
 		return errors.New("blockhash mismatch")
 	}
-	
+
 	// Process VersionHashes
 	numVH := len(NEVMBlockWire.VersionHashes)
 	n.VersionHashes = make([]*common.Hash, numVH)
@@ -325,7 +334,7 @@ func (n *NEVMBlockConnect) Deserialize(bytesIn []byte) error {
 		vh := common.BytesToHash(NEVMBlockWire.VersionHashes[i])
 		n.VersionHashes[i] = &vh
 	}
-	
+
 	// Deserialize and handle the Diff field
 	n.Diff = &NEVMBlockWire.Diff
 
@@ -357,6 +366,7 @@ func (n *NEVMBlockConnect) Serialize(block *Block) ([]byte, error) {
 
 	return buffer.Bytes(), nil
 }
+
 // NewBlock creates a new block. The input data is copied, changes to header and to the
 // field values will not affect the block.
 //

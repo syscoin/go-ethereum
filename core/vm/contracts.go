@@ -171,6 +171,9 @@ var PrecompiledContractsNexus = PrecompiledContracts{
 	common.BytesToAddress([]byte{0x61}): &sysblockhash{},
 	common.BytesToAddress([]byte{0x62}): &nevmaddress{},
 	common.BytesToAddress([]byte{0x63}): &datahash{},
+	common.BytesToAddress([]byte{0x64}): &btccheckpointindex{},
+	common.BytesToAddress([]byte{0x65}): &btclastcheckpointindex{},
+	common.BytesToAddress([]byte{0x66}): &btccheckpointhashbyindex{},
 }
 
 var PrecompiledContractsBLS = PrecompiledContractsPrague
@@ -774,6 +777,9 @@ var (
 	errDataHashInvalidInputLength          = errors.New("invalid version hash length")
 	errNEVMAddressInvalidInputLength          = errors.New("invalid version hash length")
 	errReadSYSHashInvalidInputLength          = errors.New("invalid input number")
+	errBTCCheckpointInvalidInputLength 	  = errors.New("invalid input hash")
+	errBTCCheckpointIndexInvalidInputLength = errors.New("invalid input index")
+	errBTCCheckpointBatchTooLarge            = errors.New("batch too large")
 )
 
 // bls12381G1Add implements EIP-2537 G1Add precompile.
@@ -1224,6 +1230,113 @@ func (c *sysblockhash) Run(input []byte, interpreter *EVMInterpreter) ([]byte, e
 		return []byte{}, nil
 	}
 }
+
+// SYSCOIN
+// btccheckpointindex returns checkpoint indices for one or more BTC hashes (0 if not checkpointed).
+//
+// Input:  32*k bytes, concatenation of k btc hashes (bytes32 each).
+// Output: 32*k bytes, concatenation of k ABI-words where each word contains uint64 index (right-aligned).
+type btccheckpointindex struct{}
+
+func (c *btccheckpointindex) RequiredGas(input []byte) uint64 {
+	// Batch pricing: base + per-item.
+	k := len(input) / 32
+	if k == 0 || len(input)%32 != 0 {
+		return 0
+	}
+	if k > btcCheckpointBatchMaxItems {
+		return 0
+	}
+	return params.BTCCheckpointBatchBaseGas + uint64(k)*params.BTCCheckpointBatchPerItemGas
+}
+
+func (c *btccheckpointindex) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
+	if len(input) == 0 || len(input)%32 != 0 {
+		return nil, errBTCCheckpointInvalidInputLength
+	}
+	k := len(input) / 32
+	if k > btcCheckpointBatchMaxItems {
+		return nil, errBTCCheckpointBatchTooLarge
+	}
+	if interpreter.evm.Context.BTCCheckpointIndex == nil {
+		return []byte{}, nil
+	}
+	out := make([]byte, 32*k)
+	for i := 0; i < k; i++ {
+		off := i * 32
+		idx := interpreter.evm.Context.BTCCheckpointIndex(common.BytesToHash(input[off : off+32]))
+		binary.BigEndian.PutUint64(out[off+24:off+32], idx)
+	}
+	return out, nil
+}
+
+// SYSCOIN
+// btclastcheckpointindex returns the latest checkpoint index (uint64).
+// Output is uint64 big endian, left-padded to 32 bytes.
+type btclastcheckpointindex struct{}
+
+func (c *btclastcheckpointindex) RequiredGas(input []byte) uint64 {
+	return params.BTCCheckpointLastIndexGas
+}
+
+func (c *btclastcheckpointindex) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
+	if len(input) != 0 {
+		return nil, errBTCCheckpointIndexInvalidInputLength
+	}
+	if interpreter.evm.Context.BTCCheckpointLastIndex == nil {
+		return []byte{}, nil
+	}
+	idx := interpreter.evm.Context.BTCCheckpointLastIndex()
+	out := make([]byte, 32)
+	binary.BigEndian.PutUint64(out[24:], idx)
+	return out, nil
+}
+
+// SYSCOIN
+// btccheckpointhashbyindex returns checkpoint hashes for one or more indices.
+//
+// Input:  8*k bytes, concatenation of k indices (uint64 big endian each).
+// Output: 32*k bytes, concatenation of k hashes (bytes32 each). Missing -> zero-hash.
+type btccheckpointhashbyindex struct{}
+
+func (c *btccheckpointhashbyindex) RequiredGas(input []byte) uint64 {
+	// Batch pricing: base + per-item.
+	k := len(input) / 8
+	if k == 0 || len(input)%8 != 0 {
+		return 0
+	}
+	if k > btcCheckpointBatchMaxItems {
+		return 0
+	}
+	return params.BTCCheckpointBatchBaseGas + uint64(k)*params.BTCCheckpointBatchPerItemGas
+}
+
+func (c *btccheckpointhashbyindex) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
+	if len(input) == 0 || len(input)%8 != 0 {
+		return nil, errBTCCheckpointIndexInvalidInputLength
+	}
+	k := len(input) / 8
+	if k > btcCheckpointBatchMaxItems {
+		return nil, errBTCCheckpointBatchTooLarge
+	}
+	if interpreter.evm.Context.BTCCheckpointHashByIndex == nil {
+		return []byte{}, nil
+	}
+	out := make([]byte, 32*k)
+	for i := 0; i < k; i++ {
+		inOff := i * 8
+		outOff := i * 32
+		idx := binary.BigEndian.Uint64(input[inOff : inOff+8])
+		hashBytes := interpreter.evm.Context.BTCCheckpointHashByIndex(idx)
+		if len(hashBytes) == 32 {
+			copy(out[outOff:outOff+32], hashBytes)
+		}
+	}
+	return out, nil
+}
+
+// SYSCOIN: bounded batch size for BTC checkpoint precompiles.
+const btcCheckpointBatchMaxItems = 100
 
 
 type nevmaddress struct{}

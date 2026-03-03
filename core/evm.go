@@ -74,17 +74,20 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 		Transfer:    Transfer,
 		GetHash:     GetHashFn(header, chain),
 		// SYSCOIN
-		ReadSYSHash:  ReadSYSHashFn(chain),
-		ReadDataHash: ReadDataHashFn(chain),
-		GetNEVMAddress: GetNEVMAddressFn(chain),
-		Coinbase:    beneficiary,
-		BlockNumber: new(big.Int).Set(header.Number),
-		Time:        header.Time,
-		Difficulty:  new(big.Int).Set(header.Difficulty),
-		BaseFee:     baseFee,
-		BlobBaseFee: blobBaseFee,
-		GasLimit:    header.GasLimit,
-		Random:      random,
+		ReadSYSHash:        ReadSYSHashFn(chain),
+		BTCCheckpointIndex: BTCCheckpointIndexFn(chain),
+		BTCCheckpointLastIndex:  BTCCheckpointLastIndexFn(chain),
+		BTCCheckpointHashByIndex: BTCCheckpointHashByIndexFn(chain),
+		ReadDataHash:       ReadDataHashFn(chain),
+		GetNEVMAddress:     GetNEVMAddressFn(chain),
+		Coinbase:           beneficiary,
+		BlockNumber:        new(big.Int).Set(header.Number),
+		Time:               header.Time,
+		Difficulty:         new(big.Int).Set(header.Difficulty),
+		BaseFee:            baseFee,
+		BlobBaseFee:        blobBaseFee,
+		GasLimit:           header.GasLimit,
+		Random:             random,
 	}
 }
 
@@ -139,11 +142,45 @@ func GetHashFn(ref *types.Header, chain ChainContext) func(n uint64) common.Hash
 		return common.Hash{}
 	}
 }
+
 // SYSCOIN returns if there is an NEVM mapping from this blockhash for canonical SYS chain detection
 func ReadSYSHashFn(chain ChainContext) func(n uint64) []byte {
 	return func(n uint64) []byte {
 		return chain.ReadSYSHash(n)
 	}
+}
+
+// SYSCOIN
+func BTCCheckpointIndexFn(chain ChainContext) func(hash common.Hash) uint64 {
+	type btcCheckpointIndexReader interface {
+		BTCCheckpointIndex(common.Hash) uint64
+	}
+	if r, ok := any(chain).(btcCheckpointIndexReader); ok {
+		return func(hash common.Hash) uint64 { return r.BTCCheckpointIndex(hash) }
+	}
+	return func(common.Hash) uint64 { return 0 }
+}
+
+// SYSCOIN
+func BTCCheckpointLastIndexFn(chain ChainContext) func() uint64 {
+	type btcCheckpointLastIndexReader interface {
+		ReadBTCCheckpointLastIndex() uint64
+	}
+	if r, ok := any(chain).(btcCheckpointLastIndexReader); ok {
+		return func() uint64 { return r.ReadBTCCheckpointLastIndex() }
+	}
+	return func() uint64 { return 0 }
+}
+
+// SYSCOIN
+func BTCCheckpointHashByIndexFn(chain ChainContext) func(idx uint64) []byte {
+	type btcCheckpointHashByIndexReader interface {
+		ReadBTCCheckpointHashByIndex(uint64) []byte
+	}
+	if r, ok := any(chain).(btcCheckpointHashByIndexReader); ok {
+		return func(idx uint64) []byte { return r.ReadBTCCheckpointHashByIndex(idx) }
+	}
+	return func(uint64) []byte { return []byte{} }
 }
 func ReadDataHashFn(chain ChainContext) func(hash common.Hash) []byte {
 	return func(hash common.Hash) []byte {
@@ -155,6 +192,7 @@ func GetNEVMAddressFn(chain ChainContext) func(address common.Address) []byte {
 		return chain.GetNEVMAddress(address)
 	}
 }
+
 // CanTransfer checks whether there are enough funds in the address' account to make a transfer.
 // This does not take the necessary gas in to account to make the transfer valid.
 func CanTransfer(db vm.StateDB, addr common.Address, amount *uint256.Int) bool {

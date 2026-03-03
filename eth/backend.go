@@ -328,7 +328,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	// Successful startup; push a marker and check previous unclean shutdowns.
 	eth.shutdownTracker.MarkStartup()
 	// SYSCOIN	
-	if eth.blockchain.GetChainConfig().SyscoinBlock != nil {
+	if eth.blockchain.Config().SyscoinBlock != nil {
 		eth.zmqRep = NewZMQRep(stack, eth, config.NEVMPubEP)
 		eth.wg.Add(1)
 		go eth.networkingLoop()
@@ -573,6 +573,7 @@ func (eth *Ethereum) DeleteBlock(nevmBlockDisconnect *types.NEVMBlockDisconnect)
 	}
 
 	eth.blockchain.DeleteSYSHash(batch, currentNumber)
+	eth.blockchain.DeleteBTCCheckpoint(batch, currentNumber)
 	eth.blockchain.DeleteDataHashes(batch, currentNumber)
 
 	if err := batch.Write(); err != nil {
@@ -706,7 +707,7 @@ func (s *Ethereum) Start() error {
 
 	// Regularly update shutdown marker
 	s.shutdownTracker.Start()
-	if s.blockchain.GetChainConfig().SyscoinBlock != nil {
+	if s.blockchain.Config().SyscoinBlock != nil {
 		log.Info("SYSCOIN mode active: skipping Ethereum networking and peers")
 
 		// Explicitly mark peers closed BEFORE calling any handler methods:

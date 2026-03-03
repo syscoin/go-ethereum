@@ -26,11 +26,11 @@ import (
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/triedb"
-	"github.com/ethereum/go-ethereum/ethdb"
 )
 
 // CurrentHeader retrieves the current head header of the canonical chain. The
@@ -493,6 +493,21 @@ func (bc *BlockChain) ReadSYSHash(n uint64) []byte {
 	return bc.hc.ReadSYSHash(n)
 }
 
+// SYSCOIN
+func (bc *BlockChain) BTCCheckpointIndex(btcHash common.Hash) uint64 {
+	return bc.hc.BTCCheckpointIndex(btcHash)
+}
+
+// SYSCOIN
+func (bc *BlockChain) ReadBTCCheckpointLastIndex() uint64 {
+	return bc.hc.ReadBTCCheckpointLastIndex()
+}
+
+// SYSCOIN
+func (bc *BlockChain) ReadBTCCheckpointHashByIndex(idx uint64) []byte {
+	return bc.hc.ReadBTCCheckpointHashByIndex(idx)
+}
+
 func (bc *BlockChain) GetNEVMAddress(address common.Address) []byte {
 	return bc.hc.GetNEVMAddress(address)
 }
@@ -510,6 +525,11 @@ func (bc *BlockChain) ReadDataHash(hash common.Hash) []byte {
 func (bc *BlockChain) WriteSYSHash(db ethdb.KeyValueWriter, sysBlockhash string, n uint64) {
 	bc.hc.WriteSYSHash(db, sysBlockhash, n)
 }
+
+// SYSCOIN
+func (bc *BlockChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btcHash common.Hash) {
+	bc.hc.WriteBTCCheckpoint(db, n, btcHash)
+}
 func (bc *BlockChain) WriteDataHashes(db ethdb.KeyValueWriter, n uint64, dataHashes []*common.Hash) {
 	bc.hc.WriteDataHashes(db, n, dataHashes)
 }
@@ -520,3 +540,7 @@ func (bc *BlockChain) DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
 	bc.hc.DeleteSYSHash(db, n)
 }
 
+// SYSCOIN
+func (bc *BlockChain) DeleteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64) {
+	bc.hc.DeleteBTCCheckpoint(db, n)
+}

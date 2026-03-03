@@ -115,9 +115,13 @@ var (
 	skeletonHeaderPrefix  = []byte("S") // skeletonHeaderPrefix + num (uint64 big endian) -> header
 
 	// SYSCOIN
-	blockNumToSysKeyPrefix = []byte("z") // blockNumToSysKeyPrefix + block number -> SYS block hash
-	dataHashesKeyPrefix    = []byte("y") // dataHashesKeyPrefix + block number -> versioned hashes
-	dataHashKeyPrefix      = []byte("w") // dataHashKeyPrefix + versioned hash -> versioned hash
+	blockNumToSysKeyPrefix             = []byte("z")           // blockNumToSysKeyPrefix + block number -> SYS block hash
+	btcCheckpointLastKey               = []byte("btcchk-last") // stores last BTC checkpoint index (uint64 big endian)
+	btcCheckpointH2IPrefix             = []byte("btcchk-h2i-") // btcCheckpointH2IPrefix + 32B btc hash -> checkpoint index (uint64 big endian)
+	btcCheckpointI2HPrefix             = []byte("btcchk-i2h-") // btcCheckpointI2HPrefix + decimal index -> 32B btc hash
+	blockNumToBtcCheckpointIndexPrefix = []byte("btcchk-b2i-") // blockNumToBtcCheckpointIndexPrefix + decimal block number -> checkpoint index (uint64 big endian)
+	dataHashesKeyPrefix                = []byte("y")           // dataHashesKeyPrefix + block number -> versioned hashes
+	dataHashKeyPrefix                  = []byte("w")           // dataHashKeyPrefix + versioned hash -> versioned hash
 
 	// Path-based storage scheme of merkle patricia trie.
 	TrieNodeAccountPrefix = []byte("A") // TrieNodeAccountPrefix + hexPath -> trie node
@@ -342,18 +346,31 @@ func IsStorageTrieNode(key []byte) bool {
 // SYSCOIN
 // blockNumToSysKey = blockNumToSysKeyPrefix + blocknumber
 func blockNumToSysKey(n uint64) []byte {
-    return append(blockNumToSysKeyPrefix, []byte(new(big.Int).SetUint64(n).String())...)
+	return append(blockNumToSysKeyPrefix, []byte(new(big.Int).SetUint64(n).String())...)
 }
+
+// SYSCOIN
+func btcCheckpointH2IKey(btcHash common.Hash) []byte {
+	return append(btcCheckpointH2IPrefix, btcHash.Bytes()...)
+}
+func btcCheckpointI2HKey(idx uint64) []byte {
+	return append(btcCheckpointI2HPrefix, []byte(new(big.Int).SetUint64(idx).String())...)
+}
+func blockNumToBtcCheckpointIndexKey(n uint64) []byte {
+	return append(blockNumToBtcCheckpointIndexPrefix, []byte(new(big.Int).SetUint64(n).String())...)
+}
+
 // nevmAddressKey generates the key for storing NEVM addresses
 func nevmAddressKey(addr common.Address) []byte {
 	return append([]byte("nevm-address-"), addr.Bytes()...)
 }
 func dataHashesKey(n uint64) []byte {
-    return append(dataHashesKeyPrefix, []byte(new(big.Int).SetUint64(n).String())...)
+	return append(dataHashesKeyPrefix, []byte(new(big.Int).SetUint64(n).String())...)
 }
 func dataHashKey(hash common.Hash) []byte {
-    return append(dataHashKeyPrefix, hash.Bytes()...)
+	return append(dataHashKeyPrefix, hash.Bytes()...)
 }
+
 // filterMapRowKey = filterMapRowPrefix + mapRowIndex (uint64 big endian)
 func filterMapRowKey(mapRowIndex uint64, base bool) []byte {
 	extLen := 8
