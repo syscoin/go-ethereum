@@ -18,6 +18,7 @@ package tests
 
 import (
 	"math/rand"
+	"os"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -25,6 +26,9 @@ import (
 )
 
 func TestBlockchain(t *testing.T) {
+	if os.Getenv("GETH_ETH_TESTS") != "1" {
+		t.Skip("ethereum tests disabled (set GETH_ETH_TESTS=1 to enable)")
+	}
 	bt := new(testMatcher)
 
 	// We are running most of GeneralStatetests to tests witness support, even
@@ -76,6 +80,9 @@ func TestBlockchain(t *testing.T) {
 
 // TestExecutionSpecBlocktests runs the test fixtures from execution-spec-tests.
 func TestExecutionSpecBlocktests(t *testing.T) {
+	if os.Getenv("GETH_EEST") != "1" {
+		t.Skip("execution-spec-tests disabled (set GETH_EEST=1 to enable)")
+	}
 	if !common.FileExist(executionSpecBlockchainTestDir) {
 		t.Skipf("directory %s does not exist", executionSpecBlockchainTestDir)
 	}

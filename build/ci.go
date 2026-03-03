@@ -280,13 +280,22 @@ func doTest(cmdline []string) {
 		verbose  = flag.Bool("v", false, "Whether to log verbosely")
 		race     = flag.Bool("race", false, "Execute the race detector")
 		short    = flag.Bool("short", false, "Pass the 'short'-flag to go test")
+		eest     = flag.Bool("eest", false, "Download and run execution-spec-tests fixtures (EEST)")
 		cachedir = flag.String("cachedir", "./build/cache", "directory for caching downloads")
 	)
 	flag.CommandLine.Parse(cmdline)
 
-	// Get test fixtures.
-	csdb := build.MustLoadChecksums("build/checksums.txt")
-	downloadSpecTestFixtures(csdb, *cachedir)
+	// SYSCOIN Only download execution-spec-tests fixtures when explicitly requested.
+	// Sysgeth carries additional precompiles and consensus hooks which can make
+	// upstream EEST fixtures mismatched; keep this opt-in to avoid noisy failures.
+	enableEEST := *eest || os.Getenv("GETH_EEST") == "1"
+	var csdb *build.ChecksumDB
+	if enableEEST || *dlgo {
+		csdb = build.MustLoadChecksums("build/checksums.txt")
+	}
+	if enableEEST {
+		downloadSpecTestFixtures(csdb, *cachedir)
+	}
 
 	// Configure the toolchain.
 	tc := build.GoToolchain{GOARCH: *arch, CC: *cc}

@@ -17,10 +17,14 @@
 package tests
 
 import (
+	"os"
 	"testing"
 )
 
 func TestRLP(t *testing.T) {
+	if os.Getenv("GETH_ETH_TESTS") != "1" {
+		t.Skip("ethereum tests disabled (set GETH_ETH_TESTS=1 to enable)")
+	}
 	t.Parallel()
 	tm := new(testMatcher)
 	tm.walk(t, rlpTestDir, func(t *testing.T, name string, test *RLPTest) {
