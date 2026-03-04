@@ -293,3 +293,51 @@ func TestHeaderChainBTCCheckpointReorgSwitch(t *testing.T) {
 		t.Fatalf("unexpected hash at index 2 after reorg: got %x want %x", got, new2)
 	}
 }
+
+func reverseHashBytes(h common.Hash) common.Hash {
+	var out common.Hash
+	for i := 0; i < len(h); i++ {
+		out[i] = h[len(h)-1-i]
+	}
+	return out
+}
+
+func TestHeaderChainBTCCheckpointHashRepresentationStable(t *testing.T) {
+	hc := newBTCCheckpointTestHeaderChain(t)
+	db := hc.chainDb
+
+	// Use a non-symmetric pattern so accidental byte-order reversal is detectable.
+	raw := make([]byte, 32)
+	for i := 0; i < len(raw); i++ {
+		raw[i] = byte(i)
+	}
+	hash := common.BytesToHash(raw)
+	reversed := reverseHashBytes(hash)
+
+	if hash == reversed {
+		t.Fatalf("test setup produced symmetric hash pattern, cannot validate byte-order behavior")
+	}
+
+	hc.WriteBTCCheckpoint(db, 600, hash)
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 1 {
+		t.Fatalf("unexpected last index after write: got %d want %d", got, 1)
+	}
+
+	if got := common.BytesToHash(rawdb.ReadBTCCheckpointHashByIndex(db, 1)); got != hash {
+		t.Fatalf("stored checkpoint hash bytes changed representation: got %x want %x", got, hash)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByHash(db, hash); got != 1 {
+		t.Fatalf("expected exact hash lookup to resolve index 1, got %d", got)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByHash(db, reversed); got != 0 {
+		t.Fatalf("unexpected index for byte-reversed hash representation: got %d want %d", got, 0)
+	}
+
+	hc.DeleteBTCCheckpoint(db, 600)
+	if got := rawdb.ReadBTCCheckpointIndexByHash(db, hash); got != 0 {
+		t.Fatalf("expected hash lookup to clear after delete, got %d", got)
+	}
+	if got := common.BytesToHash(rawdb.ReadBTCCheckpointHashByIndex(db, 1)); got != (common.Hash{}) {
+		t.Fatalf("expected index slot to clear after delete, got %x", got)
+	}
+}
