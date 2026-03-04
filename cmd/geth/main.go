@@ -126,6 +126,10 @@ var (
 		utils.MinerNewPayloadTimeoutFlag, // deprecated
 		// SYSCOIN
 		utils.NEVMPubFlag,
+		utils.StateBootstrapFileFlag,
+		utils.StateBootstrapURLFlag,
+		utils.StateBootstrapSHA256Flag,
+		utils.StateBootstrapForceFlag,
 		utils.NATFlag,
 		utils.NoDiscoverFlag,
 		utils.DiscoveryV4Flag,
@@ -247,6 +251,8 @@ func init() {
 		utils.ShowDeprecated,
 		// See snapshot.go
 		snapshotCommand,
+		// SYSCOIN See state_bootstrap_cmd.go
+		stateBootstrapCommand,
 		// See verkle.go
 		verkleCommand,
 	}

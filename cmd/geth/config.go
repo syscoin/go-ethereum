@@ -194,6 +194,10 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 
 	// Start metrics export if enabled
 	utils.SetupMetrics(&cfg.Metrics)
+	// SYSCOIN
+	if err := maybeBootstrapState(ctx, stack); err != nil {
+		utils.Fatalf("Failed to apply state bootstrap: %v", err)
+	}
 
 	backend, eth := utils.RegisterEthService(stack, &cfg.Eth)
 
@@ -246,7 +250,7 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 		blsyncer := blsync.NewClient(utils.MakeBeaconLightConfig(ctx))
 		blsyncer.SetEngineRPC(rpc.DialInProc(srv))
 		stack.RegisterLifecycle(blsyncer)
-	// SYSCOIN
+		// SYSCOIN
 	} else if eth.BlockChain().Config().SyscoinBlock == nil {
 		// Launch the engine API for interacting with external consensus client.
 		err := catalyst.Register(stack, eth)
