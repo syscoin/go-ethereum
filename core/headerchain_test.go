@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -108,4 +109,187 @@ func TestHeaderInsertion(t *testing.T) {
 
 	// And B becomes even longer
 	testInsert(t, hc, chainB[107:128], CanonStatTy, nil)
+}
+
+func newBTCCheckpointTestHeaderChain(t *testing.T) *HeaderChain {
+	t.Helper()
+
+	db := rawdb.NewMemoryDatabase()
+	gspec := &Genesis{BaseFee: big.NewInt(params.InitialBaseFee), Config: params.AllEthashProtocolChanges}
+	gspec.Commit(db, triedb.NewDatabase(db, nil))
+
+	hc, err := NewHeaderChain(db, gspec.Config, ethash.NewFaker(), func() bool { return false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hc
+}
+
+func testBTCCheckpointHash(tag byte) common.Hash {
+	var h common.Hash
+	h[31] = tag
+	return h
+}
+
+func TestHeaderChainBTCCheckpointTailRollback(t *testing.T) {
+	hc := newBTCCheckpointTestHeaderChain(t)
+	db := hc.chainDb
+
+	h1 := testBTCCheckpointHash(1)
+	h2 := testBTCCheckpointHash(2)
+	h3 := testBTCCheckpointHash(3)
+
+	hc.WriteBTCCheckpoint(db, 100, h1)
+	hc.WriteBTCCheckpoint(db, 101, h2)
+	hc.WriteBTCCheckpoint(db, 102, h3)
+
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 3 {
+		t.Fatalf("unexpected last index after writes: got %d want %d", got, 3)
+	}
+	if got := rawdb.ReadBTCCheckpointLastIndex(db); got != 3 {
+		t.Fatalf("unexpected persisted last index after writes: got %d want %d", got, 3)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByBlockNumber(db, 102); got != 3 {
+		t.Fatalf("unexpected block->index mapping at tip: got %d want %d", got, 3)
+	}
+
+	hc.DeleteBTCCheckpoint(db, 102)
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 2 {
+		t.Fatalf("unexpected last index after first tail delete: got %d want %d", got, 2)
+	}
+	if got := rawdb.ReadBTCCheckpointLastIndex(db); got != 2 {
+		t.Fatalf("unexpected persisted last index after first tail delete: got %d want %d", got, 2)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByBlockNumber(db, 102); got != 0 {
+		t.Fatalf("unexpected removed block->index mapping: got %d want %d", got, 0)
+	}
+	if got := common.BytesToHash(rawdb.ReadBTCCheckpointHashByIndex(db, 3)); got != (common.Hash{}) {
+		t.Fatalf("unexpected hash left at removed index 3: got %x", got)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByHash(db, h3); got != 0 {
+		t.Fatalf("unexpected hash->index mapping left for removed hash: got %d want %d", got, 0)
+	}
+	if got := common.BytesToHash(rawdb.ReadBTCCheckpointHashByIndex(db, 2)); got != h2 {
+		t.Fatalf("unexpected hash at index 2 after tail delete: got %x want %x", got, h2)
+	}
+
+	hc.DeleteBTCCheckpoint(db, 101)
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 1 {
+		t.Fatalf("unexpected last index after second tail delete: got %d want %d", got, 1)
+	}
+	if got := common.BytesToHash(rawdb.ReadBTCCheckpointHashByIndex(db, 1)); got != h1 {
+		t.Fatalf("unexpected hash at surviving index 1: got %x want %x", got, h1)
+	}
+
+	hc.DeleteBTCCheckpoint(db, 100)
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 0 {
+		t.Fatalf("unexpected last index after deleting boundary index 1: got %d want %d", got, 0)
+	}
+	if got := rawdb.ReadBTCCheckpointLastIndex(db); got != 0 {
+		t.Fatalf("unexpected persisted last index after deleting boundary index 1: got %d want %d", got, 0)
+	}
+	// Non-existent block deletion should remain a no-op.
+	hc.DeleteBTCCheckpoint(db, 999)
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 0 {
+		t.Fatalf("unexpected last index after no-op delete: got %d want %d", got, 0)
+	}
+}
+
+func TestHeaderChainBTCCheckpointDuplicateHashNoop(t *testing.T) {
+	hc := newBTCCheckpointTestHeaderChain(t)
+	db := hc.chainDb
+
+	h1 := testBTCCheckpointHash(0x11)
+	hc.WriteBTCCheckpoint(db, 200, h1)
+
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 1 {
+		t.Fatalf("unexpected last index after first write: got %d want %d", got, 1)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByBlockNumber(db, 200); got != 1 {
+		t.Fatalf("unexpected block->index mapping for first write: got %d want %d", got, 1)
+	}
+
+	// Duplicate hash on a later block should be ignored.
+	hc.WriteBTCCheckpoint(db, 201, h1)
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 1 {
+		t.Fatalf("duplicate hash changed last index: got %d want %d", got, 1)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByBlockNumber(db, 201); got != 0 {
+		t.Fatalf("duplicate hash created unexpected block->index mapping: got %d want %d", got, 0)
+	}
+
+	// Same behavior should hold within one batch before writes are flushed to chainDb.
+	h2 := testBTCCheckpointHash(0x22)
+	batch := db.NewBatch()
+	hc.WriteBTCCheckpoint(batch, 300, h2)
+	hc.WriteBTCCheckpoint(batch, 301, h2)
+	if err := batch.Write(); err != nil {
+		t.Fatalf("failed to flush batch: %v", err)
+	}
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 2 {
+		t.Fatalf("duplicate hash in batch changed last index: got %d want %d", got, 2)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByBlockNumber(db, 300); got != 2 {
+		t.Fatalf("unexpected block->index mapping for batch write: got %d want %d", got, 2)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByBlockNumber(db, 301); got != 0 {
+		t.Fatalf("duplicate hash in batch created unexpected block->index mapping: got %d want %d", got, 0)
+	}
+
+	// Zero hash should remain a no-op.
+	hc.WriteBTCCheckpoint(db, 400, common.Hash{})
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 2 {
+		t.Fatalf("zero hash write changed last index: got %d want %d", got, 2)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByBlockNumber(db, 400); got != 0 {
+		t.Fatalf("zero hash write created unexpected block->index mapping: got %d want %d", got, 0)
+	}
+}
+
+func TestHeaderChainBTCCheckpointReorgSwitch(t *testing.T) {
+	hc := newBTCCheckpointTestHeaderChain(t)
+	db := hc.chainDb
+
+	old1 := testBTCCheckpointHash(0x31)
+	old2 := testBTCCheckpointHash(0x32)
+	hc.WriteBTCCheckpoint(db, 500, old1)
+	hc.WriteBTCCheckpoint(db, 501, old2)
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 2 {
+		t.Fatalf("unexpected last index after old branch writes: got %d want %d", got, 2)
+	}
+
+	// Reorg disconnect of old tail branch.
+	hc.DeleteBTCCheckpoint(db, 501)
+	hc.DeleteBTCCheckpoint(db, 500)
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 0 {
+		t.Fatalf("unexpected last index after old branch tail delete: got %d want %d", got, 0)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByHash(db, old1); got != 0 {
+		t.Fatalf("old branch hash old1 still indexed: got %d want %d", got, 0)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByHash(db, old2); got != 0 {
+		t.Fatalf("old branch hash old2 still indexed: got %d want %d", got, 0)
+	}
+
+	// Reorg connect of new branch over same block numbers.
+	new1 := testBTCCheckpointHash(0x41)
+	new2 := testBTCCheckpointHash(0x42)
+	hc.WriteBTCCheckpoint(db, 500, new1)
+	hc.WriteBTCCheckpoint(db, 501, new2)
+
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 2 {
+		t.Fatalf("unexpected last index after new branch writes: got %d want %d", got, 2)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByBlockNumber(db, 500); got != 1 {
+		t.Fatalf("unexpected block->index mapping for new branch block 500: got %d want %d", got, 1)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByBlockNumber(db, 501); got != 2 {
+		t.Fatalf("unexpected block->index mapping for new branch block 501: got %d want %d", got, 2)
+	}
+	if got := common.BytesToHash(rawdb.ReadBTCCheckpointHashByIndex(db, 1)); got != new1 {
+		t.Fatalf("unexpected hash at index 1 after reorg: got %x want %x", got, new1)
+	}
+	if got := common.BytesToHash(rawdb.ReadBTCCheckpointHashByIndex(db, 2)); got != new2 {
+		t.Fatalf("unexpected hash at index 2 after reorg: got %x want %x", got, new2)
+	}
 }
