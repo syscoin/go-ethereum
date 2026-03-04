@@ -376,19 +376,20 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
     incomingBlockNumber := nevmBlockConnectIn.Block.NumberU64()
     incomingBlockHash := nevmBlockConnectIn.Block.Hash()
 
-    // Check persisted blockchain first to avoid duplicates or collisions
-    existingBlock := eth.blockchain.GetBlockByNumber(incomingBlockNumber)
-    if existingBlock != nil {
-        if existingBlock.Hash() == incomingBlockHash {
-            log.Info("Block already exists in chain, skipping insert", "number", incomingBlockNumber, "hash", existingBlock.Hash())
+    // Check canonical chain first to avoid duplicates/collisions. This is a hash lookup only
+    // and does not touch EVM state.
+    existingHash := eth.blockchain.GetCanonicalHash(incomingBlockNumber)
+    if existingHash != (common.Hash{}) {
+        if existingHash == incomingBlockHash {
+            log.Trace("Block already exists in chain, skipping insert", "number", incomingBlockNumber, "hash", existingHash)
             return nil
         }
         log.Warn("Block height collision in chain",
             "number", incomingBlockNumber,
-            "existingHash", existingBlock.Hash(),
+            "existingHash", existingHash,
             "incomingHash", incomingBlockHash)
         return fmt.Errorf("block collision at height %d: existing [%x..], incoming [%x..]",
-            incomingBlockNumber, existingBlock.Hash().Bytes()[:4], incomingBlockHash.Bytes()[:4])
+            incomingBlockNumber, existingHash.Bytes()[:4], incomingBlockHash.Bytes()[:4])
     }
 
     // Determine last block for continuity check
@@ -409,7 +410,7 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
         // Check last buffered block directly for duplicate
         if incomingBlockNumber == lastBlockNumber && incomingBlockHash == lastBlockHash {
             eth.bufferLock.Unlock()
-            log.Info("Block already buffered as last, skipping insert", "number", incomingBlockNumber, "hash", incomingBlockHash)
+            log.Trace("Block already buffered as last, skipping insert", "number", incomingBlockNumber, "hash", incomingBlockHash)
             return nil
         }
     }
