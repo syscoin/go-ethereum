@@ -343,6 +343,10 @@ func TestMaybeBootstrapStateRemovesDownloadedArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read source archive: %v", err)
 	}
+	sourceArchiveSHA256, err := hashFileSHA256(sourceArchive)
+	if err != nil {
+		t.Fatalf("hash source archive: %v", err)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(payload)
 	}))
@@ -361,11 +365,19 @@ func TestMaybeBootstrapStateRemovesDownloadedArchive(t *testing.T) {
 	flagset.String(utils.StateBootstrapURLFlag.Name, "", "")
 	flagset.String(utils.StateBootstrapSHA256Flag.Name, "", "")
 	flagset.Bool(utils.StateBootstrapForceFlag.Name, false, "")
+	flagset.Bool(utils.SepoliaFlag.Name, false, "")
 	if err := flagset.Set(utils.StateBootstrapFileFlag.Name, downloadPath); err != nil {
 		t.Fatalf("set file flag: %v", err)
 	}
 	if err := flagset.Set(utils.StateBootstrapURLFlag.Name, server.URL); err != nil {
 		t.Fatalf("set url flag: %v", err)
+	}
+	if err := flagset.Set(utils.StateBootstrapSHA256Flag.Name, sourceArchiveSHA256); err != nil {
+		t.Fatalf("set sha256 flag: %v", err)
+	}
+	// Avoid inheriting the built-in Syscoin default hash in this unit test.
+	if err := flagset.Set(utils.SepoliaFlag.Name, "true"); err != nil {
+		t.Fatalf("set sepolia flag: %v", err)
 	}
 
 	ctx := cli.NewContext(cli.NewApp(), flagset, nil)
@@ -383,5 +395,112 @@ func TestMaybeBootstrapStateRemovesDownloadedArchive(t *testing.T) {
 	}
 	if string(currentData) != "snapshot" {
 		t.Fatalf("unexpected installed state content: got %q want %q", string(currentData), "snapshot")
+	}
+}
+
+func TestResolveStateBootstrapSHA256(t *testing.T) {
+	makeCtx := func(setters map[string]string) *cli.Context {
+		t.Helper()
+		fs := flag.NewFlagSet("statebootstrap-sha-resolver", flag.ContinueOnError)
+		fs.String(utils.StateBootstrapSHA256Flag.Name, "", "")
+		fs.Bool(utils.SyscoinFlag.Name, false, "")
+		fs.Bool(utils.TanenbaumFlag.Name, false, "")
+		fs.Bool(utils.SepoliaFlag.Name, false, "")
+		fs.Bool(utils.HoleskyFlag.Name, false, "")
+		fs.Bool(utils.HoodiFlag.Name, false, "")
+		fs.Bool(utils.MainnetFlag.Name, false, "")
+		for key, value := range setters {
+			if err := fs.Set(key, value); err != nil {
+				t.Fatalf("set %s: %v", key, err)
+			}
+		}
+		return cli.NewContext(cli.NewApp(), fs, nil)
+	}
+
+	t.Run("explicit override takes precedence", func(t *testing.T) {
+		ctx := makeCtx(map[string]string{
+			utils.SyscoinFlag.Name:             "true",
+			utils.StateBootstrapSHA256Flag.Name: strings.Repeat("a", 64),
+		})
+		gotSHA, gotNetwork, fromDefault := resolveStateBootstrapSHA256(ctx, ctx.String(utils.StateBootstrapSHA256Flag.Name))
+		if gotSHA != strings.Repeat("a", 64) {
+			t.Fatalf("unexpected override sha: got %s", gotSHA)
+		}
+		if gotNetwork != "" || fromDefault {
+			t.Fatalf("unexpected default metadata: network=%q fromDefault=%v", gotNetwork, fromDefault)
+		}
+	})
+
+	t.Run("tanenbaum default", func(t *testing.T) {
+		ctx := makeCtx(map[string]string{utils.TanenbaumFlag.Name: "true"})
+		gotSHA, gotNetwork, fromDefault := resolveStateBootstrapSHA256(ctx, "")
+		if gotSHA != stateBootstrapDefaultSHA256Tanenbaum {
+			t.Fatalf("wrong tanenbaum default sha: got %s want %s", gotSHA, stateBootstrapDefaultSHA256Tanenbaum)
+		}
+		if gotNetwork != "tanenbaum" || !fromDefault {
+			t.Fatalf("unexpected default metadata: network=%q fromDefault=%v", gotNetwork, fromDefault)
+		}
+	})
+
+	t.Run("syscoin default without preset flag", func(t *testing.T) {
+		ctx := makeCtx(nil)
+		gotSHA, gotNetwork, fromDefault := resolveStateBootstrapSHA256(ctx, "")
+		if gotSHA != stateBootstrapDefaultSHA256SyscoinMain {
+			t.Fatalf("wrong syscoin default sha: got %s want %s", gotSHA, stateBootstrapDefaultSHA256SyscoinMain)
+		}
+		if gotNetwork != "syscoin" || !fromDefault {
+			t.Fatalf("unexpected default metadata: network=%q fromDefault=%v", gotNetwork, fromDefault)
+		}
+	})
+
+	t.Run("non-syscoin preset has no default", func(t *testing.T) {
+		ctx := makeCtx(map[string]string{utils.SepoliaFlag.Name: "true"})
+		gotSHA, gotNetwork, fromDefault := resolveStateBootstrapSHA256(ctx, "")
+		if gotSHA != "" {
+			t.Fatalf("expected empty default sha, got %s", gotSHA)
+		}
+		if gotNetwork != "" || fromDefault {
+			t.Fatalf("unexpected default metadata: network=%q fromDefault=%v", gotNetwork, fromDefault)
+		}
+	})
+}
+
+func TestMaybeBootstrapStateURLRequiresSHAWhenNoDefault(t *testing.T) {
+	root := t.TempDir()
+	stack, err := node.New(&node.Config{DataDir: filepath.Join(root, "datadir"), Name: "geth"})
+	if err != nil {
+		t.Fatalf("create test node: %v", err)
+	}
+	defer stack.Close()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ignored"))
+	}))
+	defer server.Close()
+
+	fs := flag.NewFlagSet("statebootstrap-url-no-sha", flag.ContinueOnError)
+	fs.String(utils.StateBootstrapFileFlag.Name, "", "")
+	fs.String(utils.StateBootstrapURLFlag.Name, "", "")
+	fs.String(utils.StateBootstrapSHA256Flag.Name, "", "")
+	fs.Bool(utils.StateBootstrapForceFlag.Name, false, "")
+	fs.Bool(utils.SepoliaFlag.Name, false, "")
+	if err := fs.Set(utils.StateBootstrapFileFlag.Name, filepath.Join(stack.InstanceDir(), "missing.tar.gz")); err != nil {
+		t.Fatalf("set file flag: %v", err)
+	}
+	if err := fs.Set(utils.StateBootstrapURLFlag.Name, server.URL); err != nil {
+		t.Fatalf("set url flag: %v", err)
+	}
+	// Use a non-Syscoin preset to guarantee there is no built-in SHA default.
+	if err := fs.Set(utils.SepoliaFlag.Name, "true"); err != nil {
+		t.Fatalf("set sepolia flag: %v", err)
+	}
+
+	ctx := cli.NewContext(cli.NewApp(), fs, nil)
+	err = maybeBootstrapState(ctx, stack)
+	if err == nil {
+		t.Fatal("expected error for URL bootstrap without effective SHA")
+	}
+	if !strings.Contains(err.Error(), "requires SHA-256") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

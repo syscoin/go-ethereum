@@ -160,7 +160,7 @@ var (
 	}
 	StateBootstrapSHA256Flag = &cli.StringFlag{
 		Name:     "syscoin.statebootstrap.sha256",
-		Usage:    "Expected SHA-256 of the state bootstrap archive (hex, optional but recommended)",
+		Usage:    "Expected SHA-256 of the state bootstrap archive (hex); overrides built-in network default when set",
 		Category: flags.EthCategory,
 	}
 	StateBootstrapForceFlag = &cli.BoolFlag{

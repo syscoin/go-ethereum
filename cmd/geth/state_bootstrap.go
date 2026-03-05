@@ -53,6 +53,9 @@ const (
 	stateBootstrapArchiveRoot        = "state-bootstrap"
 	stateBootstrapDownloadTimeout    = 2 * time.Hour
 	stateBootstrapDownloadMaxRetries = 3
+	// Release-managed defaults. Update these on each release when bootstrap artifacts rotate.
+	stateBootstrapDefaultSHA256SyscoinMain = "658639bbc6c9e15495c7dcb5901637e27e6f9090ede0e56b28a9789a3efc2dfa"
+	stateBootstrapDefaultSHA256Tanenbaum   = "c41deb5b54f93caaf748eee7f17464d3169b10cf4865181ed085c9cc2cbd2ddd"
 )
 
 type stateBootstrapManifest struct {
@@ -89,6 +92,14 @@ func maybeBootstrapState(ctx *cli.Context, stack *node.Node) error {
 		return nil
 	}
 
+	effectiveSHA256, defaultNetwork, usingDefaultSHA256 := resolveStateBootstrapSHA256(ctx, cfg.sha256)
+	if usingDefaultSHA256 {
+		log.Info("Using built-in state bootstrap SHA-256", "network", defaultNetwork, "sha256", effectiveSHA256)
+	}
+	if cfg.url != "" && effectiveSHA256 == "" {
+		return fmt.Errorf("state bootstrap URL download requires SHA-256 via --%s or a built-in default for the selected network", utils.StateBootstrapSHA256Flag.Name)
+	}
+
 	archivePath := cfg.filePath
 	if archivePath == "" {
 		archivePath = filepath.Join(stack.InstanceDir(), "state-bootstrap.tar.gz")
@@ -102,8 +113,8 @@ func maybeBootstrapState(ctx *cli.Context, stack *node.Node) error {
 	if err != nil {
 		return err
 	}
-	if cfg.sha256 != "" {
-		if err := verifyArchiveSHA256(archivePath, cfg.sha256); err != nil {
+	if effectiveSHA256 != "" {
+		if err := verifyArchiveSHA256(archivePath, effectiveSHA256); err != nil {
 			return err
 		}
 	}
@@ -113,6 +124,31 @@ func maybeBootstrapState(ctx *cli.Context, stack *node.Node) error {
 	cleanupDownloadedBootstrapArchive(archivePath, downloadedArchive)
 	log.Info("State bootstrap import completed", "chaindata", chaindataPath, "archive", archivePath)
 	return nil
+}
+
+func resolveStateBootstrapSHA256(ctx *cli.Context, configuredSHA256 string) (sha256 string, network string, fromDefault bool) {
+	configuredSHA256 = strings.TrimSpace(configuredSHA256)
+	if configuredSHA256 != "" {
+		return configuredSHA256, "", false
+	}
+	if network, defaultSHA := defaultBootstrapSHA256ForNetwork(ctx); defaultSHA != "" {
+		return defaultSHA, network, true
+	}
+	return "", "", false
+}
+
+func defaultBootstrapSHA256ForNetwork(ctx *cli.Context) (network string, sha256 string) {
+	switch {
+	case ctx.Bool(utils.TanenbaumFlag.Name):
+		return "tanenbaum", stateBootstrapDefaultSHA256Tanenbaum
+	case ctx.Bool(utils.SyscoinFlag.Name):
+		return "syscoin", stateBootstrapDefaultSHA256SyscoinMain
+	// Syscoin mainnet is the default network when no preset is selected.
+	case !utils.IsNetworkPreset(ctx):
+		return "syscoin", stateBootstrapDefaultSHA256SyscoinMain
+	default:
+		return "", ""
+	}
 }
 
 func shouldInstallBootstrap(chaindataPath string, force bool) (bool, error) {
