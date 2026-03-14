@@ -73,7 +73,7 @@ type HeaderChain struct {
 	// SYSCOIN
 	SYSHashCache            *lru.Cache[uint64, []byte]      // Cache for SYS hash
 	BTCCheckpointIndexCache *lru.Cache[common.Hash, uint64] // Cache for BTC hash -> checkpoint index
-	BTCCheckpointLastIndex  uint64
+	BTCCheckpointLastIndex  atomic.Uint64
 	DataHashCache           *lru.Cache[common.Hash, []byte] // Cache for Data availability
 	NEVMAddressCache        *lru.Cache[common.Address, []byte]
 
@@ -98,16 +98,16 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 		engine:                  engine,
 	}
 	// SYSCOIN: load persisted checkpoint last-index (best effort)
-	hc.BTCCheckpointLastIndex = rawdb.ReadBTCCheckpointLastIndex(chainDb)
-	origBTCCheckpointLastIndex := hc.BTCCheckpointLastIndex
+	hc.BTCCheckpointLastIndex.Store(rawdb.ReadBTCCheckpointLastIndex(chainDb))
+	origBTCCheckpointLastIndex := hc.BTCCheckpointLastIndex.Load()
 	// Self-heal: if lastIndex points past existing i2h entries (e.g. partial writes),
 	// clamp it down so BTC checkpoint queries remain correct and future writes stay consistent.
 	//
 	// IMPORTANT: Do not linearly scan down from a corrupt huge lastIndex; use
 	// exponential step-down + binary search for O(log lastIndex) DB reads.
-	if hc.BTCCheckpointLastIndex > 0 && len(rawdb.ReadBTCCheckpointHashByIndex(chainDb, hc.BTCCheckpointLastIndex)) == 0 {
-		hi := hc.BTCCheckpointLastIndex // hi is known-missing (or treated as missing)
-		var lo uint64                   // lo is known-existing (0 treated as existing sentinel)
+	if lastIndex := hc.BTCCheckpointLastIndex.Load(); lastIndex > 0 && len(rawdb.ReadBTCCheckpointHashByIndex(chainDb, lastIndex)) == 0 {
+		hi := lastIndex // hi is known-missing (or treated as missing)
+		var lo uint64   // lo is known-existing (0 treated as existing sentinel)
 
 		// Find a lower bound 'lo' where i2h exists (or 0), by stepping down exponentially.
 		step := uint64(1)
@@ -146,11 +146,11 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 				right = mid
 			}
 		}
-		hc.BTCCheckpointLastIndex = left
+		hc.BTCCheckpointLastIndex.Store(left)
 	}
 	// Persist the healed value (best effort) only if changed.
-	if hc.BTCCheckpointLastIndex != origBTCCheckpointLastIndex {
-		rawdb.WriteBTCCheckpointLastIndex(chainDb, hc.BTCCheckpointLastIndex)
+	if healedIndex := hc.BTCCheckpointLastIndex.Load(); healedIndex != origBTCCheckpointLastIndex {
+		rawdb.WriteBTCCheckpointLastIndex(chainDb, healedIndex)
 	}
 	hc.genesisHeader = hc.GetHeaderByNumber(0)
 	if hc.genesisHeader == nil {
@@ -607,14 +607,14 @@ func (hc *HeaderChain) BTCCheckpointIndex(btcHash common.Hash) uint64 {
 // SYSCOIN
 // ReadBTCCheckpointLastIndex returns the persisted last checkpoint index.
 func (hc *HeaderChain) ReadBTCCheckpointLastIndex() uint64 {
-	return hc.BTCCheckpointLastIndex
+	return hc.BTCCheckpointLastIndex.Load()
 }
 
 // SYSCOIN
 // ReadBTCCheckpointHashByIndex returns the checkpoint hash for a given index.
 // Returns empty slice if not found.
 func (hc *HeaderChain) ReadBTCCheckpointHashByIndex(idx uint64) []byte {
-	if idx == 0 || idx > hc.BTCCheckpointLastIndex {
+	if idx == 0 || idx > hc.BTCCheckpointLastIndex.Load() {
 		return []byte{}
 	}
 	return rawdb.ReadBTCCheckpointHashByIndex(hc.chainDb, idx)
@@ -659,8 +659,7 @@ func (hc *HeaderChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btc
 		hc.BTCCheckpointIndexCache.Add(btcHash, existingIdx)
 		return
 	}
-	hc.BTCCheckpointLastIndex++
-	idx := hc.BTCCheckpointLastIndex
+	idx := hc.BTCCheckpointLastIndex.Add(1)
 	rawdb.WriteBTCCheckpointLastIndex(db, idx)
 	rawdb.WriteBTCCheckpointHashByIndex(db, idx, btcHash)
 	rawdb.WriteBTCCheckpointIndexByHash(db, btcHash, idx)
@@ -705,14 +704,15 @@ func (hc *HeaderChain) DeleteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64) {
 		hc.BTCCheckpointIndexCache.Remove(btcHash)
 	}
 	// Only roll back last-index if we're disconnecting in reverse order.
-	if idx == hc.BTCCheckpointLastIndex {
-		hc.BTCCheckpointLastIndex = idx - 1
-		rawdb.WriteBTCCheckpointLastIndex(db, hc.BTCCheckpointLastIndex)
+	if idx == hc.BTCCheckpointLastIndex.Load() {
+		newLastIdx := idx - 1
+		hc.BTCCheckpointLastIndex.Store(newLastIdx)
+		rawdb.WriteBTCCheckpointLastIndex(db, newLastIdx)
 	} else {
 		log.Warn("DeleteBTCCheckpoint: non-tail disconnect detected",
 			"block", n,
 			"idx", idx,
-			"lastIdx", hc.BTCCheckpointLastIndex,
+			"lastIdx", hc.BTCCheckpointLastIndex.Load(),
 		)
 	}
 }
