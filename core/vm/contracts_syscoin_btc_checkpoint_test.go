@@ -85,6 +85,24 @@ func TestBTCCheckpointIndex_Errors(t *testing.T) {
 	}
 }
 
+func TestBTCCheckpointIndex_NilCallbackReturnsZeroWords(t *testing.T) {
+	interp := &EVMInterpreter{evm: &EVM{Context: BlockContext{}}}
+	in := make([]byte, 32*3)
+
+	out, err := (&btccheckpointindex{}).Run(in, interp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != len(in) {
+		t.Fatalf("expected %d bytes output, got %d", len(in), len(out))
+	}
+	for i, b := range out {
+		if b != 0 {
+			t.Fatalf("expected zero-filled output, found byte %d = %d", i, b)
+		}
+	}
+}
+
 func TestBTCCheckpointHashByIndex_BatchInputAndGas(t *testing.T) {
 	p := &btccheckpointhashbyindex{}
 
@@ -160,6 +178,24 @@ func TestBTCCheckpointHashByIndex_Errors(t *testing.T) {
 	}
 }
 
+func TestBTCCheckpointHashByIndex_NilCallbackReturnsZeroWords(t *testing.T) {
+	interp := &EVMInterpreter{evm: &EVM{Context: BlockContext{}}}
+	in := make([]byte, 8*3)
+
+	out, err := (&btccheckpointhashbyindex{}).Run(in, interp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 32*3 {
+		t.Fatalf("expected %d bytes output, got %d", 32*3, len(out))
+	}
+	for i, b := range out {
+		if b != 0 {
+			t.Fatalf("expected zero-filled output, found byte %d = %d", i, b)
+		}
+	}
+}
+
 func TestBTCLastCheckpointIndex_OutputAndErrors(t *testing.T) {
 	p := &btclastcheckpointindex{}
 	evm := &EVM{
@@ -181,5 +217,22 @@ func TestBTCLastCheckpointIndex_OutputAndErrors(t *testing.T) {
 	}
 	if got := binary.BigEndian.Uint64(out[24:32]); got != 123 {
 		t.Fatalf("expected 123, got %d", got)
+	}
+}
+
+func TestBTCLastCheckpointIndex_NilCallbackReturnsZeroWord(t *testing.T) {
+	interp := &EVMInterpreter{evm: &EVM{Context: BlockContext{}}}
+
+	out, err := (&btclastcheckpointindex{}).Run(nil, interp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 32 {
+		t.Fatalf("expected 32 bytes output, got %d", len(out))
+	}
+	for i, b := range out {
+		if b != 0 {
+			t.Fatalf("expected zero-filled output, found byte %d = %d", i, b)
+		}
 	}
 }
