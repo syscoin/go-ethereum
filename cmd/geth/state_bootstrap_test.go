@@ -237,6 +237,56 @@ func TestRecordCloseErrorPreservesExistingError(t *testing.T) {
 	}
 }
 
+func TestResolveBootstrapArchivePath(t *testing.T) {
+	t.Run("explicit relative file path", func(t *testing.T) {
+		want, err := filepath.Abs("custom-bootstrap.zip")
+		if err != nil {
+			t.Fatalf("resolve expected path: %v", err)
+		}
+		got, err := resolveBootstrapArchivePath(t.TempDir(), "custom-bootstrap.zip", "https://example.invalid/bootstrap.tar.gz")
+		if err != nil {
+			t.Fatalf("resolveBootstrapArchivePath error: %v", err)
+		}
+		if got != want {
+			t.Fatalf("unexpected archive path: got %s want %s", got, want)
+		}
+	})
+
+	t.Run("infer zip from url", func(t *testing.T) {
+		instanceDir := t.TempDir()
+		got, err := resolveBootstrapArchivePath(instanceDir, "", "https://example.invalid/releases/bootstrap.zip")
+		if err != nil {
+			t.Fatalf("resolveBootstrapArchivePath error: %v", err)
+		}
+		want := filepath.Join(instanceDir, "state-bootstrap.zip")
+		if got != want {
+			t.Fatalf("unexpected archive path: got %s want %s", got, want)
+		}
+	})
+
+	t.Run("infer tar gz from url with query string", func(t *testing.T) {
+		instanceDir := t.TempDir()
+		got, err := resolveBootstrapArchivePath(instanceDir, "", "https://example.invalid/releases/bootstrap.tar.gz?download=1")
+		if err != nil {
+			t.Fatalf("resolveBootstrapArchivePath error: %v", err)
+		}
+		want := filepath.Join(instanceDir, "state-bootstrap.tar.gz")
+		if got != want {
+			t.Fatalf("unexpected archive path: got %s want %s", got, want)
+		}
+	})
+
+	t.Run("reject url without supported extension", func(t *testing.T) {
+		_, err := resolveBootstrapArchivePath(t.TempDir(), "", "https://example.invalid/releases/bootstrap")
+		if err == nil {
+			t.Fatal("expected error for unsupported bootstrap URL extension")
+		}
+		if !strings.Contains(err.Error(), utils.StateBootstrapFileFlag.Name) {
+			t.Fatalf("expected error to mention explicit file flag, got %v", err)
+		}
+	})
+}
+
 func TestInstallBootstrapArchiveReplacesExistingChaindata(t *testing.T) {
 	root := t.TempDir()
 	instanceDir := filepath.Join(root, "instance")

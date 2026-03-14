@@ -29,7 +29,9 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -100,14 +102,9 @@ func maybeBootstrapState(ctx *cli.Context, stack *node.Node) error {
 		return fmt.Errorf("state bootstrap URL download requires SHA-256 via --%s or a built-in default for the selected network", utils.StateBootstrapSHA256Flag.Name)
 	}
 
-	archivePath := cfg.filePath
-	if archivePath == "" {
-		archivePath = filepath.Join(stack.InstanceDir(), "state-bootstrap.tar.gz")
-	} else if !filepath.IsAbs(archivePath) {
-		archivePath, err = filepath.Abs(archivePath)
-		if err != nil {
-			return fmt.Errorf("resolve bootstrap archive path: %w", err)
-		}
+	archivePath, err := resolveBootstrapArchivePath(stack.InstanceDir(), cfg.filePath, cfg.url)
+	if err != nil {
+		return err
 	}
 	downloadedArchive, err := ensureArchiveAvailable(archivePath, cfg.url)
 	if err != nil {
@@ -124,6 +121,42 @@ func maybeBootstrapState(ctx *cli.Context, stack *node.Node) error {
 	cleanupDownloadedBootstrapArchive(archivePath, downloadedArchive)
 	log.Info("State bootstrap import completed", "chaindata", chaindataPath, "archive", archivePath)
 	return nil
+}
+
+func resolveBootstrapArchivePath(instanceDir, filePath, sourceURL string) (string, error) {
+	archivePath := strings.TrimSpace(filePath)
+	if archivePath != "" {
+		if !filepath.IsAbs(archivePath) {
+			absPath, err := filepath.Abs(archivePath)
+			if err != nil {
+				return "", fmt.Errorf("resolve bootstrap archive path: %w", err)
+			}
+			return absPath, nil
+		}
+		return archivePath, nil
+	}
+
+	ext, err := inferBootstrapArchiveExtension(sourceURL)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(instanceDir, "state-bootstrap"+ext), nil
+}
+
+func inferBootstrapArchiveExtension(sourceURL string) (string, error) {
+	parsedURL, err := url.Parse(strings.TrimSpace(sourceURL))
+	if err != nil {
+		return "", fmt.Errorf("parse bootstrap URL: %w", err)
+	}
+	lowerPath := strings.ToLower(path.Clean(parsedURL.Path))
+	switch {
+	case strings.HasSuffix(lowerPath, ".tar.gz"):
+		return ".tar.gz", nil
+	case strings.HasSuffix(lowerPath, ".zip"):
+		return ".zip", nil
+	default:
+		return "", fmt.Errorf("bootstrap URL must end with .tar.gz or .zip, or specify --%s explicitly", utils.StateBootstrapFileFlag.Name)
+	}
 }
 
 func resolveStateBootstrapSHA256(ctx *cli.Context, configuredSHA256 string) (sha256 string, network string, fromDefault bool) {
