@@ -320,16 +320,68 @@ func installBootstrapArchive(instanceDir, chaindataPath, archivePath string) err
 	if err != nil {
 		return err
 	}
-	if err := os.RemoveAll(chaindataPath); err != nil {
-		return fmt.Errorf("remove existing chaindata: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(chaindataPath), 0o755); err != nil {
+	parentDir := filepath.Dir(chaindataPath)
+	if err := os.MkdirAll(parentDir, 0o755); err != nil {
 		return fmt.Errorf("create chaindata parent directory: %w", err)
 	}
-	if err := moveOrCopyDir(srcChaindata, chaindataPath); err != nil {
+
+	installRoot, err := os.MkdirTemp(parentDir, "state-bootstrap-install-*")
+	if err != nil {
+		return fmt.Errorf("create bootstrap install directory: %w", err)
+	}
+	defer os.RemoveAll(installRoot)
+
+	stagedChaindata := filepath.Join(installRoot, "chaindata")
+	if err := moveOrCopyDirFn(srcChaindata, stagedChaindata); err != nil {
 		return fmt.Errorf("install chaindata: %w", err)
 	}
+	if err := replaceChaindataWithBackup(stagedChaindata, chaindataPath); err != nil {
+		return fmt.Errorf("activate chaindata: %w", err)
+	}
 	return nil
+}
+
+func replaceChaindataWithBackup(stagedChaindata, chaindataPath string) error {
+	parentDir := filepath.Dir(chaindataPath)
+	backupPath := ""
+
+	if _, err := os.Stat(chaindataPath); err == nil {
+		backupPath, err = reserveTempPath(parentDir, "chaindata-backup-*")
+		if err != nil {
+			return err
+		}
+		if err := os.Rename(chaindataPath, backupPath); err != nil {
+			return fmt.Errorf("backup existing chaindata: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat existing chaindata: %w", err)
+	}
+
+	if err := os.Rename(stagedChaindata, chaindataPath); err != nil {
+		if backupPath != "" {
+			if restoreErr := os.Rename(backupPath, chaindataPath); restoreErr != nil {
+				return fmt.Errorf("activate staged chaindata: %w (restore backup failed: %v)", err, restoreErr)
+			}
+		}
+		return fmt.Errorf("activate staged chaindata: %w", err)
+	}
+	if backupPath != "" {
+		if err := os.RemoveAll(backupPath); err != nil {
+			return fmt.Errorf("remove backup chaindata: %w", err)
+		}
+	}
+	return nil
+}
+
+func reserveTempPath(parentDir, pattern string) (string, error) {
+	path, err := os.MkdirTemp(parentDir, pattern)
+	if err != nil {
+		return "", err
+	}
+	if err := os.Remove(path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func findChaindataRoot(stageDir string) (string, error) {
@@ -364,6 +416,8 @@ func moveOrCopyDir(src, dst string) error {
 	}
 	return copyDirectory(src, dst)
 }
+
+var moveOrCopyDirFn = moveOrCopyDir
 
 func copyDirectory(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {

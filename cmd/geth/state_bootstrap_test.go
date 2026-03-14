@@ -18,6 +18,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"net/http"
 	"net/http/httptest"
@@ -196,6 +197,108 @@ func TestCreateBootstrapArchive(t *testing.T) {
 				t.Fatalf("manifest sha mismatch: got %s want %s", decoded.ArchiveSHA256, manifest.ArchiveSHA256)
 			}
 		})
+	}
+}
+
+func TestInstallBootstrapArchiveReplacesExistingChaindata(t *testing.T) {
+	root := t.TempDir()
+	instanceDir := filepath.Join(root, "instance")
+	if err := os.MkdirAll(instanceDir, 0o755); err != nil {
+		t.Fatalf("mkdir instance: %v", err)
+	}
+
+	chaindataPath := filepath.Join(instanceDir, "chaindata")
+	if err := os.MkdirAll(chaindataPath, 0o755); err != nil {
+		t.Fatalf("mkdir existing chaindata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chaindataPath, "CURRENT"), []byte("old-state"), 0o644); err != nil {
+		t.Fatalf("write existing CURRENT: %v", err)
+	}
+
+	sourceChaindata := filepath.Join(root, "source-chaindata")
+	if err := os.MkdirAll(filepath.Join(sourceChaindata, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir source chaindata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceChaindata, "CURRENT"), []byte("new-state"), 0o644); err != nil {
+		t.Fatalf("write source CURRENT: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceChaindata, "nested", "000001.sst"), []byte("snapshot"), 0o644); err != nil {
+		t.Fatalf("write source nested file: %v", err)
+	}
+
+	archivePath := filepath.Join(root, "state-bootstrap.tar.gz")
+	if _, err := createBootstrapArchive(sourceChaindata, archivePath); err != nil {
+		t.Fatalf("createBootstrapArchive error: %v", err)
+	}
+
+	if err := installBootstrapArchive(instanceDir, chaindataPath, archivePath); err != nil {
+		t.Fatalf("installBootstrapArchive error: %v", err)
+	}
+
+	gotCurrent, err := os.ReadFile(filepath.Join(chaindataPath, "CURRENT"))
+	if err != nil {
+		t.Fatalf("read installed CURRENT: %v", err)
+	}
+	if string(gotCurrent) != "new-state" {
+		t.Fatalf("unexpected CURRENT content: got %q want %q", string(gotCurrent), "new-state")
+	}
+	gotNested, err := os.ReadFile(filepath.Join(chaindataPath, "nested", "000001.sst"))
+	if err != nil {
+		t.Fatalf("read installed nested file: %v", err)
+	}
+	if string(gotNested) != "snapshot" {
+		t.Fatalf("unexpected nested content: got %q want %q", string(gotNested), "snapshot")
+	}
+}
+
+func TestInstallBootstrapArchivePreservesExistingChaindataOnInstallFailure(t *testing.T) {
+	root := t.TempDir()
+	instanceDir := filepath.Join(root, "instance")
+	if err := os.MkdirAll(instanceDir, 0o755); err != nil {
+		t.Fatalf("mkdir instance: %v", err)
+	}
+
+	chaindataPath := filepath.Join(instanceDir, "chaindata")
+	if err := os.MkdirAll(chaindataPath, 0o755); err != nil {
+		t.Fatalf("mkdir existing chaindata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chaindataPath, "CURRENT"), []byte("old-state"), 0o644); err != nil {
+		t.Fatalf("write existing CURRENT: %v", err)
+	}
+
+	sourceChaindata := filepath.Join(root, "source-chaindata")
+	if err := os.MkdirAll(sourceChaindata, 0o755); err != nil {
+		t.Fatalf("mkdir source chaindata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceChaindata, "CURRENT"), []byte("new-state"), 0o644); err != nil {
+		t.Fatalf("write source CURRENT: %v", err)
+	}
+
+	archivePath := filepath.Join(root, "state-bootstrap.tar.gz")
+	if _, err := createBootstrapArchive(sourceChaindata, archivePath); err != nil {
+		t.Fatalf("createBootstrapArchive error: %v", err)
+	}
+
+	sentinel := errors.New("injected install failure")
+	prevMoveOrCopyDirFn := moveOrCopyDirFn
+	moveOrCopyDirFn = func(_, _ string) error {
+		return sentinel
+	}
+	t.Cleanup(func() {
+		moveOrCopyDirFn = prevMoveOrCopyDirFn
+	})
+
+	err := installBootstrapArchive(instanceDir, chaindataPath, archivePath)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected injected install failure, got %v", err)
+	}
+
+	gotCurrent, readErr := os.ReadFile(filepath.Join(chaindataPath, "CURRENT"))
+	if readErr != nil {
+		t.Fatalf("read preserved CURRENT: %v", readErr)
+	}
+	if string(gotCurrent) != "old-state" {
+		t.Fatalf("existing CURRENT was not preserved: got %q want %q", string(gotCurrent), "old-state")
 	}
 }
 
@@ -419,7 +522,7 @@ func TestResolveStateBootstrapSHA256(t *testing.T) {
 
 	t.Run("explicit override takes precedence", func(t *testing.T) {
 		ctx := makeCtx(map[string]string{
-			utils.SyscoinFlag.Name:             "true",
+			utils.SyscoinFlag.Name:              "true",
 			utils.StateBootstrapSHA256Flag.Name: strings.Repeat("a", 64),
 		})
 		gotSHA, gotNetwork, fromDefault := resolveStateBootstrapSHA256(ctx, ctx.String(utils.StateBootstrapSHA256Flag.Name))
