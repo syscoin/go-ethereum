@@ -143,9 +143,6 @@ func defaultBootstrapSHA256ForNetwork(ctx *cli.Context) (network string, sha256 
 		return "tanenbaum", stateBootstrapDefaultSHA256Tanenbaum
 	case ctx.Bool(utils.SyscoinFlag.Name):
 		return "syscoin", stateBootstrapDefaultSHA256SyscoinMain
-	// Syscoin mainnet is the default network when no preset is selected.
-	case !utils.IsNetworkPreset(ctx):
-		return "syscoin", stateBootstrapDefaultSHA256SyscoinMain
 	default:
 		return "", ""
 	}

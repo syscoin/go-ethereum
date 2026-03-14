@@ -582,13 +582,24 @@ func TestResolveStateBootstrapSHA256(t *testing.T) {
 		}
 	})
 
-	t.Run("syscoin default without preset flag", func(t *testing.T) {
-		ctx := makeCtx(nil)
+	t.Run("syscoin default", func(t *testing.T) {
+		ctx := makeCtx(map[string]string{utils.SyscoinFlag.Name: "true"})
 		gotSHA, gotNetwork, fromDefault := resolveStateBootstrapSHA256(ctx, "")
 		if gotSHA != stateBootstrapDefaultSHA256SyscoinMain {
 			t.Fatalf("wrong syscoin default sha: got %s want %s", gotSHA, stateBootstrapDefaultSHA256SyscoinMain)
 		}
 		if gotNetwork != "syscoin" || !fromDefault {
+			t.Fatalf("unexpected default metadata: network=%q fromDefault=%v", gotNetwork, fromDefault)
+		}
+	})
+
+	t.Run("no preset has no default", func(t *testing.T) {
+		ctx := makeCtx(nil)
+		gotSHA, gotNetwork, fromDefault := resolveStateBootstrapSHA256(ctx, "")
+		if gotSHA != "" {
+			t.Fatalf("expected empty default sha, got %s", gotSHA)
+		}
+		if gotNetwork != "" || fromDefault {
 			t.Fatalf("unexpected default metadata: network=%q fromDefault=%v", gotNetwork, fromDefault)
 		}
 	})
