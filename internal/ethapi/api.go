@@ -625,6 +625,9 @@ type ChainContextBackend interface {
 	Engine() consensus.Engine
 	// SYSCOIN
 	ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error)
+	BTCCheckpointIndex(ctx context.Context, hash common.Hash) (uint64, error)
+	ReadBTCCheckpointLastIndex(ctx context.Context) (uint64, error)
+	ReadBTCCheckpointHashByIndex(ctx context.Context, idx uint64) ([]byte, error)
 	ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error)
 	GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error)
 	HeaderByNumber(context.Context, rpc.BlockNumber) (*types.Header, error)
@@ -664,6 +667,27 @@ func (context *ChainContext) ReadSYSHash(n uint64) []byte {
 		return nil
 	}
 	return sysBlockHash
+}
+func (context *ChainContext) BTCCheckpointIndex(hash common.Hash) uint64 {
+	idx, err := context.b.BTCCheckpointIndex(context.ctx, hash)
+	if err != nil {
+		return 0
+	}
+	return idx
+}
+func (context *ChainContext) ReadBTCCheckpointLastIndex() uint64 {
+	idx, err := context.b.ReadBTCCheckpointLastIndex(context.ctx)
+	if err != nil {
+		return 0
+	}
+	return idx
+}
+func (context *ChainContext) ReadBTCCheckpointHashByIndex(idx uint64) []byte {
+	hashBytes, err := context.b.ReadBTCCheckpointHashByIndex(context.ctx, idx)
+	if err != nil {
+		return nil
+	}
+	return hashBytes
 }
 func (context *ChainContext) ReadDataHash(hash common.Hash) []byte {
 	dataHash, err := context.b.ReadDataHash(context.ctx, hash)

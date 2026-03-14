@@ -87,6 +87,9 @@ type Backend interface {
 	Engine() consensus.Engine
 	// SYSCOIN
 	ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error)
+	BTCCheckpointIndex(ctx context.Context, hash common.Hash) (uint64, error)
+	ReadBTCCheckpointLastIndex(ctx context.Context) (uint64, error)
+	ReadBTCCheckpointHashByIndex(ctx context.Context, idx uint64) ([]byte, error)
 	ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error)
 	GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error)
 	HistoryPruningCutoff() uint64

@@ -400,8 +400,18 @@ func (b *backendMock) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent)
 }
 
 func (b *backendMock) Engine() consensus.Engine { return nil }
+
 // SYSCOIN
 func (b *backendMock) ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error) {
+	return []byte{}, nil
+}
+func (b *backendMock) BTCCheckpointIndex(ctx context.Context, hash common.Hash) (uint64, error) {
+	return 0, nil
+}
+func (b *backendMock) ReadBTCCheckpointLastIndex(ctx context.Context) (uint64, error) {
+	return 0, nil
+}
+func (b *backendMock) ReadBTCCheckpointHashByIndex(ctx context.Context, idx uint64) ([]byte, error) {
 	return []byte{}, nil
 }
 func (b *backendMock) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {

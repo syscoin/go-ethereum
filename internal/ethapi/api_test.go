@@ -625,9 +625,19 @@ func (b testBackend) CurrentView() *filtermaps.ChainView {
 func (b testBackend) NewMatcherBackend() filtermaps.MatcherBackend {
 	panic("implement me")
 }
+
 // SYSCOIN
 func (b testBackend) ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error) {
 	return []byte{}, nil
+}
+func (b testBackend) BTCCheckpointIndex(ctx context.Context, hash common.Hash) (uint64, error) {
+	return 7, nil
+}
+func (b testBackend) ReadBTCCheckpointLastIndex(ctx context.Context) (uint64, error) {
+	return 9, nil
+}
+func (b testBackend) ReadBTCCheckpointHashByIndex(ctx context.Context, idx uint64) ([]byte, error) {
+	return common.BigToHash(big.NewInt(int64(idx))).Bytes(), nil
 }
 func (b testBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {
 	return []byte{}, nil
@@ -638,6 +648,25 @@ func (b testBackend) GetNEVMAddress(ctx context.Context, address common.Address)
 func (b testBackend) HistoryPruningCutoff() uint64 {
 	bn, _ := b.chain.HistoryPruningCutoff()
 	return bn
+}
+
+func TestChainContextBTCCheckpointReaders(t *testing.T) {
+	t.Parallel()
+
+	backend := testBackend{}
+	ctx := NewChainContext(context.Background(), backend)
+	hash := common.HexToHash("0x1234")
+
+	if got := ctx.BTCCheckpointIndex(hash); got != 7 {
+		t.Fatalf("unexpected checkpoint index: got %d want %d", got, 7)
+	}
+	if got := ctx.ReadBTCCheckpointLastIndex(); got != 9 {
+		t.Fatalf("unexpected last checkpoint index: got %d want %d", got, 9)
+	}
+	wantHash := common.BigToHash(big.NewInt(5)).Bytes()
+	if got := ctx.ReadBTCCheckpointHashByIndex(5); !bytes.Equal(got, wantHash) {
+		t.Fatalf("unexpected checkpoint hash bytes: got %x want %x", got, wantHash)
+	}
 }
 
 func TestEstimateGas(t *testing.T) {
@@ -3583,8 +3612,11 @@ func TestRPCGetBlockReceipts(t *testing.T) {
 type precompileContract struct{}
 
 func (p *precompileContract) RequiredGas(input []byte) uint64 { return 0 }
+
 // SYSCOIN
-func (p *precompileContract) Run(input []byte, interpreter* vm.EVMInterpreter) ([]byte, error) { return nil, nil }
+func (p *precompileContract) Run(input []byte, interpreter *vm.EVMInterpreter) ([]byte, error) {
+	return nil, nil
+}
 
 func testRPCResponseWithFile(t *testing.T, testid int, result interface{}, rpc string, file string) {
 	data, err := json.MarshalIndent(result, "", "  ")

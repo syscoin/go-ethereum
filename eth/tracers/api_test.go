@@ -186,8 +186,18 @@ func (b *testBackend) StateAtTransaction(ctx context.Context, block *types.Block
 	}
 	return nil, vm.BlockContext{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %#x", txIndex, block.Hash())
 }
+
 // SYSCOIN
 func (b *testBackend) ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error) {
+	return []byte{}, nil
+}
+func (b *testBackend) BTCCheckpointIndex(ctx context.Context, hash common.Hash) (uint64, error) {
+	return 0, nil
+}
+func (b *testBackend) ReadBTCCheckpointLastIndex(ctx context.Context) (uint64, error) {
+	return 0, nil
+}
+func (b *testBackend) ReadBTCCheckpointHashByIndex(ctx context.Context, idx uint64) ([]byte, error) {
 	return []byte{}, nil
 }
 func (b *testBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {

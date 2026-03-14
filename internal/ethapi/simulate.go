@@ -514,9 +514,19 @@ func (b *simBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber)
 	}
 	return nil, errors.New("header not found")
 }
+
 // SYSCOIN
 func (b *simBackend) ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error) {
 	return []byte{}, nil
+}
+func (b *simBackend) BTCCheckpointIndex(ctx context.Context, hash common.Hash) (uint64, error) {
+	return b.b.BTCCheckpointIndex(ctx, hash)
+}
+func (b *simBackend) ReadBTCCheckpointLastIndex(ctx context.Context) (uint64, error) {
+	return b.b.ReadBTCCheckpointLastIndex(ctx)
+}
+func (b *simBackend) ReadBTCCheckpointHashByIndex(ctx context.Context, idx uint64) ([]byte, error) {
+	return b.b.ReadBTCCheckpointHashByIndex(ctx, idx)
 }
 func (b *simBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {
 	return []byte{}, nil
