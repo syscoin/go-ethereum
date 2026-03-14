@@ -33,6 +33,14 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+type errCloser struct {
+	err error
+}
+
+func (e errCloser) Close() error {
+	return e.err
+}
+
 func TestFindChaindataRoot(t *testing.T) {
 	t.Run("direct", func(t *testing.T) {
 		stage := t.TempDir()
@@ -197,6 +205,35 @@ func TestCreateBootstrapArchive(t *testing.T) {
 				t.Fatalf("manifest sha mismatch: got %s want %s", decoded.ArchiveSHA256, manifest.ArchiveSHA256)
 			}
 		})
+	}
+}
+
+func TestRecordCloseErrorSetsErrorOnSuccessfulWrite(t *testing.T) {
+	closeErr := errors.New("close failed")
+	var err error
+
+	recordCloseError(&err, "finalize archive", errCloser{err: closeErr}.Close)
+
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("expected close error to be returned, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "finalize archive") {
+		t.Fatalf("expected action context in error, got %v", err)
+	}
+}
+
+func TestRecordCloseErrorPreservesExistingError(t *testing.T) {
+	writeErr := errors.New("write failed")
+	closeErr := errors.New("close failed")
+	err := writeErr
+
+	recordCloseError(&err, "finalize archive", errCloser{err: closeErr}.Close)
+
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("expected original write error to be preserved, got %v", err)
+	}
+	if errors.Is(err, closeErr) {
+		t.Fatalf("unexpected close error replacing original error: %v", err)
 	}
 }
 

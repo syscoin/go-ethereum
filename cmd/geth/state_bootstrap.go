@@ -631,18 +631,28 @@ func collectArchiveEntries(chaindataPath string) ([]archiveEntry, int64, error) 
 	return entries, totalBytes, nil
 }
 
-func writeTarGzArchive(archivePath string, entries []archiveEntry) error {
+func recordCloseError(errp *error, action string, closeFn func() error) {
+	if *errp != nil {
+		_ = closeFn()
+		return
+	}
+	if err := closeFn(); err != nil {
+		*errp = fmt.Errorf("%s: %w", action, err)
+	}
+}
+
+func writeTarGzArchive(archivePath string, entries []archiveEntry) (err error) {
 	file, err := os.OpenFile(archivePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("create tar.gz archive: %w", err)
 	}
-	defer file.Close()
+	defer recordCloseError(&err, "close tar.gz archive file", file.Close)
 
 	gz := gzip.NewWriter(file)
-	defer gz.Close()
+	defer recordCloseError(&err, "finalize gzip stream", gz.Close)
 
 	tw := tar.NewWriter(gz)
-	defer tw.Close()
+	defer recordCloseError(&err, "finalize tar archive", tw.Close)
 
 	if err := tw.WriteHeader(&tar.Header{
 		Name:     stateBootstrapArchiveRoot + "/",
@@ -684,15 +694,15 @@ func writeTarGzArchive(archivePath string, entries []archiveEntry) error {
 	return nil
 }
 
-func writeZipArchive(archivePath string, entries []archiveEntry) error {
+func writeZipArchive(archivePath string, entries []archiveEntry) (err error) {
 	file, err := os.OpenFile(archivePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("create zip archive: %w", err)
 	}
-	defer file.Close()
+	defer recordCloseError(&err, "close zip archive file", file.Close)
 
 	zw := zip.NewWriter(file)
-	defer zw.Close()
+	defer recordCloseError(&err, "finalize zip archive", zw.Close)
 
 	for _, entry := range entries {
 		header, err := zip.FileInfoHeader(entry.info)
