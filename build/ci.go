@@ -328,6 +328,9 @@ func doTest(cmdline []string) {
 	if *short {
 		gotest.Args = append(gotest.Args, "-short")
 	}
+	if enableEEST {
+		gotest.Env = append(gotest.Env, "GETH_EEST=1")
+	}
 
 	packages := []string{"./..."}
 	if len(flag.CommandLine.Args()) > 0 {
