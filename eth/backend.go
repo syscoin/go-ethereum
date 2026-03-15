@@ -328,7 +328,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	// Successful startup; push a marker and check previous unclean shutdowns.
 	eth.shutdownTracker.MarkStartup()
 	// SYSCOIN	
-	if eth.blockchain.GetChainConfig().SyscoinBlock != nil {
+	if eth.blockchain.Config().SyscoinBlock != nil {
 		eth.zmqRep = NewZMQRep(stack, eth, config.NEVMPubEP)
 		eth.wg.Add(1)
 		go eth.networkingLoop()
@@ -376,19 +376,20 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
     incomingBlockNumber := nevmBlockConnectIn.Block.NumberU64()
     incomingBlockHash := nevmBlockConnectIn.Block.Hash()
 
-    // Check persisted blockchain first to avoid duplicates or collisions
-    existingBlock := eth.blockchain.GetBlockByNumber(incomingBlockNumber)
-    if existingBlock != nil {
-        if existingBlock.Hash() == incomingBlockHash {
-            log.Info("Block already exists in chain, skipping insert", "number", incomingBlockNumber, "hash", existingBlock.Hash())
+    // Check canonical chain first to avoid duplicates/collisions. This is a hash lookup only
+    // and does not touch EVM state.
+    existingHash := eth.blockchain.GetCanonicalHash(incomingBlockNumber)
+    if existingHash != (common.Hash{}) {
+        if existingHash == incomingBlockHash {
+            log.Trace("Block already exists in chain, skipping insert", "number", incomingBlockNumber, "hash", existingHash)
             return nil
         }
         log.Warn("Block height collision in chain",
             "number", incomingBlockNumber,
-            "existingHash", existingBlock.Hash(),
+            "existingHash", existingHash,
             "incomingHash", incomingBlockHash)
         return fmt.Errorf("block collision at height %d: existing [%x..], incoming [%x..]",
-            incomingBlockNumber, existingBlock.Hash().Bytes()[:4], incomingBlockHash.Bytes()[:4])
+            incomingBlockNumber, existingHash.Bytes()[:4], incomingBlockHash.Bytes()[:4])
     }
 
     // Determine last block for continuity check
@@ -409,7 +410,7 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
         // Check last buffered block directly for duplicate
         if incomingBlockNumber == lastBlockNumber && incomingBlockHash == lastBlockHash {
             eth.bufferLock.Unlock()
-            log.Info("Block already buffered as last, skipping insert", "number", incomingBlockNumber, "hash", incomingBlockHash)
+            log.Trace("Block already buffered as last, skipping insert", "number", incomingBlockNumber, "hash", incomingBlockHash)
             return nil
         }
     }
@@ -573,6 +574,7 @@ func (eth *Ethereum) DeleteBlock(nevmBlockDisconnect *types.NEVMBlockDisconnect)
 	}
 
 	eth.blockchain.DeleteSYSHash(batch, currentNumber)
+	eth.blockchain.DeleteBTCCheckpoint(batch, currentNumber)
 	eth.blockchain.DeleteDataHashes(batch, currentNumber)
 
 	if err := batch.Write(); err != nil {
@@ -706,7 +708,7 @@ func (s *Ethereum) Start() error {
 
 	// Regularly update shutdown marker
 	s.shutdownTracker.Start()
-	if s.blockchain.GetChainConfig().SyscoinBlock != nil {
+	if s.blockchain.Config().SyscoinBlock != nil {
 		log.Info("SYSCOIN mode active: skipping Ethereum networking and peers")
 
 		// Explicitly mark peers closed BEFORE calling any handler methods:

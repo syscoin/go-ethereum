@@ -60,6 +60,9 @@ func initMatcher(st *testMatcher) {
 }
 
 func TestState(t *testing.T) {
+	if os.Getenv("GETH_ETH_TESTS") != "1" {
+		t.Skip("ethereum tests disabled (set GETH_ETH_TESTS=1 to enable)")
+	}
 	t.Parallel()
 
 	st := new(testMatcher)
@@ -78,6 +81,9 @@ func TestState(t *testing.T) {
 // TestLegacyState tests some older tests, which were moved to the folder
 // 'LegacyTests' for the Istanbul fork.
 func TestLegacyState(t *testing.T) {
+	if os.Getenv("GETH_ETH_TESTS") != "1" {
+		t.Skip("ethereum tests disabled (set GETH_ETH_TESTS=1 to enable)")
+	}
 	st := new(testMatcher)
 	initMatcher(st)
 	st.walk(t, legacyStateTestDir, func(t *testing.T, name string, test *StateTest) {
@@ -87,6 +93,9 @@ func TestLegacyState(t *testing.T) {
 
 // TestExecutionSpecState runs the test fixtures from execution-spec-tests.
 func TestExecutionSpecState(t *testing.T) {
+	if os.Getenv("GETH_EEST") != "1" {
+		t.Skip("execution-spec-tests disabled (set GETH_EEST=1 to enable)")
+	}
 	if !common.FileExist(executionSpecStateTestDir) {
 		t.Skipf("directory %s does not exist", executionSpecStateTestDir)
 	}

@@ -1506,15 +1506,15 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 func (bc *BlockChain) writeNEVMData(blockBatch ethdb.KeyValueWriter, block *types.Block) error {
 	nevmBlockConnect := block.NevmBlockConnect
 	if nevmBlockConnect != nil {
-		if(nevmBlockConnect.HasDiff()) {
+		if nevmBlockConnect.HasDiff() {
 			for _, entry := range nevmBlockConnect.Diff.AddedMNNEVM {
 				addr := common.BytesToAddress(entry.Address)
 				bc.StoreNEVMAddress(blockBatch, addr, entry.CollateralHeight)
-		
+
 			}
 			for _, entry := range nevmBlockConnect.Diff.UpdatedMNNEVM {
 				oldAddr := common.BytesToAddress(entry.OldAddress)
-				newAddr := common.BytesToAddress(entry.NewAddress)	
+				newAddr := common.BytesToAddress(entry.NewAddress)
 				bc.RemoveNEVMAddress(blockBatch, oldAddr)
 				bc.StoreNEVMAddress(blockBatch, newAddr, entry.CollateralHeight)
 
@@ -1527,9 +1527,13 @@ func (bc *BlockChain) writeNEVMData(blockBatch ethdb.KeyValueWriter, block *type
 		proposedBlockNumber := nevmBlockConnect.Block.NumberU64()
 		bc.WriteDataHashes(blockBatch, proposedBlockNumber, nevmBlockConnect.VersionHashes)
 		bc.WriteSYSHash(blockBatch, nevmBlockConnect.Sysblockhash, proposedBlockNumber)
-	} else if bc.GetChainConfig().SyscoinBlock != nil {
-		log.Debug("Skipping NEVM data; no connect info for block", 
-              "number", block.NumberU64(), "hash", block.Hash())
+		// BTC checkpoint metadata is only present on checkpoint carrier blocks.
+		if nevmBlockConnect.BTCPrevHash != (common.Hash{}) {
+			bc.WriteBTCCheckpoint(blockBatch, proposedBlockNumber, nevmBlockConnect.BTCPrevHash)
+		}
+	} else if bc.Config().SyscoinBlock != nil {
+		log.Debug("Skipping NEVM data; no connect info for block",
+			"number", block.NumberU64(), "hash", block.Hash())
 	}
 	return nil
 }
@@ -1544,7 +1548,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	//
 	// Note all the components of block(hash->number map, header, body, receipts)
 	// should be written atomically. BlockBatch is used for containing all components.
-	blockBatch := bc.db.NewBatch()
+	blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
 	rawdb.WriteBlock(blockBatch, block)
 	rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
 	rawdb.WritePreimages(blockBatch, statedb.Preimages())
@@ -1766,7 +1770,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 				return nil, it.index, err
 			}
 			// SYSCOIN
-			blockBatch := bc.db.NewBatch()
+			blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
 			err = bc.writeNEVMData(blockBatch, block)
 			if err != nil {
 				log.Crit("Failed to previously known block into disk", "err", err)
@@ -1856,7 +1860,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 				return nil, it.index, err
 			}
 			// SYSCOIN
-			blockBatch := bc.db.NewBatch()
+			blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
 			err = bc.writeNEVMData(blockBatch, block)
 			if err != nil {
 				log.Crit("Failed to previously known block into disk", "err", err)
@@ -2354,7 +2358,7 @@ func (bc *BlockChain) reorg(oldHead *types.Header, newHead *types.Header) error 
 	} else {
 		// len(newChain) == 0 && len(oldChain) > 0
 		// rewind the canonical chain to a lower point.
-		if bc.GetChainConfig().SyscoinBlock == nil {
+		if bc.Config().SyscoinBlock == nil {
 			log.Error("Impossible reorg, please file an issue", "oldnum", oldHead.Number, "oldhash", oldHead.Hash(), "oldblocks", len(oldChain), "newnum", newHead.Number, "newhash", newHead.Hash(), "newblocks", len(newChain))
 		}
 	}
@@ -2728,8 +2732,4 @@ func (bc *BlockChain) SetTrieFlushInterval(interval time.Duration) {
 // GetTrieFlushInterval gets the in-memory tries flushAlloc interval
 func (bc *BlockChain) GetTrieFlushInterval() time.Duration {
 	return time.Duration(bc.flushInterval.Load())
-}
-// SYSCOIN
-func (bc *BlockChain) GetChainConfig() *params.ChainConfig {
-	return bc.chainConfig
 }

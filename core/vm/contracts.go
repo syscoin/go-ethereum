@@ -43,9 +43,9 @@ import (
 // requires a deterministic gas count based on the input size of the Run method of the
 // contract.
 type PrecompiledContract interface {
-	RequiredGas(input []byte) uint64  // RequiredPrice calculates the contract gas use
+	RequiredGas(input []byte) uint64 // RequiredPrice calculates the contract gas use
 	// SYSCOIN
-	Run(input []byte, interpreter *EVMInterpreter) ([]byte, error)  // Run runs the precompiled contract
+	Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) // Run runs the precompiled contract
 }
 
 // PrecompiledContracts contains the precompiled contracts supported at the given fork.
@@ -137,17 +137,18 @@ var PrecompiledContractsPrague = PrecompiledContracts{
 	common.BytesToAddress([]byte{0x10}): &bls12381MapG1{},
 	common.BytesToAddress([]byte{0x11}): &bls12381MapG2{},
 }
+
 // SYSCOIN
 var PrecompiledContractsRollux = PrecompiledContracts{
-	common.BytesToAddress([]byte{0x1}): &ecrecover{},
-	common.BytesToAddress([]byte{0x2}): &sha256hash{},
-	common.BytesToAddress([]byte{0x3}): &ripemd160hash{},
-	common.BytesToAddress([]byte{0x4}): &dataCopy{},
-	common.BytesToAddress([]byte{0x5}): &bigModExp{eip2565: true},
-	common.BytesToAddress([]byte{0x6}): &bn256AddIstanbul{},
-	common.BytesToAddress([]byte{0x7}): &bn256ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{0x8}): &bn256PairingIstanbul{},
-	common.BytesToAddress([]byte{0x9}): &blake2F{},
+	common.BytesToAddress([]byte{0x1}):  &ecrecover{},
+	common.BytesToAddress([]byte{0x2}):  &sha256hash{},
+	common.BytesToAddress([]byte{0x3}):  &ripemd160hash{},
+	common.BytesToAddress([]byte{0x4}):  &dataCopy{},
+	common.BytesToAddress([]byte{0x5}):  &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{0x6}):  &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{0x7}):  &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{0x8}):  &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{0x9}):  &blake2F{},
 	common.BytesToAddress([]byte{0x63}): &datahash{},
 }
 var PrecompiledContractsNexus = PrecompiledContracts{
@@ -171,6 +172,9 @@ var PrecompiledContractsNexus = PrecompiledContracts{
 	common.BytesToAddress([]byte{0x61}): &sysblockhash{},
 	common.BytesToAddress([]byte{0x62}): &nevmaddress{},
 	common.BytesToAddress([]byte{0x63}): &datahash{},
+	common.BytesToAddress([]byte{0x64}): &btccheckpointindex{},
+	common.BytesToAddress([]byte{0x65}): &btclastcheckpointindex{},
+	common.BytesToAddress([]byte{0x66}): &btccheckpointhashbyindex{},
 }
 
 var PrecompiledContractsBLS = PrecompiledContractsPrague
@@ -185,9 +189,9 @@ var (
 	PrecompiledAddressesByzantium []common.Address
 	PrecompiledAddressesHomestead []common.Address
 	// SYSCOIN
-	PrecompiledAddressesSyscoin   []common.Address
-	PrecompiledAddressesRollux    []common.Address
-	PrecompiledAddressesNexus    []common.Address
+	PrecompiledAddressesSyscoin []common.Address
+	PrecompiledAddressesRollux  []common.Address
+	PrecompiledAddressesNexus   []common.Address
 )
 
 func init() {
@@ -294,6 +298,7 @@ type ecrecover struct{}
 func (c *ecrecover) RequiredGas(input []byte) uint64 {
 	return params.EcrecoverGas
 }
+
 // SYSCOIN
 func (c *ecrecover) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	const ecRecoverInputLength = 128
@@ -336,6 +341,7 @@ type sha256hash struct{}
 func (c *sha256hash) RequiredGas(input []byte) uint64 {
 	return uint64(len(input)+31)/32*params.Sha256PerWordGas + params.Sha256BaseGas
 }
+
 // SYSCOIN
 func (c *sha256hash) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	h := sha256.Sum256(input)
@@ -352,6 +358,7 @@ type ripemd160hash struct{}
 func (c *ripemd160hash) RequiredGas(input []byte) uint64 {
 	return uint64(len(input)+31)/32*params.Ripemd160PerWordGas + params.Ripemd160BaseGas
 }
+
 // SYSCOIN
 func (c *ripemd160hash) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	ripemd := ripemd160.New()
@@ -369,6 +376,7 @@ type dataCopy struct{}
 func (c *dataCopy) RequiredGas(input []byte) uint64 {
 	return uint64(len(input)+31)/32*params.IdentityPerWordGas + params.IdentityBaseGas
 }
+
 // SYSCOIN
 func (c *dataCopy) Run(in []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	return common.CopyBytes(in), nil
@@ -500,6 +508,7 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	}
 	return gas.Uint64()
 }
+
 // SYSCOIN
 func (c *bigModExp) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	var (
@@ -580,6 +589,7 @@ type bn256AddIstanbul struct{}
 func (c *bn256AddIstanbul) RequiredGas(input []byte) uint64 {
 	return params.Bn256AddGasIstanbul
 }
+
 // SYSCOIN
 func (c *bn256AddIstanbul) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	return runBn256Add(input)
@@ -593,6 +603,7 @@ type bn256AddByzantium struct{}
 func (c *bn256AddByzantium) RequiredGas(input []byte) uint64 {
 	return params.Bn256AddGasByzantium
 }
+
 // SYSCOIN
 func (c *bn256AddByzantium) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	return runBn256Add(input)
@@ -618,6 +629,7 @@ type bn256ScalarMulIstanbul struct{}
 func (c *bn256ScalarMulIstanbul) RequiredGas(input []byte) uint64 {
 	return params.Bn256ScalarMulGasIstanbul
 }
+
 // SYSCOIN
 func (c *bn256ScalarMulIstanbul) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	return runBn256ScalarMul(input)
@@ -631,6 +643,7 @@ type bn256ScalarMulByzantium struct{}
 func (c *bn256ScalarMulByzantium) RequiredGas(input []byte) uint64 {
 	return params.Bn256ScalarMulGasByzantium
 }
+
 // SYSCOIN
 func (c *bn256ScalarMulByzantium) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	return runBn256ScalarMul(input)
@@ -686,6 +699,7 @@ type bn256PairingIstanbul struct{}
 func (c *bn256PairingIstanbul) RequiredGas(input []byte) uint64 {
 	return params.Bn256PairingBaseGasIstanbul + uint64(len(input)/192)*params.Bn256PairingPerPointGasIstanbul
 }
+
 // SYSCOIN
 func (c *bn256PairingIstanbul) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	return runBn256Pairing(input)
@@ -699,6 +713,7 @@ type bn256PairingByzantium struct{}
 func (c *bn256PairingByzantium) RequiredGas(input []byte) uint64 {
 	return params.Bn256PairingBaseGasByzantium + uint64(len(input)/192)*params.Bn256PairingPerPointGasByzantium
 }
+
 // SYSCOIN
 func (c *bn256PairingByzantium) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	return runBn256Pairing(input)
@@ -725,6 +740,7 @@ var (
 	errBlake2FInvalidInputLength = errors.New("invalid input length")
 	errBlake2FInvalidFinalFlag   = errors.New("invalid final flag")
 )
+
 // SYSCOIN
 func (c *blake2F) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	// Make sure the input is valid (correct length and final flag)
@@ -771,9 +787,12 @@ var (
 	errBLS12381G1PointSubgroup             = errors.New("g1 point is not on correct subgroup")
 	errBLS12381G2PointSubgroup             = errors.New("g2 point is not on correct subgroup")
 	// SYSCOIN
-	errDataHashInvalidInputLength          = errors.New("invalid version hash length")
-	errNEVMAddressInvalidInputLength          = errors.New("invalid version hash length")
-	errReadSYSHashInvalidInputLength          = errors.New("invalid input number")
+	errDataHashInvalidInputLength           = errors.New("invalid version hash length")
+	errNEVMAddressInvalidInputLength        = errors.New("invalid version hash length")
+	errReadSYSHashInvalidInputLength        = errors.New("invalid input number")
+	errBTCCheckpointInvalidInputLength      = errors.New("invalid input hash")
+	errBTCCheckpointIndexInvalidInputLength = errors.New("invalid input index")
+	errBTCCheckpointBatchTooLarge           = errors.New("batch too large")
 )
 
 // bls12381G1Add implements EIP-2537 G1Add precompile.
@@ -783,6 +802,7 @@ type bls12381G1Add struct{}
 func (c *bls12381G1Add) RequiredGas(input []byte) uint64 {
 	return params.Bls12381G1AddGas
 }
+
 // SYSCOIN
 func (c *bls12381G1Add) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	// Implements EIP-2537 G1Add precompile.
@@ -833,6 +853,7 @@ func (c *bls12381G1MultiExp) RequiredGas(input []byte) uint64 {
 	// Calculate gas and return the result
 	return (uint64(k) * params.Bls12381G1MulGas * discount) / 1000
 }
+
 // SYSCOIN
 func (c *bls12381G1MultiExp) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	// Implements EIP-2537 G1MultiExp precompile.
@@ -879,6 +900,7 @@ type bls12381G2Add struct{}
 func (c *bls12381G2Add) RequiredGas(input []byte) uint64 {
 	return params.Bls12381G2AddGas
 }
+
 // SYSCOIN
 func (c *bls12381G2Add) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	// Implements EIP-2537 G2Add precompile.
@@ -930,6 +952,7 @@ func (c *bls12381G2MultiExp) RequiredGas(input []byte) uint64 {
 	// Calculate gas and return the result
 	return (uint64(k) * params.Bls12381G2MulGas * discount) / 1000
 }
+
 // SYSCOIN
 func (c *bls12381G2MultiExp) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	// Implements EIP-2537 G2MultiExp precompile logic
@@ -976,6 +999,7 @@ type bls12381Pairing struct{}
 func (c *bls12381Pairing) RequiredGas(input []byte) uint64 {
 	return params.Bls12381PairingBaseGas + uint64(len(input)/384)*params.Bls12381PairingPerPairGas
 }
+
 // SYSCOIN
 func (c *bls12381Pairing) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	// Implements EIP-2537 Pairing precompile logic.
@@ -1128,6 +1152,7 @@ type bls12381MapG1 struct{}
 func (c *bls12381MapG1) RequiredGas(input []byte) uint64 {
 	return params.Bls12381MapG1Gas
 }
+
 // SYSCOIN
 func (c *bls12381MapG1) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	// Implements EIP-2537 Map_To_G1 precompile.
@@ -1157,6 +1182,7 @@ type bls12381MapG2 struct{}
 func (c *bls12381MapG2) RequiredGas(input []byte) uint64 {
 	return params.Bls12381MapG2Gas
 }
+
 // SYSCOIN
 func (c *bls12381MapG2) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	// Implements EIP-2537 Map_FP2_TO_G2 precompile logic.
@@ -1225,6 +1251,112 @@ func (c *sysblockhash) Run(input []byte, interpreter *EVMInterpreter) ([]byte, e
 	}
 }
 
+// SYSCOIN
+// btccheckpointindex returns checkpoint indices for one or more BTC hashes (0 if not checkpointed).
+//
+// Input:  32*k bytes, concatenation of k btc hashes (bytes32 each).
+// Output: 32*k bytes, concatenation of k ABI-words where each word contains uint64 index (right-aligned).
+type btccheckpointindex struct{}
+
+func (c *btccheckpointindex) RequiredGas(input []byte) uint64 {
+	// Batch pricing: base + per-item.
+	k := len(input) / 32
+	if k == 0 || len(input)%32 != 0 {
+		return 0
+	}
+	if k > btcCheckpointBatchMaxItems {
+		return 0
+	}
+	return params.BTCCheckpointBatchBaseGas + uint64(k)*params.BTCCheckpointBatchPerItemGas
+}
+
+func (c *btccheckpointindex) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
+	if len(input) == 0 || len(input)%32 != 0 {
+		return nil, errBTCCheckpointInvalidInputLength
+	}
+	k := len(input) / 32
+	if k > btcCheckpointBatchMaxItems {
+		return nil, errBTCCheckpointBatchTooLarge
+	}
+	out := make([]byte, 32*k)
+	if interpreter.evm.Context.BTCCheckpointIndex == nil {
+		return out, nil
+	}
+	for i := 0; i < k; i++ {
+		off := i * 32
+		idx := interpreter.evm.Context.BTCCheckpointIndex(common.BytesToHash(input[off : off+32]))
+		binary.BigEndian.PutUint64(out[off+24:off+32], idx)
+	}
+	return out, nil
+}
+
+// SYSCOIN
+// btclastcheckpointindex returns the latest checkpoint index (uint64).
+// Output is uint64 big endian, left-padded to 32 bytes.
+type btclastcheckpointindex struct{}
+
+func (c *btclastcheckpointindex) RequiredGas(input []byte) uint64 {
+	return params.BTCCheckpointLastIndexGas
+}
+
+func (c *btclastcheckpointindex) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
+	if len(input) != 0 {
+		return nil, errBTCCheckpointIndexInvalidInputLength
+	}
+	out := make([]byte, 32)
+	if interpreter.evm.Context.BTCCheckpointLastIndex == nil {
+		return out, nil
+	}
+	idx := interpreter.evm.Context.BTCCheckpointLastIndex()
+	binary.BigEndian.PutUint64(out[24:], idx)
+	return out, nil
+}
+
+// SYSCOIN
+// btccheckpointhashbyindex returns checkpoint hashes for one or more indices.
+//
+// Input:  8*k bytes, concatenation of k indices (uint64 big endian each).
+// Output: 32*k bytes, concatenation of k hashes (bytes32 each). Missing -> zero-hash.
+type btccheckpointhashbyindex struct{}
+
+func (c *btccheckpointhashbyindex) RequiredGas(input []byte) uint64 {
+	// Batch pricing: base + per-item.
+	k := len(input) / 8
+	if k == 0 || len(input)%8 != 0 {
+		return 0
+	}
+	if k > btcCheckpointBatchMaxItems {
+		return 0
+	}
+	return params.BTCCheckpointBatchBaseGas + uint64(k)*params.BTCCheckpointBatchPerItemGas
+}
+
+func (c *btccheckpointhashbyindex) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {
+	if len(input) == 0 || len(input)%8 != 0 {
+		return nil, errBTCCheckpointIndexInvalidInputLength
+	}
+	k := len(input) / 8
+	if k > btcCheckpointBatchMaxItems {
+		return nil, errBTCCheckpointBatchTooLarge
+	}
+	out := make([]byte, 32*k)
+	if interpreter.evm.Context.BTCCheckpointHashByIndex == nil {
+		return out, nil
+	}
+	for i := 0; i < k; i++ {
+		inOff := i * 8
+		outOff := i * 32
+		idx := binary.BigEndian.Uint64(input[inOff : inOff+8])
+		hashBytes := interpreter.evm.Context.BTCCheckpointHashByIndex(idx)
+		if len(hashBytes) == 32 {
+			copy(out[outOff:outOff+32], hashBytes)
+		}
+	}
+	return out, nil
+}
+
+// SYSCOIN: bounded batch size for BTC checkpoint precompiles.
+const btcCheckpointBatchMaxItems = 100
 
 type nevmaddress struct{}
 
@@ -1259,6 +1391,7 @@ var (
 	errBlobVerifyMismatchedVersion  = errors.New("mismatched versioned hash")
 	errBlobVerifyKZGProof           = errors.New("error verifying kzg proof")
 )
+
 // SYSCOIN
 // Run executes the point evaluation precompile.
 func (b *kzgPointEvaluation) Run(input []byte, interpreter *EVMInterpreter) ([]byte, error) {

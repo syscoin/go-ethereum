@@ -91,6 +91,9 @@ type Backend interface {
 	StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (*types.Transaction, vm.BlockContext, *state.StateDB, StateReleaseFunc, error)
 	// SYSCOIN
 	ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error)
+	BTCCheckpointIndex(ctx context.Context, hash common.Hash) (uint64, error)
+	ReadBTCCheckpointLastIndex(ctx context.Context) (uint64, error)
+	ReadBTCCheckpointHashByIndex(ctx context.Context, idx uint64) ([]byte, error)
 	ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error)
 	GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error)
 }
@@ -110,6 +113,7 @@ func NewAPI(backend Backend) *API {
 func (api *API) chainContext(ctx context.Context) core.ChainContext {
 	return ethapi.NewChainContext(ctx, api.backend)
 }
+
 // SYSCOIN
 func (api *API) ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error) {
 	sysBlockHash, err := api.backend.ReadSYSHash(ctx, number)
@@ -132,6 +136,7 @@ func (api *API) GetNEVMAddress(ctx context.Context, address common.Address) ([]b
 	}
 	return collateralHeight, nil
 }
+
 // blockByNumber is the wrapper of the chain access function offered by the backend.
 // It will return an error if the block is not found.
 func (api *API) blockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {

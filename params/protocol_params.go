@@ -168,14 +168,19 @@ const (
 	RefundQuotient        uint64 = 2
 	RefundQuotientEIP3529 uint64 = 5
 	// SYSCOIN
-	SYSDataHashGas uint64 = 1400 // The cost of data hash retrieval
-	NEVMAddressGas uint64 = 200 // The cost of retrieving NEVM Address information
-	SYSBlockHashGas uint64 = 200 // the cost of SYS block hash retrieval
-	BlobTxBytesPerFieldElement         = 32      // Size in bytes of a field element
-	BlobTxFieldElementsPerBlob         = 4096    // Number of field elements stored in a single data blob
-	BlobTxBlobGasPerBlob               = 1 << 17 // Gas consumption of a single data blob (== blob byte size)
-	BlobTxMinBlobGasprice              = 1       // Minimum gas price for data blobs
-	BlobTxPointEvaluationPrecompileGas = 50000   // Gas price for the point evaluation precompile.
+	SYSDataHashGas            uint64 = 1400 // The cost of data hash retrieval
+	NEVMAddressGas            uint64 = 200  // The cost of retrieving NEVM Address information
+	SYSBlockHashGas           uint64 = 200  // the cost of SYS block hash retrieval
+	BTCCheckpointLastIndexGas uint64 = 5500 // the cost of BTC last-checkpoint-index lookup
+	// Batched BTC checkpoint lookups (amortize overhead across items).
+	// Priced as base+per-item to amortize overhead across batch items.
+	BTCCheckpointBatchBaseGas          uint64 = 4500
+	BTCCheckpointBatchPerItemGas       uint64 = 1000
+	BlobTxBytesPerFieldElement                = 32      // Size in bytes of a field element
+	BlobTxFieldElementsPerBlob                = 4096    // Number of field elements stored in a single data blob
+	BlobTxBlobGasPerBlob                      = 1 << 17 // Gas consumption of a single data blob (== blob byte size)
+	BlobTxMinBlobGasprice                     = 1       // Minimum gas price for data blobs
+	BlobTxPointEvaluationPrecompileGas        = 50000   // Gas price for the point evaluation precompile.
 
 	HistoryServeWindow = 8192 // Number of blocks to serve historical block hashes for, EIP-2935.
 )

@@ -32,10 +32,12 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 )
+
 const (
 	// SYSCOIN
 	DataBlockLimit = 50001
 )
+
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
 func ReadCanonicalHash(db ethdb.Reader, number uint64) common.Hash {
 	var data []byte
@@ -747,12 +749,14 @@ func StoreNEVMAddress(db ethdb.KeyValueWriter, addr common.Address, height []byt
 		log.Crit("Failed to store nevmAddressKey", "err", err)
 	}
 }
+
 // Remove a mapping
 func RemoveNEVMAddress(db ethdb.KeyValueWriter, addr common.Address) {
 	if err := db.Delete(nevmAddressKey(addr)); err != nil {
 		log.Crit("Failed to store nevmAddressKey", "err", err)
 	}
 }
+
 // Get height directly by address
 func GetNEVMAddress(db ethdb.Reader, addr common.Address) []byte {
 	data, err := db.Get(nevmAddressKey(addr))
@@ -770,11 +774,13 @@ func WriteSYSHash(db ethdb.KeyValueWriter, sysBlockhash string, n uint64) {
 		log.Crit("Failed to store blockNumToSysKey", "err", err)
 	}
 }
+
 func DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
 	if err := db.Delete(blockNumToSysKey(n)); err != nil {
 		log.Crit("Failed to delete blockNumToSysKey", "err", err)
 	}
 }
+
 func ReadDataHashesRLP(db ethdb.Reader, number uint64) rlp.RawValue {
 	var data []byte
 	data, _ = db.Get(dataHashesKey(number))
@@ -820,7 +826,7 @@ func WriteDataHashes(dbw ethdb.KeyValueWriter, dbr ethdb.Reader, n uint64, dataH
 }
 func DeleteDataHashes(dbw ethdb.KeyValueWriter, dbr ethdb.Reader, n uint64) []*common.Hash {
 	dataHashes := ReadRawDataHashes(dbr, n)
-	if dataHashes == nil || len(dataHashes) == 0 {
+	if len(dataHashes) == 0 {
 		return nil
 	}
 	for _, dataHash := range dataHashes {
@@ -840,6 +846,78 @@ func ReadSYSHash(db ethdb.Reader, n uint64) []byte {
 	}
 	return data
 }
+
+// SYSCOIN
+// BTC checkpoint index helpers.
+func ReadBTCCheckpointLastIndex(db ethdb.Reader) uint64 {
+	data, err := db.Get(btcCheckpointLastKey)
+	if data == nil || err != nil || len(data) != 8 {
+		return 0
+	}
+	return binary.BigEndian.Uint64(data)
+}
+func WriteBTCCheckpointLastIndex(db ethdb.KeyValueWriter, idx uint64) {
+	var enc [8]byte
+	binary.BigEndian.PutUint64(enc[:], idx)
+	if err := db.Put(btcCheckpointLastKey, enc[:]); err != nil {
+		log.Crit("Failed to store btcCheckpointLastKey", "err", err)
+	}
+}
+func ReadBTCCheckpointIndexByHash(db ethdb.Reader, btcHash common.Hash) uint64 {
+	data, err := db.Get(btcCheckpointH2IKey(btcHash))
+	if data == nil || err != nil || len(data) != 8 {
+		return 0
+	}
+	return binary.BigEndian.Uint64(data)
+}
+func WriteBTCCheckpointIndexByHash(db ethdb.KeyValueWriter, btcHash common.Hash, idx uint64) {
+	var enc [8]byte
+	binary.BigEndian.PutUint64(enc[:], idx)
+	if err := db.Put(btcCheckpointH2IKey(btcHash), enc[:]); err != nil {
+		log.Crit("Failed to store btcCheckpointH2IKey", "err", err)
+	}
+}
+func DeleteBTCCheckpointIndexByHash(db ethdb.KeyValueWriter, btcHash common.Hash) {
+	if err := db.Delete(btcCheckpointH2IKey(btcHash)); err != nil {
+		log.Crit("Failed to delete btcCheckpointH2IKey", "err", err)
+	}
+}
+func ReadBTCCheckpointHashByIndex(db ethdb.Reader, idx uint64) []byte {
+	data, err := db.Get(btcCheckpointI2HKey(idx))
+	if data == nil || err != nil {
+		return []byte{}
+	}
+	return data
+}
+func WriteBTCCheckpointHashByIndex(db ethdb.KeyValueWriter, idx uint64, btcHash common.Hash) {
+	if err := db.Put(btcCheckpointI2HKey(idx), btcHash.Bytes()); err != nil {
+		log.Crit("Failed to store btcCheckpointI2HKey", "err", err)
+	}
+}
+func DeleteBTCCheckpointHashByIndex(db ethdb.KeyValueWriter, idx uint64) {
+	if err := db.Delete(btcCheckpointI2HKey(idx)); err != nil {
+		log.Crit("Failed to delete btcCheckpointI2HKey", "err", err)
+	}
+}
+func ReadBTCCheckpointIndexByBlockNumber(db ethdb.Reader, n uint64) uint64 {
+	data, err := db.Get(blockNumToBtcCheckpointIndexKey(n))
+	if data == nil || err != nil || len(data) != 8 {
+		return 0
+	}
+	return binary.BigEndian.Uint64(data)
+}
+func WriteBTCCheckpointIndexByBlockNumber(db ethdb.KeyValueWriter, n uint64, idx uint64) {
+	var enc [8]byte
+	binary.BigEndian.PutUint64(enc[:], idx)
+	if err := db.Put(blockNumToBtcCheckpointIndexKey(n), enc[:]); err != nil {
+		log.Crit("Failed to store blockNumToBtcCheckpointIndexKey", "err", err)
+	}
+}
+func DeleteBTCCheckpointIndexByBlockNumber(db ethdb.KeyValueWriter, n uint64) {
+	if err := db.Delete(blockNumToBtcCheckpointIndexKey(n)); err != nil {
+		log.Crit("Failed to delete blockNumToBtcCheckpointIndexKey", "err", err)
+	}
+}
 func ReadDataHash(db ethdb.Reader, hash common.Hash) []byte {
 	data, err := db.Get(dataHashKey(hash))
 	if data == nil || err != nil {
@@ -847,6 +925,7 @@ func ReadDataHash(db ethdb.Reader, hash common.Hash) []byte {
 	}
 	return hash.Bytes()
 }
+
 // WriteAncientHeaderChain writes the supplied headers along with nil block
 // bodies and receipts into the ancient store. It's supposed to be used for
 // storing chain segment before the chain cutoff.

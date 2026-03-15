@@ -148,14 +148,34 @@ var (
 		Name:  "nevmpub",
 		Usage: "NEVM ZMQ REP Endpoint",
 	}
+	StateBootstrapFileFlag = &cli.StringFlag{
+		Name:     "syscoin.statebootstrap.file",
+		Usage:    "Path to a local state bootstrap archive (.tar.gz or .zip) to import before startup",
+		Category: flags.EthCategory,
+	}
+	StateBootstrapURLFlag = &cli.StringFlag{
+		Name:     "syscoin.statebootstrap.url",
+		Usage:    "HTTP/HTTPS URL to download state bootstrap archive when local file is missing",
+		Category: flags.EthCategory,
+	}
+	StateBootstrapSHA256Flag = &cli.StringFlag{
+		Name:     "syscoin.statebootstrap.sha256",
+		Usage:    "Expected SHA-256 of the state bootstrap archive (hex); overrides built-in network default when set",
+		Category: flags.EthCategory,
+	}
+	StateBootstrapForceFlag = &cli.BoolFlag{
+		Name:     "syscoin.statebootstrap.force",
+		Usage:    "Force bootstrap import even when chaindata already exists",
+		Category: flags.EthCategory,
+	}
 	TanenbaumFlag = &cli.BoolFlag{
-		Name:  "tanenbaum",
-		Usage: "Tanenbaum network: pre-configured NEVM-based Tanenbaum test network.",
+		Name:     "tanenbaum",
+		Usage:    "Tanenbaum network: pre-configured NEVM-based Tanenbaum test network.",
 		Category: flags.EthCategory,
 	}
 	SyscoinFlag = &cli.BoolFlag{
-		Name:  "syscoin",
-		Usage: "Syscoin network: pre-configured NEVM-based Syscoin mainnet.",
+		Name:     "syscoin",
+		Usage:    "Syscoin network: pre-configured NEVM-based Syscoin mainnet.",
 		Category: flags.EthCategory,
 	}
 	SepoliaFlag = &cli.BoolFlag{

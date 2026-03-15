@@ -127,7 +127,7 @@ type handler struct {
 
 	// channels for fetcher, syncer, txsyncLoop
 	quitSync chan struct{}
-	wg sync.WaitGroup
+	wg       sync.WaitGroup
 
 	handlerStartCh chan struct{}
 	handlerDoneCh  chan struct{}
@@ -189,7 +189,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 	}
 	// SYSCOIN Construct the downloader (long sync)
 	h.downloader = downloader.New(config.Database, h.eventMux, h.chain, h.removePeer, h.enableSyncedFeatures)
-	if h.chain.GetChainConfig().SyscoinBlock != nil {
+	if h.chain.Config().SyscoinBlock != nil {
 		h.downloader.Terminate()
 	}
 
@@ -432,9 +432,9 @@ func (h *handler) unregisterPeer(id string) {
 func (h *handler) Start(maxPeers int) {
 	// SYSCOIN
 	if h.running.Load() {
-        log.Warn("Handler already started")
-        return
-    }
+		log.Warn("Handler already started")
+		return
+	}
 	h.maxPeers = maxPeers
 
 	// broadcast and announce transactions (only new ones, not resurrected ones)
@@ -454,9 +454,9 @@ func (h *handler) Start(maxPeers int) {
 
 func (h *handler) Stop() {
 	if !h.running.Load() {
-        log.Warn("Handler not started or already stopped")
-        return
-    }
+		log.Warn("Handler not started or already stopped")
+		return
+	}
 	h.txsSub.Unsubscribe() // quits txBroadcastLoop
 	h.txFetcher.Stop()
 	h.downloader.Terminate()

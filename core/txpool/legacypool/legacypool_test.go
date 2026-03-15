@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"math/rand"
 	"slices"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1234,12 +1235,13 @@ func TestAllowedTxSize(t *testing.T) {
 	account := crypto.PubkeyToAddress(key.PublicKey)
 	testAddBalance(pool, account, big.NewInt(1000000000))
 
-	// Find the maximum data length for the kind of transaction which will
-	// be generated in the pool.addRemoteSync calls below.
-	const largeDataLength = txMaxSize - 200 // enough to have a 5 bytes RLP encoding of the data length number
-	txWithLargeData := pricedDataTransaction(0, pool.currentHead.Load().GasLimit, big.NewInt(1), key, largeDataLength)
-	maxTxLengthWithoutData := txWithLargeData.Size() - largeDataLength // 103 bytes
-	maxTxDataLength := txMaxSize - maxTxLengthWithoutData              // 131072 - 103 = 130953 bytes
+	// SYSCOIN Find the maximum data length for the exact legacy transaction shape generated
+	// below. The signed RLP size can vary by a byte depending on signature encoding
+	// and list-length boundaries, so derive the limit dynamically instead of relying
+	// on a fixed "tx size without data" constant.
+	maxTxDataLength := uint64(sort.Search(int(txMaxSize)+1, func(n int) bool {
+		return pricedDataTransaction(0, pool.currentHead.Load().GasLimit, big.NewInt(1), key, uint64(n)).Size() > txMaxSize
+	})) - 1
 
 	// Try adding a transaction with maximal allowed size
 	tx := pricedDataTransaction(0, pool.currentHead.Load().GasLimit, big.NewInt(1), key, maxTxDataLength)

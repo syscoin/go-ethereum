@@ -65,9 +65,19 @@ func (b *EthAPIBackend) SetHead(number uint64) {
 	b.eth.handler.downloader.Cancel()
 	b.eth.blockchain.SetHead(number)
 }
+
 // SYSCOIN
 func (b *EthAPIBackend) ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error) {
 	return b.eth.blockchain.ReadSYSHash(uint64(number)), nil
+}
+func (b *EthAPIBackend) BTCCheckpointIndex(ctx context.Context, hash common.Hash) (uint64, error) {
+	return b.eth.blockchain.BTCCheckpointIndex(hash), nil
+}
+func (b *EthAPIBackend) ReadBTCCheckpointLastIndex(ctx context.Context) (uint64, error) {
+	return b.eth.blockchain.ReadBTCCheckpointLastIndex(), nil
+}
+func (b *EthAPIBackend) ReadBTCCheckpointHashByIndex(ctx context.Context, idx uint64) ([]byte, error) {
+	return b.eth.blockchain.ReadBTCCheckpointHashByIndex(idx), nil
 }
 func (b *EthAPIBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {
 	return b.eth.blockchain.ReadDataHash(hash), nil

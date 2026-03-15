@@ -17,12 +17,16 @@
 package tests
 
 import (
+	"os"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 )
 
 func TestTransaction(t *testing.T) {
+	if os.Getenv("GETH_ETH_TESTS") != "1" {
+		t.Skip("ethereum tests disabled (set GETH_ETH_TESTS=1 to enable)")
+	}
 	t.Parallel()
 
 	txt := new(testMatcher)
@@ -64,6 +68,9 @@ func TestTransaction(t *testing.T) {
 }
 
 func TestExecutionSpecTransaction(t *testing.T) {
+	if os.Getenv("GETH_EEST") != "1" {
+		t.Skip("execution-spec-tests disabled (set GETH_EEST=1 to enable)")
+	}
 	if !common.FileExist(executionSpecStateTestDir) {
 		t.Skipf("directory %s does not exist", executionSpecStateTestDir)
 	}

@@ -18,6 +18,7 @@ package tests
 
 import (
 	"math/big"
+	"os"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/params"
@@ -55,6 +56,9 @@ var (
 )
 
 func TestDifficulty(t *testing.T) {
+	if os.Getenv("GETH_ETH_TESTS") != "1" {
+		t.Skip("ethereum tests disabled (set GETH_ETH_TESTS=1 to enable)")
+	}
 	t.Parallel()
 
 	dt := new(testMatcher)
