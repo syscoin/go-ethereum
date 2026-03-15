@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/gofrs/flock"
 	"github.com/urfave/cli/v2"
 )
 
@@ -71,11 +72,8 @@ func exportStateBootstrap(ctx *cli.Context) error {
 		return fmt.Errorf("--%s is required", stateBootstrapExportOutputFlag.Name)
 	}
 	if !ctx.Bool(stateBootstrapExportAllowLiveFlag.Name) {
-		lockPath := filepath.Join(chaindataPath, "LOCK")
-		if _, err := os.Stat(lockPath); err == nil {
-			return fmt.Errorf("chaindata lock file exists at %s; stop the writer process or pass --%s", lockPath, stateBootstrapExportAllowLiveFlag.Name)
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("stat chaindata lock file: %w", err)
+		if err := ensureChaindataNotLocked(chaindataPath); err != nil {
+			return fmt.Errorf("%w or pass --%s", err, stateBootstrapExportAllowLiveFlag.Name)
 		}
 	}
 
@@ -97,5 +95,27 @@ func exportStateBootstrap(ctx *cli.Context) error {
 		"files", manifest.FileCount,
 		"bytes", manifest.TotalBytes,
 	)
+	return nil
+}
+
+func ensureChaindataNotLocked(chaindataPath string) error {
+	lockPath := filepath.Join(chaindataPath, "LOCK")
+	if _, err := os.Stat(lockPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat chaindata lock file: %w", err)
+	}
+	lock := flock.New(lockPath)
+	locked, err := lock.TryLock()
+	if err != nil {
+		return fmt.Errorf("probe chaindata lock %s: %w", lockPath, err)
+	}
+	if !locked {
+		return fmt.Errorf("chaindata appears to be locked by another process at %s; stop the writer process", lockPath)
+	}
+	if err := lock.Unlock(); err != nil {
+		return fmt.Errorf("release chaindata lock probe %s: %w", lockPath, err)
+	}
 	return nil
 }
