@@ -666,6 +666,84 @@ func TestResolveStateBootstrapSHA256(t *testing.T) {
 	})
 }
 
+func TestResolveStateBootstrapURL(t *testing.T) {
+	makeCtx := func(setters map[string]string) *cli.Context {
+		t.Helper()
+		fs := flag.NewFlagSet("statebootstrap-url-resolver", flag.ContinueOnError)
+		fs.String(utils.StateBootstrapURLFlag.Name, "", "")
+		fs.Bool(utils.SyscoinFlag.Name, false, "")
+		fs.Bool(utils.TanenbaumFlag.Name, false, "")
+		fs.Bool(utils.SepoliaFlag.Name, false, "")
+		fs.Bool(utils.HoleskyFlag.Name, false, "")
+		fs.Bool(utils.HoodiFlag.Name, false, "")
+		fs.Bool(utils.MainnetFlag.Name, false, "")
+		for key, value := range setters {
+			if err := fs.Set(key, value); err != nil {
+				t.Fatalf("set %s: %v", key, err)
+			}
+		}
+		return cli.NewContext(cli.NewApp(), fs, nil)
+	}
+
+	t.Run("explicit override takes precedence", func(t *testing.T) {
+		ctx := makeCtx(map[string]string{
+			utils.SyscoinFlag.Name:           "true",
+			utils.StateBootstrapURLFlag.Name: "https://override.invalid/bootstrap.zip",
+		})
+		gotURL, gotNetwork, fromDefault := resolveStateBootstrapURL(ctx, ctx.String(utils.StateBootstrapURLFlag.Name))
+		if gotURL != "https://override.invalid/bootstrap.zip" {
+			t.Fatalf("unexpected override url: got %s", gotURL)
+		}
+		if gotNetwork != "" || fromDefault {
+			t.Fatalf("unexpected default metadata: network=%q fromDefault=%v", gotNetwork, fromDefault)
+		}
+	})
+
+	t.Run("tanenbaum default", func(t *testing.T) {
+		ctx := makeCtx(map[string]string{utils.TanenbaumFlag.Name: "true"})
+		gotURL, gotNetwork, fromDefault := resolveStateBootstrapURL(ctx, "")
+		if gotURL != stateBootstrapDefaultURLTanenbaum {
+			t.Fatalf("wrong tanenbaum default url: got %s want %s", gotURL, stateBootstrapDefaultURLTanenbaum)
+		}
+		if gotNetwork != "tanenbaum" || !fromDefault {
+			t.Fatalf("unexpected default metadata: network=%q fromDefault=%v", gotNetwork, fromDefault)
+		}
+	})
+
+	t.Run("syscoin default", func(t *testing.T) {
+		ctx := makeCtx(map[string]string{utils.SyscoinFlag.Name: "true"})
+		gotURL, gotNetwork, fromDefault := resolveStateBootstrapURL(ctx, "")
+		if gotURL != stateBootstrapDefaultURLSyscoinMain {
+			t.Fatalf("wrong syscoin default url: got %s want %s", gotURL, stateBootstrapDefaultURLSyscoinMain)
+		}
+		if gotNetwork != "syscoin" || !fromDefault {
+			t.Fatalf("unexpected default metadata: network=%q fromDefault=%v", gotNetwork, fromDefault)
+		}
+	})
+
+	t.Run("no preset has no default", func(t *testing.T) {
+		ctx := makeCtx(nil)
+		gotURL, gotNetwork, fromDefault := resolveStateBootstrapURL(ctx, "")
+		if gotURL != "" {
+			t.Fatalf("expected empty default url, got %s", gotURL)
+		}
+		if gotNetwork != "" || fromDefault {
+			t.Fatalf("unexpected default metadata: network=%q fromDefault=%v", gotNetwork, fromDefault)
+		}
+	})
+
+	t.Run("non-syscoin preset has no default", func(t *testing.T) {
+		ctx := makeCtx(map[string]string{utils.SepoliaFlag.Name: "true"})
+		gotURL, gotNetwork, fromDefault := resolveStateBootstrapURL(ctx, "")
+		if gotURL != "" {
+			t.Fatalf("expected empty default url, got %s", gotURL)
+		}
+		if gotNetwork != "" || fromDefault {
+			t.Fatalf("unexpected default metadata: network=%q fromDefault=%v", gotNetwork, fromDefault)
+		}
+	})
+}
+
 func TestMaybeBootstrapStateURLRequiresSHAWhenNoDefault(t *testing.T) {
 	root := t.TempDir()
 	stack, err := node.New(&node.Config{DataDir: filepath.Join(root, "datadir"), Name: "geth"})

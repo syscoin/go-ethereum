@@ -56,6 +56,8 @@ const (
 	stateBootstrapDownloadTimeout    = 2 * time.Hour
 	stateBootstrapDownloadMaxRetries = 3
 	// Release-managed defaults. Update these on each release when bootstrap artifacts rotate.
+	stateBootstrapDefaultURLSyscoinMain    = "https://download.syscoin.org/state-bootstrap/syscoin-mainnet-latest.tar.gz"
+	stateBootstrapDefaultURLTanenbaum      = "https://download.syscoin.org/state-bootstrap/tanenbaum-latest.tar.gz"
 	stateBootstrapDefaultSHA256SyscoinMain = "658639bbc6c9e15495c7dcb5901637e27e6f9090ede0e56b28a9789a3efc2dfa"
 	stateBootstrapDefaultSHA256Tanenbaum   = "c41deb5b54f93caaf748eee7f17464d3169b10cf4865181ed085c9cc2cbd2ddd"
 )
@@ -77,9 +79,6 @@ func maybeBootstrapState(ctx *cli.Context, stack *node.Node) error {
 		sha256:   strings.TrimSpace(ctx.String(utils.StateBootstrapSHA256Flag.Name)),
 		force:    ctx.Bool(utils.StateBootstrapForceFlag.Name),
 	}
-	if cfg.filePath == "" && cfg.url == "" {
-		return nil
-	}
 	if stack.InstanceDir() == "" {
 		return errors.New("state bootstrap requires persistent --datadir")
 	}
@@ -94,15 +93,22 @@ func maybeBootstrapState(ctx *cli.Context, stack *node.Node) error {
 		return nil
 	}
 
+	effectiveURL, defaultURLNetwork, usingDefaultURL := resolveStateBootstrapURL(ctx, cfg.url)
 	effectiveSHA256, defaultNetwork, usingDefaultSHA256 := resolveStateBootstrapSHA256(ctx, cfg.sha256)
+	if cfg.filePath == "" && effectiveURL == "" {
+		return nil
+	}
+	if usingDefaultURL {
+		log.Info("Using built-in state bootstrap URL", "network", defaultURLNetwork, "url", effectiveURL)
+	}
 	if usingDefaultSHA256 {
 		log.Info("Using built-in state bootstrap SHA-256", "network", defaultNetwork, "sha256", effectiveSHA256)
 	}
-	if cfg.url != "" && effectiveSHA256 == "" {
+	if effectiveURL != "" && effectiveSHA256 == "" {
 		return fmt.Errorf("state bootstrap URL download requires SHA-256 via --%s or a built-in default for the selected network", utils.StateBootstrapSHA256Flag.Name)
 	}
 
-	archivePath, err := resolveBootstrapArchivePath(stack.InstanceDir(), cfg.filePath, cfg.url)
+	archivePath, err := resolveBootstrapArchivePath(stack.InstanceDir(), cfg.filePath, effectiveURL)
 	if err != nil {
 		return err
 	}
@@ -121,6 +127,21 @@ func maybeBootstrapState(ctx *cli.Context, stack *node.Node) error {
 	cleanupDownloadedBootstrapArchive(archivePath, downloadedArchive)
 	log.Info("State bootstrap import completed", "chaindata", chaindataPath, "archive", archivePath)
 	return nil
+}
+
+func resolveStateBootstrapURL(ctx *cli.Context, configuredURL string) (url string, network string, fromDefault bool) {
+	configuredURL = strings.TrimSpace(configuredURL)
+	if configuredURL != "" {
+		return configuredURL, "", false
+	}
+	switch {
+	case ctx.Bool(utils.TanenbaumFlag.Name):
+		return stateBootstrapDefaultURLTanenbaum, "tanenbaum", true
+	case ctx.Bool(utils.SyscoinFlag.Name):
+		return stateBootstrapDefaultURLSyscoinMain, "syscoin", true
+	default:
+		return "", "", false
+	}
 }
 
 func resolveBootstrapArchivePath(instanceDir, filePath, sourceURL string) (string, error) {
