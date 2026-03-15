@@ -17,6 +17,7 @@
 package core
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math/big"
@@ -28,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/triedb"
 )
@@ -131,6 +133,15 @@ func testBTCCheckpointHash(tag byte) common.Hash {
 	return h
 }
 
+type failingBTCCheckpointBatch struct {
+	ethdb.Batch
+	err error
+}
+
+func (b *failingBTCCheckpointBatch) Write() error {
+	return b.err
+}
+
 func TestHeaderChainBTCCheckpointTailRollback(t *testing.T) {
 	hc := newBTCCheckpointTestHeaderChain(t)
 	db := hc.chainDb
@@ -220,7 +231,7 @@ func TestHeaderChainBTCCheckpointDuplicateHashNoop(t *testing.T) {
 
 	// Same behavior should hold within one batch before writes are flushed to chainDb.
 	h2 := testBTCCheckpointHash(0x22)
-	batch := db.NewBatch()
+	batch := hc.newSyscoinCacheBatch(db.NewBatch())
 	hc.WriteBTCCheckpoint(batch, 300, h2)
 	hc.WriteBTCCheckpoint(batch, 301, h2)
 	if err := batch.Write(); err != nil {
@@ -243,6 +254,84 @@ func TestHeaderChainBTCCheckpointDuplicateHashNoop(t *testing.T) {
 	}
 	if got := rawdb.ReadBTCCheckpointIndexByBlockNumber(db, 400); got != 0 {
 		t.Fatalf("zero hash write created unexpected block->index mapping: got %d want %d", got, 0)
+	}
+}
+
+func TestHeaderChainBTCCheckpointFailedBatchWriteDoesNotPoisonDeduper(t *testing.T) {
+	hc := newBTCCheckpointTestHeaderChain(t)
+	db := hc.chainDb
+
+	h1 := testBTCCheckpointHash(0x51)
+	failErr := errors.New("forced batch write failure")
+	failingBatch := hc.newSyscoinCacheBatch(&failingBTCCheckpointBatch{Batch: db.NewBatch(), err: failErr})
+
+	hc.WriteBTCCheckpoint(failingBatch, 700, h1)
+	if err := failingBatch.Write(); !errors.Is(err, failErr) {
+		t.Fatalf("expected forced batch write failure, got %v", err)
+	}
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 0 {
+		t.Fatalf("failed batch write changed in-memory last index: got %d want %d", got, 0)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByHash(db, h1); got != 0 {
+		t.Fatalf("failed batch write persisted hash->index mapping: got %d want %d", got, 0)
+	}
+
+	retryBatch := hc.newSyscoinCacheBatch(db.NewBatch())
+	hc.WriteBTCCheckpoint(retryBatch, 700, h1)
+	if err := retryBatch.Write(); err != nil {
+		t.Fatalf("retry batch write failed: %v", err)
+	}
+	if got := hc.ReadBTCCheckpointLastIndex(); got != 1 {
+		t.Fatalf("retry batch write did not restore last index: got %d want %d", got, 1)
+	}
+	if got := rawdb.ReadBTCCheckpointIndexByHash(db, h1); got != 1 {
+		t.Fatalf("retry batch write did not persist hash->index mapping: got %d want %d", got, 1)
+	}
+}
+
+func TestHeaderChainSyscoinCachesFailedBatchWriteDoesNotPoisonReads(t *testing.T) {
+	hc := newBTCCheckpointTestHeaderChain(t)
+	db := hc.chainDb
+
+	dataHash := testBTCCheckpointHash(0x61)
+	addr := common.HexToAddress("0x1234")
+	sysHash := "sys-hash"
+	failErr := errors.New("forced batch write failure")
+
+	failingBatch := hc.newSyscoinCacheBatch(&failingBTCCheckpointBatch{Batch: db.NewBatch(), err: failErr})
+	hc.WriteSYSHash(failingBatch, sysHash, 11)
+	hc.StoreNEVMAddress(failingBatch, addr, 77)
+	hc.WriteDataHashes(failingBatch, 1, []*common.Hash{&dataHash})
+	if err := failingBatch.Write(); !errors.Is(err, failErr) {
+		t.Fatalf("expected forced batch write failure, got %v", err)
+	}
+
+	if got := hc.ReadSYSHash(11); len(got) != 0 {
+		t.Fatalf("failed batch write poisoned SYS hash cache: got %x", got)
+	}
+	if got := hc.GetNEVMAddress(addr); len(got) != 0 {
+		t.Fatalf("failed batch write poisoned NEVM address cache: got %x", got)
+	}
+	if got := hc.ReadDataHash(dataHash); len(got) != 0 {
+		t.Fatalf("failed batch write poisoned data hash cache: got %x", got)
+	}
+
+	retryBatch := hc.newSyscoinCacheBatch(db.NewBatch())
+	hc.WriteSYSHash(retryBatch, sysHash, 11)
+	hc.StoreNEVMAddress(retryBatch, addr, 77)
+	hc.WriteDataHashes(retryBatch, 1, []*common.Hash{&dataHash})
+	if err := retryBatch.Write(); err != nil {
+		t.Fatalf("retry batch write failed: %v", err)
+	}
+
+	if got := hc.ReadSYSHash(11); !bytes.Equal(got, []byte(sysHash)) {
+		t.Fatalf("retry batch write did not restore SYS hash: got %x want %x", got, []byte(sysHash))
+	}
+	if got := hc.GetNEVMAddress(addr); len(got) != 4 {
+		t.Fatalf("retry batch write did not restore NEVM address mapping: got %x", got)
+	}
+	if got := hc.ReadDataHash(dataHash); !bytes.Equal(got, dataHash.Bytes()) {
+		t.Fatalf("retry batch write did not restore data hash presence: got %x want %x", got, dataHash.Bytes())
 	}
 }
 

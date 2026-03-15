@@ -1548,7 +1548,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	//
 	// Note all the components of block(hash->number map, header, body, receipts)
 	// should be written atomically. BlockBatch is used for containing all components.
-	blockBatch := bc.db.NewBatch()
+	blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
 	rawdb.WriteBlock(blockBatch, block)
 	rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
 	rawdb.WritePreimages(blockBatch, statedb.Preimages())
@@ -1770,7 +1770,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 				return nil, it.index, err
 			}
 			// SYSCOIN
-			blockBatch := bc.db.NewBatch()
+			blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
 			err = bc.writeNEVMData(blockBatch, block)
 			if err != nil {
 				log.Crit("Failed to previously known block into disk", "err", err)
@@ -1860,7 +1860,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 				return nil, it.index, err
 			}
 			// SYSCOIN
-			blockBatch := bc.db.NewBatch()
+			blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
 			err = bc.writeNEVMData(blockBatch, block)
 			if err != nil {
 				log.Crit("Failed to previously known block into disk", "err", err)

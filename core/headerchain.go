@@ -81,6 +81,53 @@ type HeaderChain struct {
 	engine        consensus.Engine
 }
 
+// SYSCOIN
+type syscoinCacheBatch struct {
+	ethdb.Batch
+	hc                 *HeaderChain
+	pendingIndexByHash map[common.Hash]uint64
+	pendingLastIndex   uint64
+	postCommit         []func()
+}
+
+func (hc *HeaderChain) newSyscoinCacheBatch(batch ethdb.Batch) *syscoinCacheBatch {
+	return &syscoinCacheBatch{
+		Batch:              batch,
+		hc:                 hc,
+		pendingIndexByHash: make(map[common.Hash]uint64),
+		pendingLastIndex:   hc.BTCCheckpointLastIndex.Load(),
+	}
+}
+
+func (b *syscoinCacheBatch) Write() error {
+	if err := b.Batch.Write(); err != nil {
+		return err
+	}
+	if b.pendingLastIndex != b.hc.BTCCheckpointLastIndex.Load() {
+		b.hc.BTCCheckpointLastIndex.Store(b.pendingLastIndex)
+	}
+	for btcHash, idx := range b.pendingIndexByHash {
+		b.hc.BTCCheckpointIndexCache.Add(btcHash, idx)
+	}
+	for _, fn := range b.postCommit {
+		fn()
+	}
+	clear(b.pendingIndexByHash)
+	b.postCommit = nil
+	return nil
+}
+
+func (b *syscoinCacheBatch) Reset() {
+	b.Batch.Reset()
+	clear(b.pendingIndexByHash)
+	b.pendingLastIndex = b.hc.BTCCheckpointLastIndex.Load()
+	b.postCommit = nil
+}
+
+func (b *syscoinCacheBatch) addPostCommit(fn func()) {
+	b.postCommit = append(b.postCommit, fn)
+}
+
 // NewHeaderChain creates a new HeaderChain structure. ProcInterrupt points
 // to the parent's interrupt semaphore.
 func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine consensus.Engine, procInterrupt func() bool) (*HeaderChain, error) {
@@ -549,12 +596,27 @@ func (hc *HeaderChain) StoreNEVMAddress(db ethdb.KeyValueWriter, addr common.Add
 	buf := make([]byte, 4)
 	binary.BigEndian.PutUint32(buf, height)
 	rawdb.StoreNEVMAddress(db, addr, buf)
+	if batch, ok := db.(*syscoinCacheBatch); ok {
+		addrCopy := addr
+		bufCopy := append([]byte(nil), buf...)
+		batch.addPostCommit(func() {
+			hc.NEVMAddressCache.Add(addrCopy, bufCopy)
+		})
+		return
+	}
 	hc.NEVMAddressCache.Add(addr, buf)
 }
 
 func (hc *HeaderChain) RemoveNEVMAddress(db ethdb.KeyValueWriter, addr common.Address) {
-	hc.NEVMAddressCache.Remove(addr)
 	rawdb.RemoveNEVMAddress(db, addr)
+	if batch, ok := db.(*syscoinCacheBatch); ok {
+		addrCopy := addr
+		batch.addPostCommit(func() {
+			hc.NEVMAddressCache.Remove(addrCopy)
+		})
+		return
+	}
+	hc.NEVMAddressCache.Remove(addr)
 }
 
 // GetNEVMAddress retrieves height as bytes directly (ideal for precompile)
@@ -635,6 +697,13 @@ func (hc *HeaderChain) ReadDataHash(hash common.Hash) []byte {
 
 func (hc *HeaderChain) WriteSYSHash(db ethdb.KeyValueWriter, sysBlockhash string, n uint64) {
 	rawdb.WriteSYSHash(db, sysBlockhash, n)
+	if batch, ok := db.(*syscoinCacheBatch); ok {
+		hashCopy := []byte(sysBlockhash)
+		batch.addPostCommit(func() {
+			hc.SYSHashCache.Add(n, hashCopy)
+		})
+		return
+	}
 	hc.SYSHashCache.Add(n, []byte(sysBlockhash))
 }
 
@@ -652,6 +721,23 @@ func (hc *HeaderChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btc
 	//
 	// Note: writes are performed into a batch, but this guard reads from hc.chainDb.
 	// Consult the in-memory cache first to get read-your-writes semantics within a batch.
+	if batch, ok := db.(*syscoinCacheBatch); ok {
+		if pendingIdx, ok := batch.pendingIndexByHash[btcHash]; ok && pendingIdx != 0 {
+			return
+		}
+		if existingIdx := rawdb.ReadBTCCheckpointIndexByHash(hc.chainDb, btcHash); existingIdx != 0 {
+			batch.pendingIndexByHash[btcHash] = existingIdx
+			return
+		}
+		idx := batch.pendingLastIndex + 1
+		batch.pendingLastIndex = idx
+		rawdb.WriteBTCCheckpointLastIndex(batch, idx)
+		rawdb.WriteBTCCheckpointHashByIndex(batch, idx, btcHash)
+		rawdb.WriteBTCCheckpointIndexByHash(batch, btcHash, idx)
+		rawdb.WriteBTCCheckpointIndexByBlockNumber(batch, n, idx)
+		batch.pendingIndexByHash[btcHash] = idx
+		return
+	}
 	if cachedIdx, ok := hc.BTCCheckpointIndexCache.Get(btcHash); ok && cachedIdx != 0 {
 		return
 	}
@@ -668,18 +754,48 @@ func (hc *HeaderChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btc
 }
 func (hc *HeaderChain) WriteDataHashes(db ethdb.KeyValueWriter, n uint64, dataHashes []*common.Hash) {
 	rawdb.WriteDataHashes(db, hc.chainDb, n, dataHashes)
+	if batch, ok := db.(*syscoinCacheBatch); ok {
+		hashes := make([]common.Hash, 0, len(dataHashes))
+		for _, dataHash := range dataHashes {
+			hashes = append(hashes, *dataHash)
+		}
+		batch.addPostCommit(func() {
+			for _, dataHash := range hashes {
+				hc.DataHashCache.Add(dataHash, []byte{0})
+			}
+		})
+		return
+	}
 	for _, dataHash := range dataHashes {
 		hc.DataHashCache.Add(*dataHash, []byte{0})
 	}
 }
 func (hc *HeaderChain) DeleteDataHashes(db ethdb.KeyValueWriter, n uint64) {
 	dataHashes := rawdb.DeleteDataHashes(db, hc.chainDb, n)
+	if batch, ok := db.(*syscoinCacheBatch); ok {
+		hashes := make([]common.Hash, 0, len(dataHashes))
+		for _, dataHash := range dataHashes {
+			hashes = append(hashes, *dataHash)
+		}
+		batch.addPostCommit(func() {
+			for _, dataHash := range hashes {
+				hc.DataHashCache.Remove(dataHash)
+			}
+		})
+		return
+	}
 	for _, dataHash := range dataHashes {
 		hc.DataHashCache.Remove(*dataHash)
 	}
 }
 func (hc *HeaderChain) DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
 	rawdb.DeleteSYSHash(db, n)
+	if batch, ok := db.(*syscoinCacheBatch); ok {
+		batch.addPostCommit(func() {
+			hc.SYSHashCache.Remove(n)
+		})
+		return
+	}
 	hc.SYSHashCache.Remove(n)
 }
 
