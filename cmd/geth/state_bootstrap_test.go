@@ -783,3 +783,37 @@ func TestMaybeBootstrapStateURLRequiresSHAWhenNoDefault(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestMaybeBootstrapStateDisabledSkipsDefaultBootstrap(t *testing.T) {
+	root := t.TempDir()
+	stack, err := node.New(&node.Config{DataDir: filepath.Join(root, "datadir"), Name: "geth"})
+	if err != nil {
+		t.Fatalf("create test node: %v", err)
+	}
+	defer stack.Close()
+
+	fs := flag.NewFlagSet("statebootstrap-disabled", flag.ContinueOnError)
+	fs.String(utils.StateBootstrapFileFlag.Name, "", "")
+	fs.String(utils.StateBootstrapURLFlag.Name, "", "")
+	fs.String(utils.StateBootstrapSHA256Flag.Name, "", "")
+	fs.Bool(utils.StateBootstrapDisableFlag.Name, false, "")
+	fs.Bool(utils.StateBootstrapForceFlag.Name, false, "")
+	fs.Bool(utils.SyscoinFlag.Name, false, "")
+	if err := fs.Set(utils.StateBootstrapDisableFlag.Name, "true"); err != nil {
+		t.Fatalf("set disable flag: %v", err)
+	}
+	// Enable the Syscoin preset so built-in defaults would normally apply.
+	if err := fs.Set(utils.SyscoinFlag.Name, "true"); err != nil {
+		t.Fatalf("set syscoin flag: %v", err)
+	}
+
+	ctx := cli.NewContext(cli.NewApp(), fs, nil)
+	if err := maybeBootstrapState(ctx, stack); err != nil {
+		t.Fatalf("maybeBootstrapState error: %v", err)
+	}
+
+	chaindataPath := stack.ResolvePath("chaindata")
+	if _, err := os.Stat(chaindataPath); !os.IsNotExist(err) {
+		t.Fatalf("expected chaindata to remain absent when bootstrap is disabled, stat err=%v", err)
+	}
+}

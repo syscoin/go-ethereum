@@ -129,6 +129,7 @@ var (
 		utils.StateBootstrapFileFlag,
 		utils.StateBootstrapURLFlag,
 		utils.StateBootstrapSHA256Flag,
+		utils.StateBootstrapDisableFlag,
 		utils.StateBootstrapForceFlag,
 		utils.NATFlag,
 		utils.NoDiscoverFlag,

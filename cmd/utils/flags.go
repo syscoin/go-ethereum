@@ -163,6 +163,11 @@ var (
 		Usage:    "Expected SHA-256 of the state bootstrap archive (hex); overrides built-in network default when set",
 		Category: flags.EthCategory,
 	}
+	StateBootstrapDisableFlag = &cli.BoolFlag{
+		Name:     "syscoin.statebootstrap.disable",
+		Usage:    "Disable Syscoin state bootstrap and continue with normal sync",
+		Category: flags.EthCategory,
+	}
 	StateBootstrapForceFlag = &cli.BoolFlag{
 		Name:     "syscoin.statebootstrap.force",
 		Usage:    "Force bootstrap import even when chaindata already exists",

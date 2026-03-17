@@ -48,6 +48,7 @@ type stateBootstrapConfig struct {
 	filePath string
 	url      string
 	sha256   string
+	disable  bool
 	force    bool
 }
 
@@ -77,7 +78,12 @@ func maybeBootstrapState(ctx *cli.Context, stack *node.Node) error {
 		filePath: strings.TrimSpace(ctx.String(utils.StateBootstrapFileFlag.Name)),
 		url:      strings.TrimSpace(ctx.String(utils.StateBootstrapURLFlag.Name)),
 		sha256:   strings.TrimSpace(ctx.String(utils.StateBootstrapSHA256Flag.Name)),
+		disable:  ctx.Bool(utils.StateBootstrapDisableFlag.Name),
 		force:    ctx.Bool(utils.StateBootstrapForceFlag.Name),
+	}
+	if cfg.disable {
+		log.Info("State bootstrap disabled; continuing with normal sync")
+		return nil
 	}
 	if stack.InstanceDir() == "" {
 		return errors.New("state bootstrap requires persistent --datadir")
