@@ -112,7 +112,7 @@ func maybeBootstrapState(ctx *cli.Context, stack *node.Node) error {
 	if err != nil {
 		return err
 	}
-	downloadedArchive, err := ensureArchiveAvailable(archivePath, cfg.url)
+	downloadedArchive, err := ensureArchiveAvailable(archivePath, effectiveURL)
 	if err != nil {
 		return err
 	}
