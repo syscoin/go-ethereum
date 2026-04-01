@@ -33,3 +33,15 @@ func TestJumpTableCopy(t *testing.T) {
 	require.Equal(t, uint64(100), deepCopy[SLOAD].constantGas)
 	require.Equal(t, uint64(0), tbl[SLOAD].constantGas)
 }
+
+func TestNexusInstructionSetEnablesOnlyTransientAndMcopy(t *testing.T) {
+	tbl := newNexusInstructionSet()
+
+	require.True(t, tbl[TLOAD].HasCost(), "TLOAD must be enabled at Nexus")
+	require.True(t, tbl[TSTORE].HasCost(), "TSTORE must be enabled at Nexus")
+	require.True(t, tbl[MCOPY].HasCost(), "MCOPY must be enabled at Nexus")
+
+	// Keep Cancun blob opcodes disabled for Nexus-only activation.
+	require.False(t, tbl[BLOBHASH].HasCost(), "BLOBHASH must remain disabled at Nexus")
+	require.False(t, tbl[BLOBBASEFEE].HasCost(), "BLOBBASEFEE must remain disabled at Nexus")
+}

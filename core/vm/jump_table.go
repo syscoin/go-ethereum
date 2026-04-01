@@ -59,6 +59,7 @@ var (
 	londonInstructionSet           = newLondonInstructionSet()
 	mergeInstructionSet            = newMergeInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
+	nexusInstructionSet            = newNexusInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
 	verkleInstructionSet           = newVerkleInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
@@ -105,6 +106,16 @@ func newEOFInstructionSetForTesting() JumpTable {
 func newPragueInstructionSet() JumpTable {
 	instructionSet := newCancunInstructionSet()
 	enable7702(&instructionSet) // EIP-7702 Setcode transaction type
+	return validate(instructionSet)
+}
+
+func newNexusInstructionSet() JumpTable {
+	// SYSCOIN: enable MCOPY and transient storage opcodes at Nexus without
+	// enabling the full Cancun instruction set (e.g. blob opcodes/signer paths).
+	instructionSet := newShanghaiInstructionSet()
+	enable1153(&instructionSet) // EIP-1153 "Transient Storage"
+	enable5656(&instructionSet) // EIP-5656 (MCOPY opcode)
+	enable6780(&instructionSet) // EIP-6780 SELFDESTRUCT only in same transaction
 	return validate(instructionSet)
 }
 

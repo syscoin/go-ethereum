@@ -34,6 +34,8 @@ func LookupInstructionSet(rules params.Rules) (JumpTable, error) {
 		return newPragueInstructionSet(), nil
 	case rules.IsCancun:
 		return newCancunInstructionSet(), nil
+	case rules.IsNexus:
+		return newNexusInstructionSet(), nil
 	case rules.IsShanghai:
 		return newShanghaiInstructionSet(), nil
 	case rules.IsMerge:
