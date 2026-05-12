@@ -54,6 +54,7 @@ type stateBootstrapConfig struct {
 
 const (
 	stateBootstrapArchiveRoot        = "state-bootstrap"
+	stateBootstrapStatusFilename     = "state-bootstrap.status"
 	stateBootstrapDownloadTimeout    = 2 * time.Hour
 	stateBootstrapDownloadMaxRetries = 3
 	// Release-managed defaults. Update these on each release when bootstrap artifacts rotate.
@@ -104,6 +105,9 @@ func maybeBootstrapState(ctx *cli.Context, stack *node.Node) error {
 	if cfg.filePath == "" && effectiveURL == "" {
 		return nil
 	}
+	statusPath := filepath.Join(stack.InstanceDir(), stateBootstrapStatusFilename)
+	defer removeStateBootstrapStatus(statusPath)
+	writeStateBootstrapStatus(statusPath, "preparing")
 	if usingDefaultURL {
 		log.Info("Using built-in state bootstrap URL", "network", defaultURLNetwork, "url", effectiveURL)
 	}
@@ -118,15 +122,17 @@ func maybeBootstrapState(ctx *cli.Context, stack *node.Node) error {
 	if err != nil {
 		return err
 	}
-	downloadedArchive, err := ensureArchiveAvailable(archivePath, effectiveURL)
+	downloadedArchive, err := ensureArchiveAvailable(archivePath, effectiveURL, statusPath)
 	if err != nil {
 		return err
 	}
 	if effectiveSHA256 != "" {
+		writeStateBootstrapStatus(statusPath, "verifying")
 		if err := verifyArchiveSHA256(archivePath, effectiveSHA256); err != nil {
 			return err
 		}
 	}
+	writeStateBootstrapStatus(statusPath, "installing")
 	if err := installBootstrapArchive(stack.InstanceDir(), chaindataPath, archivePath); err != nil {
 		return err
 	}
@@ -229,11 +235,12 @@ func shouldInstallBootstrap(chaindataPath string, force bool) (bool, error) {
 	return len(entries) == 0, nil
 }
 
-func ensureArchiveAvailable(archivePath, url string) (bool, error) {
+func ensureArchiveAvailable(archivePath, url, statusPath string) (bool, error) {
 	if info, err := os.Stat(archivePath); err == nil {
 		if info.IsDir() {
 			return false, fmt.Errorf("bootstrap archive path points to a directory: %s", archivePath)
 		}
+		writeStateBootstrapStatus(statusPath, "using local archive")
 		return false, nil
 	} else if !os.IsNotExist(err) {
 		return false, fmt.Errorf("stat bootstrap archive: %w", err)
@@ -247,10 +254,29 @@ func ensureArchiveAvailable(archivePath, url string) (bool, error) {
 	}
 
 	log.Info("Downloading state bootstrap archive", "url", url, "path", archivePath)
+	writeStateBootstrapStatus(statusPath, "downloading")
 	if err := downloadBootstrapArchiveWithRetry(archivePath, url); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+func writeStateBootstrapStatus(statusPath, phase string) {
+	if statusPath == "" {
+		return
+	}
+	if err := os.WriteFile(statusPath, []byte(strings.TrimSpace(phase)+"\n"), 0o644); err != nil {
+		log.Warn("Failed to write state bootstrap status", "path", statusPath, "phase", phase, "err", err)
+	}
+}
+
+func removeStateBootstrapStatus(statusPath string) {
+	if statusPath == "" {
+		return
+	}
+	if err := os.Remove(statusPath); err != nil && !os.IsNotExist(err) {
+		log.Warn("Failed to remove state bootstrap status", "path", statusPath, "err", err)
+	}
 }
 
 func downloadBootstrapArchiveWithRetry(archivePath, url string) error {

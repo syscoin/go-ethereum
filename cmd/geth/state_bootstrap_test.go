@@ -413,7 +413,7 @@ func TestEnsureArchiveAvailable(t *testing.T) {
 		if err := os.WriteFile(archivePath, []byte("existing"), 0o644); err != nil {
 			t.Fatalf("write archive: %v", err)
 		}
-		downloaded, err := ensureArchiveAvailable(archivePath, "https://example.invalid/bootstrap.tar.gz")
+		downloaded, err := ensureArchiveAvailable(archivePath, "https://example.invalid/bootstrap.tar.gz", "")
 		if err != nil {
 			t.Fatalf("ensureArchiveAvailable error: %v", err)
 		}
@@ -424,7 +424,7 @@ func TestEnsureArchiveAvailable(t *testing.T) {
 
 	t.Run("missing without url", func(t *testing.T) {
 		archivePath := filepath.Join(t.TempDir(), "state-bootstrap.tar.gz")
-		downloaded, err := ensureArchiveAvailable(archivePath, "")
+		downloaded, err := ensureArchiveAvailable(archivePath, "", "")
 		if err == nil {
 			t.Fatal("expected error for missing archive without URL")
 		}
@@ -441,7 +441,7 @@ func TestEnsureArchiveAvailable(t *testing.T) {
 		defer server.Close()
 
 		archivePath := filepath.Join(t.TempDir(), "state-bootstrap.tar.gz")
-		downloaded, err := ensureArchiveAvailable(archivePath, server.URL)
+		downloaded, err := ensureArchiveAvailable(archivePath, server.URL, "")
 		if err != nil {
 			t.Fatalf("ensureArchiveAvailable error: %v", err)
 		}
@@ -471,7 +471,7 @@ func TestEnsureArchiveAvailable(t *testing.T) {
 		defer server.Close()
 
 		archivePath := filepath.Join(t.TempDir(), "state-bootstrap.tar.gz")
-		downloaded, err := ensureArchiveAvailable(archivePath, server.URL)
+		downloaded, err := ensureArchiveAvailable(archivePath, server.URL, "")
 		if err != nil {
 			t.Fatalf("ensureArchiveAvailable error: %v", err)
 		}
@@ -577,6 +577,9 @@ func TestMaybeBootstrapStateRemovesDownloadedArchive(t *testing.T) {
 
 	if _, err := os.Stat(downloadPath); !os.IsNotExist(err) {
 		t.Fatalf("expected downloaded archive to be removed after install, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stack.InstanceDir(), stateBootstrapStatusFilename)); !os.IsNotExist(err) {
+		t.Fatalf("expected bootstrap status marker to be removed after install, stat err=%v", err)
 	}
 	installedCurrent := filepath.Join(stack.ResolvePath("chaindata"), "CURRENT")
 	currentData, err := os.ReadFile(installedCurrent)
