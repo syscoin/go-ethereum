@@ -76,6 +76,10 @@ func (zmq *ZMQRep) InitZMQListener() error {
 				}
 				if len(msg.Frames) != 2 {
 					log.Error("Invalid number of message frames", "len", len(msg.Frames))
+					msgSend := zmq4.NewMsgFrom([]byte("error"), []byte("invalid-message-frames"))
+					if err := zmq.rep.SendMulti(msgSend); err != nil {
+						log.Error("ZMQ send error", "topic", "error", "err", err)
+					}
 					continue
 				}
 				strTopic := string(msg.Frames[0])
@@ -158,6 +162,12 @@ func (zmq *ZMQRep) InitZMQListener() error {
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
 					}	
+				} else {
+					log.Error("Unknown ZMQ request topic", "topic", strTopic)
+					msgSend := zmq4.NewMsgFrom([]byte(strTopic), []byte("unknown-topic"))
+					if err := zmq.rep.SendMulti(msgSend); err != nil {
+						log.Error("ZMQ send error", "topic", strTopic, "err", err)
+					}
 				}
 			}
 		}
