@@ -111,6 +111,7 @@ type Ethereum struct {
 	timeLastBlock     int64
 	stack             *node.Node
 	closeHandler chan struct{}
+	closeHandlerOnce sync.Once
 	blockConnectBuffer []*types.NEVMBlockConnect
 	bufferLock         sync.Mutex
 }
@@ -825,6 +826,11 @@ func (s *Ethereum) setupDiscovery() error {
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
 	// SYSCOIN
+	if s.closeHandler != nil {
+		s.closeHandlerOnce.Do(func() {
+			close(s.closeHandler)
+		})
+	}
     // Flush buffered blocks first
     if err := s.flushBufferedBlocks(); err != nil {
         log.Error("Failed to flush buffered blocks on shutdown", "err", err)
@@ -853,9 +859,6 @@ func (s *Ethereum) Stop() error {
 	s.wgNEVM.Wait()
 	if s.zmqRep != nil {
 		s.zmqRep.Close()
-	}
-	if s.closeHandler != nil {
-		close(s.closeHandler)
 	}
 	return nil
 }
