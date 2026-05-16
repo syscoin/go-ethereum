@@ -436,7 +436,22 @@ func (b *EthAPIBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) 
 }
 
 func (b *EthAPIBackend) FeeHistory(ctx context.Context, blockCount uint64, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (firstBlock *big.Int, reward [][]*big.Int, baseFee []*big.Int, gasUsedRatio []float64, baseFeePerBlobGas []*big.Int, blobGasUsedRatio []float64, err error) {
-	return b.gpo.FeeHistory(ctx, blockCount, lastBlock, rewardPercentiles)
+	// SYSCOIN: keep feeHistory rewards aligned with the local NEVM miner policy.
+	firstBlock, reward, baseFee, gasUsedRatio, baseFeePerBlobGas, blobGasUsedRatio, err = b.gpo.FeeHistory(ctx, blockCount, lastBlock, rewardPercentiles)
+	if err != nil || reward == nil {
+		return firstBlock, reward, baseFee, gasUsedRatio, baseFeePerBlobGas, blobGasUsedRatio, err
+	}
+	b.eth.lock.RLock()
+	minTip := new(big.Int).Set(b.eth.gasPrice)
+	b.eth.lock.RUnlock()
+	for i := range reward {
+		for j, tip := range reward[i] {
+			if tip == nil || tip.Cmp(minTip) < 0 {
+				reward[i][j] = new(big.Int).Set(minTip)
+			}
+		}
+	}
+	return firstBlock, reward, baseFee, gasUsedRatio, baseFeePerBlobGas, blobGasUsedRatio, nil
 }
 
 func (b *EthAPIBackend) BlobBaseFee(ctx context.Context) *big.Int {
