@@ -358,17 +358,9 @@ func (eth *Ethereum) CreateBlock() *types.Block {
 	eth.wgNEVM.Add(1)
 	defer eth.wgNEVM.Done()
 
-	inserted, err := eth.flushBufferedBlocks()
-	if err != nil {
+	if err := eth.flushBufferedBlocks(); err != nil {
 		log.Crit("Failed flushing buffer before createBlock", "err", err)
 		return nil
-	}
-	if inserted {
-		// SYSCOIN: block insertion is buffered, so wait for txpool head reset before mining.
-		if err := eth.txPool.Sync(); err != nil {
-			log.Error("Failed syncing txpool before createBlock", "err", err)
-			return nil
-		}
 	}
 
 	return eth.miner.GenerateWorkSyscoin(
@@ -465,17 +457,16 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
         return nil
     }
 
-    _, err := eth.flushBufferedBlocks()
-    return err
+    return eth.flushBufferedBlocks()
 }
 
 
-func (eth *Ethereum) flushBufferedBlocks() (bool, error) {
+func (eth *Ethereum) flushBufferedBlocks() error {
     eth.bufferLock.Lock()
     defer eth.bufferLock.Unlock()
 
     if len(eth.blockConnectBuffer) == 0 {
-        return false, nil
+        return nil
     }
 
     blockBuffer := make([]*types.Block, 0, len(eth.blockConnectBuffer))
@@ -485,11 +476,11 @@ func (eth *Ethereum) flushBufferedBlocks() (bool, error) {
     }
 
     if _, err := eth.blockchain.InsertChain(blockBuffer); err != nil {
-        return false, err
+        return err
     }
 
     eth.blockConnectBuffer = eth.blockConnectBuffer[:0] // safely clear buffer
-    return true, nil
+    return nil
 }
 
 func (eth *Ethereum) disconnectBufferedBlock(blockHash common.Hash) (bool, error) {
@@ -841,7 +832,7 @@ func (s *Ethereum) Stop() error {
 		})
 	}
     // Flush buffered blocks first
-    if _, err := s.flushBufferedBlocks(); err != nil {
+    if err := s.flushBufferedBlocks(); err != nil {
         log.Error("Failed to flush buffered blocks on shutdown", "err", err)
     }
 	// Stop all the peer-related stuff first.

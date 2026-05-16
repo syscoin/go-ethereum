@@ -62,6 +62,64 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestLegacyGasPriceWithSyscoinFloorHeadroom(t *testing.T) {
+	syscoinConfig := *params.TanenbaumChainConfig
+	mainnetConfig := *params.MainnetChainConfig
+	minTip := big.NewInt(10_000)
+
+	tests := []struct {
+		name   string
+		config *params.ChainConfig
+		base   int64
+		tip    int64
+		want   int64
+	}{
+		{
+			name:   "syscoin floor tip gets floor-derived low base fee headroom",
+			config: &syscoinConfig,
+			base:   7,
+			tip:    10_000,
+			want:   21_250,
+		},
+		{
+			name:   "syscoin above-floor tip is not inflated",
+			config: &syscoinConfig,
+			base:   7,
+			tip:    10_020,
+			want:   10_027,
+		},
+		{
+			name:   "syscoin at-floor base fee floor tip is not inflated",
+			config: &syscoinConfig,
+			base:   10_000,
+			tip:    10_000,
+			want:   20_000,
+		},
+		{
+			name:   "syscoin high base fee floor tip is not inflated",
+			config: &syscoinConfig,
+			base:   20_000,
+			tip:    10_000,
+			want:   30_000,
+		},
+		{
+			name:   "non-syscoin keeps upstream legacy gas price behavior",
+			config: &mainnetConfig,
+			base:   7,
+			tip:    10_000,
+			want:   10_007,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			head := &types.Header{Number: big.NewInt(1), BaseFee: big.NewInt(test.base)}
+			got := legacyGasPriceWithSyscoinFloorHeadroom(test.config, head, big.NewInt(test.tip), minTip)
+			require.Equal(t, big.NewInt(test.want), got)
+		})
+	}
+}
+
 func testTransactionMarshal(t *testing.T, tests []txData, config *params.ChainConfig) {
 	var (
 		signer = types.LatestSigner(config)
@@ -476,6 +534,7 @@ func (b testBackend) SyncProgress() ethereum.SyncProgress { return ethereum.Sync
 func (b testBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
 	return big.NewInt(0), nil
 }
+func (b testBackend) MinerGasTipFloor() *big.Int { return big.NewInt(0) }
 func (b testBackend) FeeHistory(ctx context.Context, blockCount uint64, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*big.Int, []float64, []*big.Int, []float64, error) {
 	return nil, nil, nil, nil, nil, nil, nil
 }

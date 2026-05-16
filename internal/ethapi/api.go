@@ -72,9 +72,29 @@ func (api *EthereumAPI) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		return nil, err
 	}
 	if head := api.b.CurrentHeader(); head.BaseFee != nil {
-		tipcap.Add(tipcap, head.BaseFee)
+		tipcap = legacyGasPriceWithSyscoinFloorHeadroom(api.b.ChainConfig(), head, tipcap, api.b.MinerGasTipFloor())
 	}
 	return (*hexutil.Big)(tipcap), err
+}
+
+func legacyGasPriceWithSyscoinFloorHeadroom(config *params.ChainConfig, head *types.Header, tipcap, minTip *big.Int) *big.Int {
+	baseFee := head.BaseFee
+	if config.IsSyscoin(head.Number) && tipcap.Cmp(minTip) == 0 && baseFee.Cmp(minTip) < 0 {
+		// SYSCOIN: legacy eth_gasPrice callers such as Foundry --legacy need
+		// low-base-fee headroom. Treat the miner tip floor as the base-fee floor
+		// for this suggestion, so large same-price batches do not flip below the
+		// miner floor as base fee walks up from tiny testnet values.
+		baseFee = syscoinNextBaseFeeFromFloor(config, minTip)
+	}
+	return new(big.Int).Add(tipcap, baseFee)
+}
+
+func syscoinNextBaseFeeFromFloor(config *params.ChainConfig, floor *big.Int) *big.Int {
+	change := new(big.Int).Div(floor, new(big.Int).SetUint64(config.BaseFeeChangeDenominator()))
+	if change.Cmp(common.Big1) < 0 {
+		change = common.Big1
+	}
+	return new(big.Int).Add(floor, change)
 }
 
 // MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.

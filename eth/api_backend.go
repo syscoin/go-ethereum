@@ -426,13 +426,18 @@ func (b *EthAPIBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) 
 	if err != nil {
 		return nil, err
 	}
-	b.eth.lock.RLock()
-	minTip := new(big.Int).Set(b.eth.gasPrice)
-	b.eth.lock.RUnlock()
+	minTip := b.MinerGasTipFloor()
 	if tip.Cmp(minTip) < 0 {
 		return minTip, nil
 	}
 	return tip, nil
+}
+
+func (b *EthAPIBackend) MinerGasTipFloor() *big.Int {
+	// SYSCOIN: this is the local NEVM miner tip floor used by tx selection.
+	b.eth.lock.RLock()
+	defer b.eth.lock.RUnlock()
+	return new(big.Int).Set(b.eth.gasPrice)
 }
 
 func (b *EthAPIBackend) FeeHistory(ctx context.Context, blockCount uint64, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (firstBlock *big.Int, reward [][]*big.Int, baseFee []*big.Int, gasUsedRatio []float64, baseFeePerBlobGas []*big.Int, blobGasUsedRatio []float64, err error) {
@@ -441,9 +446,7 @@ func (b *EthAPIBackend) FeeHistory(ctx context.Context, blockCount uint64, lastB
 	if err != nil || reward == nil {
 		return firstBlock, reward, baseFee, gasUsedRatio, baseFeePerBlobGas, blobGasUsedRatio, err
 	}
-	b.eth.lock.RLock()
-	minTip := new(big.Int).Set(b.eth.gasPrice)
-	b.eth.lock.RUnlock()
+	minTip := b.MinerGasTipFloor()
 	flooredReward := make([][]*big.Int, len(reward))
 	for i, tips := range reward {
 		flooredReward[i] = make([]*big.Int, len(tips))
