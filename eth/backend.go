@@ -362,11 +362,6 @@ func (eth *Ethereum) CreateBlock() *types.Block {
 		log.Crit("Failed flushing buffer before createBlock", "err", err)
 		return nil
 	}
-	// SYSCOIN: block insertion is buffered, so force txpool state to catch up before mining.
-	if err := eth.txPool.Sync(); err != nil {
-		log.Error("Failed syncing txpool before createBlock", "err", err)
-		return nil
-	}
 
 	return eth.miner.GenerateWorkSyscoin(
 		eth.config.Miner.Etherbase,
