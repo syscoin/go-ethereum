@@ -444,14 +444,18 @@ func (b *EthAPIBackend) FeeHistory(ctx context.Context, blockCount uint64, lastB
 	b.eth.lock.RLock()
 	minTip := new(big.Int).Set(b.eth.gasPrice)
 	b.eth.lock.RUnlock()
-	for i := range reward {
-		for j, tip := range reward[i] {
+	flooredReward := make([][]*big.Int, len(reward))
+	for i, tips := range reward {
+		flooredReward[i] = make([]*big.Int, len(tips))
+		for j, tip := range tips {
 			if tip == nil || tip.Cmp(minTip) < 0 {
-				reward[i][j] = new(big.Int).Set(minTip)
+				flooredReward[i][j] = new(big.Int).Set(minTip)
+			} else {
+				flooredReward[i][j] = new(big.Int).Set(tip)
 			}
 		}
 	}
-	return firstBlock, reward, baseFee, gasUsedRatio, baseFeePerBlobGas, blobGasUsedRatio, nil
+	return firstBlock, flooredReward, baseFee, gasUsedRatio, baseFeePerBlobGas, blobGasUsedRatio, nil
 }
 
 func (b *EthAPIBackend) BlobBaseFee(ctx context.Context) *big.Int {
