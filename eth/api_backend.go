@@ -421,7 +421,18 @@ func (b *EthAPIBackend) SyncProgress() ethereum.SyncProgress {
 }
 
 func (b *EthAPIBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
-	return b.gpo.SuggestTipCap(ctx)
+	// SYSCOIN: keep RPC fee suggestions aligned with the local NEVM miner policy.
+	tip, err := b.gpo.SuggestTipCap(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b.eth.lock.RLock()
+	minTip := new(big.Int).Set(b.eth.gasPrice)
+	b.eth.lock.RUnlock()
+	if tip.Cmp(minTip) < 0 {
+		return minTip, nil
+	}
+	return tip, nil
 }
 
 func (b *EthAPIBackend) FeeHistory(ctx context.Context, blockCount uint64, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (firstBlock *big.Int, reward [][]*big.Int, baseFee []*big.Int, gasUsedRatio []float64, baseFeePerBlobGas []*big.Int, blobGasUsedRatio []float64, err error) {
