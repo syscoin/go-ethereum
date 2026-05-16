@@ -44,6 +44,9 @@ type Backend interface {
 	SyncProgress() ethereum.SyncProgress
 
 	SuggestGasTipCap(ctx context.Context) (*big.Int, error)
+	// SYSCOIN: exposes the local miner tip floor so legacy gas-price suggestions
+	// can avoid pricing transactions exactly at the floor in low-base-fee regimes.
+	MinerGasTipFloor() *big.Int
 	FeeHistory(ctx context.Context, blockCount uint64, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*big.Int, []float64, []*big.Int, []float64, error)
 	BlobBaseFee(ctx context.Context) *big.Int
 	ChainDb() ethdb.Database
