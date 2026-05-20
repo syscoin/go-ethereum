@@ -30,11 +30,11 @@ import (
 var (
 	MainnetGenesisHash = common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
 	// SYSCOIN
-	SyscoinGenesisHash = common.HexToHash("0x2112327cad6deec6ada8bd7e5d33d263b57742a8495f3b641faa326b55b1c666")
+	SyscoinGenesisHash   = common.HexToHash("0x2112327cad6deec6ada8bd7e5d33d263b57742a8495f3b641faa326b55b1c666")
 	TanenbaumGenesisHash = common.HexToHash("0x5fb22cd4425cea75d2ddaf5fbafb247bb682f407575c599d954b811214c3617c")
-	HoleskyGenesisHash = common.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4")
-	SepoliaGenesisHash = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
-	HoodiGenesisHash   = common.HexToHash("0xbbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b")
+	HoleskyGenesisHash   = common.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4")
+	SepoliaGenesisHash   = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
+	HoodiGenesisHash     = common.HexToHash("0xbbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b")
 )
 
 func newUint64(val uint64) *uint64 { return &val }
@@ -73,30 +73,31 @@ var (
 	}
 	// SYSCOIN
 	SyscoinChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(57),
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		DAOForkSupport:      false,
-		EIP150Block:         big.NewInt(0),
-		EIP155Block:         big.NewInt(0),
-		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		BerlinBlock:         big.NewInt(0),
-		SyscoinBlock:        big.NewInt(0),
-		RolluxBlock:         big.NewInt(268500),
-		ShanghaiBlock:       big.NewInt(268500),
-		NexusBlock:          big.NewInt(692846),
-		LondonBlock:         big.NewInt(1),
+		ChainID:                 big.NewInt(57),
+		HomesteadBlock:          big.NewInt(0),
+		DAOForkBlock:            nil,
+		DAOForkSupport:          false,
+		EIP150Block:             big.NewInt(0),
+		EIP155Block:             big.NewInt(0),
+		EIP158Block:             big.NewInt(0),
+		ByzantiumBlock:          big.NewInt(0),
+		ConstantinopleBlock:     big.NewInt(0),
+		PetersburgBlock:         big.NewInt(0),
+		IstanbulBlock:           big.NewInt(0),
+		MuirGlacierBlock:        big.NewInt(0),
+		BerlinBlock:             big.NewInt(0),
+		SyscoinBlock:            big.NewInt(0),
+		RolluxBlock:             big.NewInt(268500),
+		ShanghaiBlock:           big.NewInt(268500),
+		NexusBlock:              big.NewInt(692846),
+		LibertyBlock:            nil,
+		LondonBlock:             big.NewInt(1),
 		TerminalTotalDifficulty: big.NewInt(1),
 		//ShanghaiTime:                  newUint64(1679618404),
 		// SYSCOIN TODO enable later fork such as prague or verkle (make sure to merge which instruction sets into latest one for us)
 		// cancun enables a new signer so we jump to prague or better to ensure we dont need blob signing txs from cancun
 		//CancunTime:                    newUint64(1679618404),
-		Ethash:              nil,
+		Ethash: nil,
 	}
 	TanenbaumChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(5700),
@@ -116,11 +117,12 @@ var (
 		RolluxBlock:         big.NewInt(182500),
 		ShanghaiBlock:       big.NewInt(223000),
 		//ShanghaiTime:        newUint64(1675118284),
-		NexusBlock:          big.NewInt(665001),
-		LondonBlock:         big.NewInt(1),
+		NexusBlock:   big.NewInt(665001),
+		LibertyBlock: big.NewInt(906001),
+		LondonBlock:  big.NewInt(1),
 		//CancunTime:          newUint64(1675118284),
 		TerminalTotalDifficulty: big.NewInt(1),
-		Ethash:              nil,
+		Ethash:                  nil,
 	}
 	// HoleskyChainConfig contains the chain parameters to run a node on the Holesky test network.
 	HoleskyChainConfig = &ChainConfig{
@@ -424,11 +426,11 @@ var (
 var NetworkNames = map[string]string{
 	MainnetChainConfig.ChainID.String(): "mainnet",
 	// SYSCOIN
-	SyscoinChainConfig.ChainID.String(): "syscoin",
+	SyscoinChainConfig.ChainID.String():   "syscoin",
 	TanenbaumChainConfig.ChainID.String(): "tanenbaum",
-	SepoliaChainConfig.ChainID.String(): "sepolia",
-	HoleskyChainConfig.ChainID.String(): "holesky",
-	HoodiChainConfig.ChainID.String():   "hoodi",
+	SepoliaChainConfig.ChainID.String():   "sepolia",
+	HoleskyChainConfig.ChainID.String():   "holesky",
+	HoodiChainConfig.ChainID.String():     "hoodi",
 }
 
 // ChainConfig is the core config which determines the blockchain settings.
@@ -460,10 +462,11 @@ type ChainConfig struct {
 	GrayGlacierBlock    *big.Int `json:"grayGlacierBlock,omitempty"`    // Eip-5133 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	MergeNetsplitBlock  *big.Int `json:"mergeNetsplitBlock,omitempty"`  // Virtual fork after The Merge to use as a network splitter
 	// SYSCOIN
-	SyscoinBlock        *big.Int `json:"syscoinBlock,omitempty"`        // Syscoin switch block (nil = no fork, 0 = already on syscoin)
-	RolluxBlock         *big.Int `json:"rolluxBlock,omitempty"`         // Rollux switch block (nil = no fork, 0 = already on syscoin)
-	ShanghaiBlock       *big.Int `json:"shanghaiBlock,omitempty"`       // Rollux switch block (nil = no fork, 0 = already on syscoin)
-	NexusBlock          *big.Int `json:"nexusBlock,omitempty"`          // Nexus switch block (nil = no fork, 0 = already on syscoin)
+	SyscoinBlock  *big.Int `json:"syscoinBlock,omitempty"`  // Syscoin switch block (nil = no fork, 0 = already on syscoin)
+	RolluxBlock   *big.Int `json:"rolluxBlock,omitempty"`   // Rollux switch block (nil = no fork, 0 = already on syscoin)
+	ShanghaiBlock *big.Int `json:"shanghaiBlock,omitempty"` // Rollux switch block (nil = no fork, 0 = already on syscoin)
+	NexusBlock    *big.Int `json:"nexusBlock,omitempty"`    // Nexus switch block (nil = no fork, 0 = already on syscoin)
+	LibertyBlock  *big.Int `json:"libertyBlock,omitempty"`  // Liberty opcode switch block (nil = no fork, 0 = already on syscoin)
 	// Fork scheduling was switched from blocks to timestamps here
 
 	ShanghaiTime *uint64 `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
@@ -691,6 +694,7 @@ func (c *ChainConfig) IsTerminalPoWBlock(parentTotalDiff *big.Int, totalDiff *bi
 	}
 	return parentTotalDiff.Cmp(c.TerminalTotalDifficulty) < 0 && totalDiff.Cmp(c.TerminalTotalDifficulty) >= 0
 }
+
 // SYSCOIN IsSyscoin returns whether num is either equal to the Syscoin fork block or greater.
 func (c *ChainConfig) IsSyscoin(num *big.Int) bool {
 	return isBlockForked(c.SyscoinBlock, num)
@@ -701,6 +705,12 @@ func (c *ChainConfig) IsRollux(num *big.Int) bool {
 func (c *ChainConfig) IsNexus(num *big.Int) bool {
 	return isBlockForked(c.NexusBlock, num)
 }
+
+// SYSCOIN
+func (c *ChainConfig) IsLiberty(num *big.Int) bool {
+	return isBlockForked(c.LibertyBlock, num)
+}
+
 // IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
 func (c *ChainConfig) IsShanghai(num *big.Int, time uint64) bool {
 	// SYSCOIN
@@ -948,6 +958,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkBlockIncompatible(c.NexusBlock, newcfg.NexusBlock, headNumber) {
 		return newBlockCompatError("Nexus fork block", c.NexusBlock, newcfg.NexusBlock)
 	}
+	if isForkBlockIncompatible(c.LibertyBlock, newcfg.LibertyBlock, headNumber) {
+		return newBlockCompatError("Liberty fork block", c.LibertyBlock, newcfg.LibertyBlock)
+	}
 	if isForkTimestampIncompatible(c.ShanghaiTime, newcfg.ShanghaiTime, headTimestamp) {
 		return newTimestampCompatError("Shanghai fork timestamp", c.ShanghaiTime, newcfg.ShanghaiTime)
 	}
@@ -1151,9 +1164,9 @@ type Rules struct {
 	IsEIP2929, IsEIP4762                                    bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	// SYSCOIN
-	IsBerlin, IsLondon, IsSyscoin, IsRollux, IsNexus        bool
-	IsMerge, IsShanghai, IsCancun, IsPrague, IsOsaka        bool
-	IsVerkle                                                bool
+	IsBerlin, IsLondon, IsSyscoin, IsRollux, IsNexus, IsLiberty bool
+	IsMerge, IsShanghai, IsCancun, IsPrague, IsOsaka            bool
+	IsVerkle                                                    bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1180,15 +1193,16 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsLondon:         c.IsLondon(num),
 		IsMerge:          isMerge,
 		// SYSCOIN
-		IsShanghai:       c.IsShanghai(num, timestamp),
-		IsCancun:         isMerge && c.IsCancun(num, timestamp),
-		IsPrague:         isMerge && c.IsPrague(num, timestamp),
-		IsOsaka:          isMerge && c.IsOsaka(num, timestamp),
-		IsVerkle:         isVerkle,
-		IsEIP4762:        isVerkle,
+		IsShanghai: c.IsShanghai(num, timestamp),
+		IsCancun:   isMerge && c.IsCancun(num, timestamp),
+		IsPrague:   isMerge && c.IsPrague(num, timestamp),
+		IsOsaka:    isMerge && c.IsOsaka(num, timestamp),
+		IsVerkle:   isVerkle,
+		IsEIP4762:  isVerkle,
 		// SYSCOIN
-		IsSyscoin:        c.IsSyscoin(num),
-		IsRollux:         c.IsRollux(num),
-		IsNexus:          c.IsNexus(num),
+		IsSyscoin: c.IsSyscoin(num),
+		IsRollux:  c.IsRollux(num),
+		IsNexus:   c.IsNexus(num),
+		IsLiberty: c.IsLiberty(num),
 	}
 }

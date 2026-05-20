@@ -19,6 +19,7 @@ package vm
 import (
 	"testing"
 
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,14 +35,25 @@ func TestJumpTableCopy(t *testing.T) {
 	require.Equal(t, uint64(0), tbl[SLOAD].constantGas)
 }
 
-func TestNexusInstructionSetEnablesOnlyTransientAndMcopy(t *testing.T) {
-	tbl := newNexusInstructionSet()
+// SYSCOIN
+func TestLibertyInstructionSetEnablesOnlyTransientAndMcopy(t *testing.T) {
+	tbl := newLibertyInstructionSet()
 
-	require.True(t, tbl[TLOAD].HasCost(), "TLOAD must be enabled at Nexus")
-	require.True(t, tbl[TSTORE].HasCost(), "TSTORE must be enabled at Nexus")
-	require.True(t, tbl[MCOPY].HasCost(), "MCOPY must be enabled at Nexus")
+	require.True(t, tbl[TLOAD].HasCost(), "TLOAD must be enabled at Liberty")
+	require.True(t, tbl[TSTORE].HasCost(), "TSTORE must be enabled at Liberty")
+	require.True(t, tbl[MCOPY].HasCost(), "MCOPY must be enabled at Liberty")
 
-	// Keep Cancun blob opcodes disabled for Nexus-only activation.
-	require.False(t, tbl[BLOBHASH].HasCost(), "BLOBHASH must remain disabled at Nexus")
-	require.False(t, tbl[BLOBBASEFEE].HasCost(), "BLOBBASEFEE must remain disabled at Nexus")
+	// Keep Cancun blob opcodes disabled for Liberty-only activation.
+	require.False(t, tbl[BLOBHASH].HasCost(), "BLOBHASH must remain disabled at Liberty")
+	require.False(t, tbl[BLOBBASEFEE].HasCost(), "BLOBBASEFEE must remain disabled at Liberty")
+}
+
+// SYSCOIN
+func TestNexusInstructionSetDoesNotEnableLibertyOpcodes(t *testing.T) {
+	tbl, err := LookupInstructionSet(params.Rules{IsNexus: true, IsShanghai: true})
+	require.NoError(t, err)
+
+	require.False(t, tbl[TLOAD].HasCost(), "TLOAD must remain disabled before Liberty")
+	require.False(t, tbl[TSTORE].HasCost(), "TSTORE must remain disabled before Liberty")
+	require.False(t, tbl[MCOPY].HasCost(), "MCOPY must remain disabled before Liberty")
 }
