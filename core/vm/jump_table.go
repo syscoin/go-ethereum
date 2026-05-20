@@ -59,11 +59,12 @@ var (
 	londonInstructionSet           = newLondonInstructionSet()
 	mergeInstructionSet            = newMergeInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
-	nexusInstructionSet            = newNexusInstructionSet()
-	cancunInstructionSet           = newCancunInstructionSet()
-	verkleInstructionSet           = newVerkleInstructionSet()
-	pragueInstructionSet           = newPragueInstructionSet()
-	eofInstructionSet              = newEOFInstructionSetForTesting()
+	// SYSCOIN
+	libertyInstructionSet = newLibertyInstructionSet()
+	cancunInstructionSet  = newCancunInstructionSet()
+	verkleInstructionSet  = newVerkleInstructionSet()
+	pragueInstructionSet  = newPragueInstructionSet()
+	eofInstructionSet     = newEOFInstructionSetForTesting()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -109,8 +110,9 @@ func newPragueInstructionSet() JumpTable {
 	return validate(instructionSet)
 }
 
-func newNexusInstructionSet() JumpTable {
-	// SYSCOIN: enable MCOPY and transient storage opcodes at Nexus without
+// SYSCOIN
+func newLibertyInstructionSet() JumpTable {
+	// SYSCOIN: enable MCOPY and transient storage opcodes at Liberty without
 	// enabling the full Cancun instruction set (e.g. blob opcodes/signer paths).
 	instructionSet := newShanghaiInstructionSet()
 	enable1153(&instructionSet) // EIP-1153 "Transient Storage"

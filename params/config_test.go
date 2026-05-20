@@ -110,6 +110,24 @@ func TestCheckCompatible(t *testing.T) {
 				RewindToTime: 9,
 			},
 		},
+		// SYSCOIN
+		{
+			stored:    &ChainConfig{LibertyBlock: big.NewInt(100)},
+			new:       &ChainConfig{LibertyBlock: big.NewInt(200)},
+			headBlock: 99,
+			wantErr:   nil,
+		},
+		{
+			stored:    &ChainConfig{LibertyBlock: big.NewInt(100)},
+			new:       &ChainConfig{LibertyBlock: big.NewInt(200)},
+			headBlock: 150,
+			wantErr: &ConfigCompatError{
+				What:          "Liberty fork block",
+				StoredBlock:   big.NewInt(100),
+				NewBlock:      big.NewInt(200),
+				RewindToBlock: 99,
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -136,6 +154,18 @@ func TestConfigRules(t *testing.T) {
 	stamp = math.MaxInt64
 	if r := c.Rules(big.NewInt(0), true, stamp); !r.IsShanghai {
 		t.Errorf("expected %v to be shanghai", stamp)
+	}
+
+	// SYSCOIN
+	c = &ChainConfig{
+		NexusBlock:   big.NewInt(10),
+		LibertyBlock: big.NewInt(20),
+	}
+	if r := c.Rules(big.NewInt(15), true, 0); !r.IsNexus || r.IsLiberty {
+		t.Errorf("expected block 15 to be nexus-only")
+	}
+	if r := c.Rules(big.NewInt(20), true, 0); !r.IsNexus || !r.IsLiberty {
+		t.Errorf("expected block 20 to be liberty")
 	}
 }
 
