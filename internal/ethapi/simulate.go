@@ -517,6 +517,9 @@ func (b *simBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber)
 
 // SYSCOIN
 func (b *simBackend) ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error) {
+	if uint64(number) > b.base.Number.Uint64() {
+		return []byte{}, nil
+	}
 	return b.b.ReadSYSHash(ctx, number)
 }
 func (b *simBackend) BTCCheckpointIndex(ctx context.Context, hash common.Hash) (uint64, error) {

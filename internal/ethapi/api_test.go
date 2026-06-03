@@ -744,7 +744,10 @@ func TestSimBackendSyscoinReadersDelegate(t *testing.T) {
 	t.Parallel()
 
 	backend := testBackend{}
-	sim := &simBackend{b: backend}
+	sim := &simBackend{
+		b:    backend,
+		base: &types.Header{Number: big.NewInt(12)},
+	}
 	ctx := context.Background()
 	hash := common.HexToHash("0x5678")
 	address := common.HexToAddress("0x1234567890123456789012345678901234567890")
@@ -752,6 +755,9 @@ func TestSimBackendSyscoinReadersDelegate(t *testing.T) {
 	wantSYSHash := common.BigToHash(big.NewInt(12)).Bytes()
 	if got, err := sim.ReadSYSHash(ctx, 12); err != nil || !bytes.Equal(got, wantSYSHash) {
 		t.Fatalf("unexpected simulated SYS hash: got %x err %v want %x", got, err, wantSYSHash)
+	}
+	if got, err := sim.ReadSYSHash(ctx, 13); err != nil || len(got) != 0 {
+		t.Fatalf("simulated future SYS hash leaked canonical data: got %x err %v", got, err)
 	}
 	if got, err := sim.ReadDataHash(ctx, hash); err != nil || !bytes.Equal(got, hash.Bytes()) {
 		t.Fatalf("unexpected simulated data hash: got %x err %v want %x", got, err, hash.Bytes())
