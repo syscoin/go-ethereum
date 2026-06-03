@@ -687,7 +687,7 @@ func (b testBackend) NewMatcherBackend() filtermaps.MatcherBackend {
 
 // SYSCOIN
 func (b testBackend) ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error) {
-	return []byte{}, nil
+	return common.BigToHash(big.NewInt(int64(number))).Bytes(), nil
 }
 func (b testBackend) BTCCheckpointIndex(ctx context.Context, hash common.Hash) (uint64, error) {
 	return 7, nil
@@ -699,22 +699,34 @@ func (b testBackend) ReadBTCCheckpointHashByIndex(ctx context.Context, idx uint6
 	return common.BigToHash(big.NewInt(int64(idx))).Bytes(), nil
 }
 func (b testBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {
-	return []byte{}, nil
+	return hash.Bytes(), nil
 }
 func (b testBackend) GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error) {
-	return []byte{}, nil
+	return address.Bytes(), nil
 }
 func (b testBackend) HistoryPruningCutoff() uint64 {
 	bn, _ := b.chain.HistoryPruningCutoff()
 	return bn
 }
 
-func TestChainContextBTCCheckpointReaders(t *testing.T) {
+func TestChainContextSyscoinReaders(t *testing.T) {
 	t.Parallel()
 
 	backend := testBackend{}
 	ctx := NewChainContext(context.Background(), backend)
 	hash := common.HexToHash("0x1234")
+	address := common.HexToAddress("0x1234567890123456789012345678901234567890")
+
+	wantSYSHash := common.BigToHash(big.NewInt(11)).Bytes()
+	if got := ctx.ReadSYSHash(11); !bytes.Equal(got, wantSYSHash) {
+		t.Fatalf("unexpected SYS hash bytes: got %x want %x", got, wantSYSHash)
+	}
+	if got := ctx.ReadDataHash(hash); !bytes.Equal(got, hash.Bytes()) {
+		t.Fatalf("unexpected data hash bytes: got %x want %x", got, hash.Bytes())
+	}
+	if got := ctx.GetNEVMAddress(address); !bytes.Equal(got, address.Bytes()) {
+		t.Fatalf("unexpected NEVM address bytes: got %x want %x", got, address.Bytes())
+	}
 
 	if got := ctx.BTCCheckpointIndex(hash); got != 7 {
 		t.Fatalf("unexpected checkpoint index: got %d want %d", got, 7)
@@ -725,6 +737,43 @@ func TestChainContextBTCCheckpointReaders(t *testing.T) {
 	wantHash := common.BigToHash(big.NewInt(5)).Bytes()
 	if got := ctx.ReadBTCCheckpointHashByIndex(5); !bytes.Equal(got, wantHash) {
 		t.Fatalf("unexpected checkpoint hash bytes: got %x want %x", got, wantHash)
+	}
+}
+
+func TestSimBackendSyscoinReadersDelegate(t *testing.T) {
+	t.Parallel()
+
+	backend := testBackend{}
+	sim := &simBackend{
+		b:    backend,
+		base: &types.Header{Number: big.NewInt(12)},
+	}
+	ctx := context.Background()
+	hash := common.HexToHash("0x5678")
+	address := common.HexToAddress("0x1234567890123456789012345678901234567890")
+
+	wantSYSHash := common.BigToHash(big.NewInt(12)).Bytes()
+	if got, err := sim.ReadSYSHash(ctx, 12); err != nil || !bytes.Equal(got, wantSYSHash) {
+		t.Fatalf("unexpected simulated SYS hash: got %x err %v want %x", got, err, wantSYSHash)
+	}
+	if got, err := sim.ReadSYSHash(ctx, 13); err != nil || len(got) != 0 {
+		t.Fatalf("simulated future SYS hash leaked canonical data: got %x err %v", got, err)
+	}
+	if got, err := sim.ReadDataHash(ctx, hash); err != nil || !bytes.Equal(got, hash.Bytes()) {
+		t.Fatalf("unexpected simulated data hash: got %x err %v want %x", got, err, hash.Bytes())
+	}
+	if got, err := sim.GetNEVMAddress(ctx, address); err != nil || !bytes.Equal(got, address.Bytes()) {
+		t.Fatalf("unexpected simulated NEVM address: got %x err %v want %x", got, err, address.Bytes())
+	}
+	if got, err := sim.BTCCheckpointIndex(ctx, hash); err != nil || got != 7 {
+		t.Fatalf("unexpected simulated checkpoint index: got %d err %v want %d", got, err, 7)
+	}
+	if got, err := sim.ReadBTCCheckpointLastIndex(ctx); err != nil || got != 9 {
+		t.Fatalf("unexpected simulated last checkpoint index: got %d err %v want %d", got, err, 9)
+	}
+	wantCheckpointHash := common.BigToHash(big.NewInt(5)).Bytes()
+	if got, err := sim.ReadBTCCheckpointHashByIndex(ctx, 5); err != nil || !bytes.Equal(got, wantCheckpointHash) {
+		t.Fatalf("unexpected simulated checkpoint hash: got %x err %v want %x", got, err, wantCheckpointHash)
 	}
 }
 

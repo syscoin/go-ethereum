@@ -517,7 +517,10 @@ func (b *simBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber)
 
 // SYSCOIN
 func (b *simBackend) ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error) {
-	return []byte{}, nil
+	if uint64(number) > b.base.Number.Uint64() {
+		return []byte{}, nil
+	}
+	return b.b.ReadSYSHash(ctx, number)
 }
 func (b *simBackend) BTCCheckpointIndex(ctx context.Context, hash common.Hash) (uint64, error) {
 	return b.b.BTCCheckpointIndex(ctx, hash)
@@ -529,10 +532,10 @@ func (b *simBackend) ReadBTCCheckpointHashByIndex(ctx context.Context, idx uint6
 	return b.b.ReadBTCCheckpointHashByIndex(ctx, idx)
 }
 func (b *simBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {
-	return []byte{}, nil
+	return b.b.ReadDataHash(ctx, hash)
 }
 func (b *simBackend) GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error) {
-	return []byte{}, nil
+	return b.b.GetNEVMAddress(ctx, address)
 }
 func (b *simBackend) ChainConfig() *params.ChainConfig {
 	return b.b.ChainConfig()
