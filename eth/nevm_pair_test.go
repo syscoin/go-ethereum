@@ -225,6 +225,27 @@ func TestPersistedPairZeroSysHashRetryRejected(t *testing.T) {
 	}
 }
 
+func TestUnpairedTipZeroSysHashRetryRejected(t *testing.T) {
+	eth, gspec, engine := newNEVMPairTestEthereum(t, true)
+
+	_, blocks, _ := core.GenerateChainWithGenesis(gspec, engine, 1, nil)
+	e1 := blocks[0]
+	if _, err := eth.blockchain.InsertChain([]*types.Block{e1}); err != nil {
+		t.Fatalf("insert unpaired tip: %v", err)
+	}
+	if got := eth.blockchain.ReadSYSHash(1); len(got) != 0 {
+		t.Fatalf("expected empty SYSHash(1), got %x", got)
+	}
+
+	// Same NEVM tip with zero SYS must not succeed as an exact-pair retry.
+	if err := eth.AddBlock(makeNEVMConnect(e1, nil)); err == nil {
+		t.Fatal("zero-SYS retry on unpaired tip unexpectedly succeeded")
+	}
+	if eth.blockchain.CurrentBlock().Hash() != e1.Hash() {
+		t.Fatalf("tip moved after zero-SYS unpaired retry")
+	}
+}
+
 func TestDisconnectZeroSysHashRejected(t *testing.T) {
 	eth, gspec, engine := newNEVMPairTestEthereum(t, true)
 

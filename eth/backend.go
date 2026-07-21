@@ -397,9 +397,10 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
     }
 
     // Exact idempotent retry of the current tip/buffer pair only.
-    // Zero SYS hash is never an exact retry; it is only for next-candidate validation.
+    // Zero SYS hash is never an exact retry (including zero==zero on unpaired tips);
+    // it is only for next-candidate validation below.
     if incomingBlockNumber == lastBlockNumber && incomingBlockHash == lastBlockHash {
-        if incomingSysHash != lastSysHash {
+        if incomingSysHash == (common.Hash{}) || lastSysHash == (common.Hash{}) || incomingSysHash != lastSysHash {
             eth.bufferLock.Unlock()
             return errors.New("NEVM block already paired with a different Syscoin block")
         }
