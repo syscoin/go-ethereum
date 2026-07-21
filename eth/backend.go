@@ -376,50 +376,41 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
 
     incomingBlockNumber := nevmBlockConnectIn.Block.NumberU64()
     incomingBlockHash := nevmBlockConnectIn.Block.Hash()
-
-    // Check canonical chain first to avoid duplicates/collisions. This is a hash lookup only
-    // and does not touch EVM state.
-    existingHash := eth.blockchain.GetCanonicalHash(incomingBlockNumber)
-    if existingHash != (common.Hash{}) {
-        if existingHash == incomingBlockHash {
-            log.Trace("Block already exists in chain, skipping insert", "number", incomingBlockNumber, "hash", existingHash)
-            return nil
-        }
-        log.Warn("Block height collision in chain",
-            "number", incomingBlockNumber,
-            "existingHash", existingHash,
-            "incomingHash", incomingBlockHash)
-        return fmt.Errorf("block collision at height %d: existing [%x..], incoming [%x..]",
-            incomingBlockNumber, existingHash.Bytes()[:4], incomingBlockHash.Bytes()[:4])
-    }
-
-    // Determine last block for continuity check
-    var lastBlockNumber uint64
-    var lastBlockHash common.Hash
+    incomingParentHash := nevmBlockConnectIn.Block.ParentHash()
+    incomingSysHash := common.BytesToHash([]byte(nevmBlockConnectIn.Sysblockhash))
 
     eth.bufferLock.Lock()
     bufferLen := len(eth.blockConnectBuffer)
+    var lastBlockNumber uint64
+    var lastBlockHash common.Hash
+    var lastSysHash common.Hash
     if bufferLen == 0 {
         currentHead := eth.blockchain.CurrentBlock()
         lastBlockNumber = currentHead.Number.Uint64()
         lastBlockHash = currentHead.Hash()
+        lastSysHash = common.BytesToHash(eth.blockchain.ReadSYSHash(lastBlockNumber))
     } else {
-        lastInBatch := eth.blockConnectBuffer[bufferLen-1].Block
-        lastBlockNumber = lastInBatch.NumberU64()
-        lastBlockHash = lastInBatch.Hash()
+        lastInBatch := eth.blockConnectBuffer[bufferLen-1]
+        lastBlockNumber = lastInBatch.Block.NumberU64()
+        lastBlockHash = lastInBatch.Block.Hash()
+        lastSysHash = common.BytesToHash([]byte(lastInBatch.Sysblockhash))
+    }
 
-        // Check last buffered block directly for duplicate
-        if incomingBlockNumber == lastBlockNumber && incomingBlockHash == lastBlockHash {
+    // Exact idempotent retry of the current tip/buffer pair only.
+    // Zero SYS hash is never an exact retry; it is only for next-candidate validation.
+    if incomingBlockNumber == lastBlockNumber && incomingBlockHash == lastBlockHash {
+        if incomingSysHash != lastSysHash {
             eth.bufferLock.Unlock()
-            log.Trace("Block already buffered as last, skipping insert", "number", incomingBlockNumber, "hash", incomingBlockHash)
-            return nil
+            return errors.New("NEVM block already paired with a different Syscoin block")
         }
+        eth.bufferLock.Unlock()
+        log.Trace("Exact NEVM/Syscoin pair retry, skipping insert", "number", incomingBlockNumber, "hash", incomingBlockHash)
+        return nil
     }
     eth.bufferLock.Unlock()
 
-    incomingParentHash := nevmBlockConnectIn.Block.ParentHash()
-
     if incomingBlockNumber != lastBlockNumber+1 || incomingParentHash != lastBlockHash {
+        // Includes replaying an older canonical NEVM block: must not return success.
         log.Error("Non contiguous block insert",
             "number", incomingBlockNumber,
             "hash", incomingBlockHash,
@@ -434,8 +425,8 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
         )
     }
 
-    sysBlockHash := common.BytesToHash([]byte(nevmBlockConnectIn.Sysblockhash))
-    if sysBlockHash == (common.Hash{}) {
+    // Zero SYS hash: validate next candidate only; never pair or treat as retry.
+    if incomingSysHash == (common.Hash{}) {
         if err := eth.engine.VerifyHeader(eth.blockchain, nevmBlockConnectIn.Block.Header()); err != nil {
             return err
         }
@@ -542,6 +533,12 @@ func (eth *Ethereum) DeleteBlock(nevmBlockDisconnect *types.NEVMBlockDisconnect)
 	if currentNumber == 0 {
 		log.Warn("Trying to disconnect block 0")
 		return nil
+	}
+
+	pairedSysHash := common.BytesToHash(eth.blockchain.ReadSYSHash(currentNumber))
+	if pairedSysHash != disconnectHash {
+		return fmt.Errorf("disconnect does not match current Core/NEVM pairing: tip=%d paired=%x disconnect=%x",
+			currentNumber, pairedSysHash.Bytes()[:4], disconnectHash.Bytes()[:4])
 	}
 
 	parent := eth.blockchain.GetBlock(current.ParentHash, currentNumber-1)
