@@ -536,7 +536,8 @@ func (eth *Ethereum) DeleteBlock(nevmBlockDisconnect *types.NEVMBlockDisconnect)
 	}
 
 	pairedSysHash := common.BytesToHash(eth.blockchain.ReadSYSHash(currentNumber))
-	if pairedSysHash != disconnectHash {
+	// Missing/zero pairing or disconnect is never a match (BytesToHash(nil) == zero).
+	if pairedSysHash == (common.Hash{}) || disconnectHash == (common.Hash{}) || pairedSysHash != disconnectHash {
 		return fmt.Errorf("disconnect does not match current Core/NEVM pairing: tip=%d paired=%x disconnect=%x",
 			currentNumber, pairedSysHash.Bytes()[:4], disconnectHash.Bytes()[:4])
 	}

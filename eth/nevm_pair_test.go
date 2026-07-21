@@ -224,3 +224,28 @@ func TestPersistedPairZeroSysHashRetryRejected(t *testing.T) {
 		t.Fatalf("SYSHash changed: %x", got)
 	}
 }
+
+func TestDisconnectZeroSysHashRejected(t *testing.T) {
+	eth, gspec, engine := newNEVMPairTestEthereum(t, true)
+
+	_, blocks, _ := core.GenerateChainWithGenesis(gspec, engine, 1, nil)
+	e1 := blocks[0]
+	// Insert without NevmBlockConnect so tip has no SYSHash pairing.
+	if _, err := eth.blockchain.InsertChain([]*types.Block{e1}); err != nil {
+		t.Fatalf("insert unpaired tip: %v", err)
+	}
+	if eth.blockchain.CurrentBlock().Hash() != e1.Hash() {
+		t.Fatalf("tip want e1")
+	}
+	if got := eth.blockchain.ReadSYSHash(1); len(got) != 0 {
+		t.Fatalf("expected empty SYSHash(1), got %x", got)
+	}
+
+	// Empty disconnect must not rewind an unpaired tip (zero == zero was the hole).
+	if err := eth.DeleteBlock(makeNEVMDisconnect(nil)); err == nil {
+		t.Fatal("zero SYS disconnect on unpaired tip unexpectedly succeeded")
+	}
+	if eth.blockchain.CurrentBlock().Hash() != e1.Hash() {
+		t.Fatalf("tip rewound by zero disconnect: got %x", eth.blockchain.CurrentBlock().Hash())
+	}
+}
