@@ -119,8 +119,11 @@ var (
 		ShanghaiBlock:       big.NewInt(223000),
 		//ShanghaiTime:        newUint64(1675118284),
 		NexusBlock:          big.NewInt(665001),
-		LibertyBlock:        big.NewInt(906001), // opcode fork only; already historical
-		VaultMigrationBlock: nil,                // future F2; do not reuse LibertyBlock
+		LibertyBlock: big.NewInt(906001), // opcode fork only; already historical
+		// Intentionally nil until Bridge V2 cutover: a past LibertyBlock must not
+		// migrate vault balances. Set to future NEVM height F when the V2 proxy
+		// is deployed (paired with Core nBridgeV2StartBlock).
+		VaultMigrationBlock: nil,
 		LondonBlock:         big.NewInt(1),
 		//CancunTime:          newUint64(1675118284),
 		TerminalTotalDifficulty: big.NewInt(1),
