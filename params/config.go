@@ -91,8 +91,8 @@ var (
 		ShanghaiBlock:           big.NewInt(268500),
 		NexusBlock:              big.NewInt(692846),
 		LibertyBlock:            nil,
-		VaultMigrationBlock:     nil, // set to future F when V2 vault proxy is deployed
-		VaultManagerV2:          VaultManagerV2, // stub until proxy deployed; per-network
+		VaultMigrationBlock: nil, // set to future F when V2 vault proxy is deployed
+		// VaultManagerV2 left zero until the real proxy address is set with F.
 		LondonBlock:             big.NewInt(1),
 		TerminalTotalDifficulty: big.NewInt(1),
 		//ShanghaiTime:                  newUint64(1679618404),
@@ -125,8 +125,7 @@ var (
 		// migrate vault balances. Set to future NEVM height F when the V2 proxy
 		// is deployed (paired with Core nBridgeV2StartBlock).
 		VaultMigrationBlock: nil,
-		// Per-network V2 vault; stub until proxy is deployed (may differ from mainnet).
-		VaultManagerV2: VaultManagerV2,
+		// VaultManagerV2 left zero until the real proxy address is set with F.
 		LondonBlock:         big.NewInt(1),
 		//CancunTime:          newUint64(1675118284),
 		TerminalTotalDifficulty: big.NewInt(1),
@@ -882,6 +881,11 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock (%v) set without vaultManagerV2 address",
 				c.VaultMigrationBlock)
 		}
+		// Reject the package stub so cutover cannot be a one-line F-only update.
+		if c.VaultManagerV2 == VaultManagerV2 {
+			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock (%v) still uses stub vaultManagerV2 (%v)",
+				c.VaultMigrationBlock, c.VaultManagerV2)
+		}
 	}
 
 	// Check that all forks with blobs explicitly define the blob schedule configuration.
@@ -996,6 +1000,11 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	}
 	if isForkBlockIncompatible(c.VaultMigrationBlock, newcfg.VaultMigrationBlock, headNumber) {
 		return newBlockCompatError("Vault migration fork block", c.VaultMigrationBlock, newcfg.VaultMigrationBlock)
+	}
+	// Destination address is consensus-critical once the migration fork is in the past.
+	if (isBlockForked(c.VaultMigrationBlock, headNumber) || isBlockForked(newcfg.VaultMigrationBlock, headNumber)) &&
+		c.VaultManagerV2 != newcfg.VaultManagerV2 {
+		return newBlockCompatError("Vault migration V2 address", c.VaultMigrationBlock, newcfg.VaultMigrationBlock)
 	}
 	if isForkTimestampIncompatible(c.ShanghaiTime, newcfg.ShanghaiTime, headTimestamp) {
 		return newTimestampCompatError("Shanghai fork timestamp", c.ShanghaiTime, newcfg.ShanghaiTime)
