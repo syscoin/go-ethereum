@@ -869,6 +869,11 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 
 	// SYSCOIN: vault migration requires Nexus first (balance only exists after Nexus).
 	if c.VaultMigrationBlock != nil {
+		// Block 0 is committed via Genesis, not StateProcessor — migration would never run.
+		if c.VaultMigrationBlock.Sign() == 0 {
+			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock must be > 0 (got %v)",
+				c.VaultMigrationBlock)
+		}
 		if c.NexusBlock == nil {
 			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock (%v) set without nexusBlock",
 				c.VaultMigrationBlock)
