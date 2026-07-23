@@ -1234,3 +1234,28 @@ func TestTraceBlockWithBasefee(t *testing.T) {
 		}
 	}
 }
+
+func TestOverrideConfigVaultMigration(t *testing.T) {
+	original := &params.ChainConfig{
+		NexusBlock:          big.NewInt(10),
+		VaultMigrationBlock: nil,
+	}
+	v2 := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	over := &params.ChainConfig{
+		VaultMigrationBlock: big.NewInt(42),
+		VaultManagerV2:      v2,
+	}
+	cfg, canon := overrideConfig(original, over)
+	if canon {
+		t.Fatal("expected non-canonical after vault override")
+	}
+	if cfg.VaultMigrationBlock == nil || cfg.VaultMigrationBlock.Cmp(big.NewInt(42)) != 0 {
+		t.Fatalf("VaultMigrationBlock=%v want 42", cfg.VaultMigrationBlock)
+	}
+	if cfg.VaultManagerV2 != v2 {
+		t.Fatalf("VaultManagerV2=%s want %s", cfg.VaultManagerV2, v2)
+	}
+	if original.VaultMigrationBlock != nil {
+		t.Fatal("override mutated original config")
+	}
+}

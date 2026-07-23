@@ -243,11 +243,8 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 		log.Error("Failed to create sealing context", "err", err)
 		return nil, err
 	}
-	// SYSCOIN
-	if miner.chainConfig.NexusBlock != nil &&
-		miner.chainConfig.NexusBlock.Cmp(header.Number) == 0 {
-		misc.ApplyNexusHardFork(env.state)
-	}
+	// SYSCOIN — match StateProcessor.Process hard-fork mutations
+	misc.ApplyBlockHardForks(miner.chainConfig, header.Number, env.state)
 	if header.ParentBeaconRoot != nil {
 		core.ProcessBeaconBlockRoot(*header.ParentBeaconRoot, env.evm)
 	}

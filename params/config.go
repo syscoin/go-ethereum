@@ -91,6 +91,8 @@ var (
 		ShanghaiBlock:           big.NewInt(268500),
 		NexusBlock:              big.NewInt(692846),
 		LibertyBlock:            nil,
+		VaultMigrationBlock: nil, // set to future F when V2 vault proxy is deployed
+		// VaultManagerV2 left zero until the real proxy address is set with F.
 		LondonBlock:             big.NewInt(1),
 		TerminalTotalDifficulty: big.NewInt(1),
 		//ShanghaiTime:                  newUint64(1679618404),
@@ -117,9 +119,14 @@ var (
 		RolluxBlock:         big.NewInt(182500),
 		ShanghaiBlock:       big.NewInt(223000),
 		//ShanghaiTime:        newUint64(1675118284),
-		NexusBlock:   big.NewInt(665001),
-		LibertyBlock: big.NewInt(906001),
-		LondonBlock:  big.NewInt(1),
+		NexusBlock:          big.NewInt(665001),
+		LibertyBlock: big.NewInt(906001), // opcode fork only; already historical
+		// Intentionally nil until Bridge V2 cutover: a past LibertyBlock must not
+		// migrate vault balances. Set to future NEVM height F when the V2 proxy
+		// is deployed (paired with Core nBridgeV2StartBlock).
+		VaultMigrationBlock: nil,
+		// VaultManagerV2 left zero until the real proxy address is set with F.
+		LondonBlock:         big.NewInt(1),
 		//CancunTime:          newUint64(1675118284),
 		TerminalTotalDifficulty: big.NewInt(1),
 		Ethash:                  nil,
@@ -465,8 +472,12 @@ type ChainConfig struct {
 	SyscoinBlock  *big.Int `json:"syscoinBlock,omitempty"`  // Syscoin switch block (nil = no fork, 0 = already on syscoin)
 	RolluxBlock   *big.Int `json:"rolluxBlock,omitempty"`   // Rollux switch block (nil = no fork, 0 = already on syscoin)
 	ShanghaiBlock *big.Int `json:"shanghaiBlock,omitempty"` // Rollux switch block (nil = no fork, 0 = already on syscoin)
-	NexusBlock    *big.Int `json:"nexusBlock,omitempty"`    // Nexus switch block (nil = no fork, 0 = already on syscoin)
-	LibertyBlock  *big.Int `json:"libertyBlock,omitempty"`  // Liberty opcode switch block (nil = no fork, 0 = already on syscoin)
+	NexusBlock          *big.Int `json:"nexusBlock,omitempty"`          // Nexus switch block (nil = no fork, 0 = already on syscoin)
+	LibertyBlock        *big.Int `json:"libertyBlock,omitempty"`        // Liberty opcode switch block (nil = no fork, 0 = already on syscoin)
+	VaultMigrationBlock *big.Int `json:"vaultMigrationBlock,omitempty"` // Bridge V2 vault balance migration block (nil = no fork)
+	// VaultManagerV2 is the destination for VaultMigrationBlock balance move.
+	// Per-network so Tanenbaum and mainnet may use different UUPS proxy addresses.
+	VaultManagerV2 common.Address `json:"vaultManagerV2,omitempty"`
 	// Fork scheduling was switched from blocks to timestamps here
 
 	ShanghaiTime *uint64 `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
@@ -711,6 +722,11 @@ func (c *ChainConfig) IsLiberty(num *big.Int) bool {
 	return isBlockForked(c.LibertyBlock, num)
 }
 
+// IsVaultMigration returns whether num is at or past the bridge V2 vault migration block.
+func (c *ChainConfig) IsVaultMigration(num *big.Int) bool {
+	return isBlockForked(c.VaultMigrationBlock, num)
+}
+
 // IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
 func (c *ChainConfig) IsShanghai(num *big.Int, time uint64) bool {
 	// SYSCOIN
@@ -851,6 +867,37 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		}
 	}
 
+	// SYSCOIN: vault migration requires Nexus first (balance only exists after Nexus).
+	if c.VaultMigrationBlock != nil {
+		// Block 0 is committed via Genesis, not StateProcessor — migration would never run.
+		if c.VaultMigrationBlock.Sign() == 0 {
+			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock must be > 0 (got %v)",
+				c.VaultMigrationBlock)
+		}
+		if c.NexusBlock == nil {
+			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock (%v) set without nexusBlock",
+				c.VaultMigrationBlock)
+		}
+		if c.VaultMigrationBlock.Cmp(c.NexusBlock) < 0 {
+			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock (%v) is before nexusBlock (%v)",
+				c.VaultMigrationBlock, c.NexusBlock)
+		}
+		if c.VaultManagerV2 == (common.Address{}) {
+			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock (%v) set without vaultManagerV2 address",
+				c.VaultMigrationBlock)
+		}
+		// Reject the package stub so cutover cannot be a one-line F-only update.
+		if c.VaultManagerV2 == VaultManagerV2 {
+			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock (%v) still uses stub vaultManagerV2 (%v)",
+				c.VaultMigrationBlock, c.VaultManagerV2)
+		}
+		// from == to is a no-op in migrateVaultBalance; reject accidental self-migration.
+		if c.VaultManagerV2 == VaultManager {
+			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock (%v) vaultManagerV2 equals current VaultManager (%v)",
+				c.VaultMigrationBlock, c.VaultManagerV2)
+		}
+	}
+
 	// Check that all forks with blobs explicitly define the blob schedule configuration.
 	bsc := c.BlobScheduleConfig
 	if bsc == nil {
@@ -960,6 +1007,14 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	}
 	if isForkBlockIncompatible(c.LibertyBlock, newcfg.LibertyBlock, headNumber) {
 		return newBlockCompatError("Liberty fork block", c.LibertyBlock, newcfg.LibertyBlock)
+	}
+	if isForkBlockIncompatible(c.VaultMigrationBlock, newcfg.VaultMigrationBlock, headNumber) {
+		return newBlockCompatError("Vault migration fork block", c.VaultMigrationBlock, newcfg.VaultMigrationBlock)
+	}
+	// Destination address is consensus-critical once the migration fork is in the past.
+	if (isBlockForked(c.VaultMigrationBlock, headNumber) || isBlockForked(newcfg.VaultMigrationBlock, headNumber)) &&
+		c.VaultManagerV2 != newcfg.VaultManagerV2 {
+		return newBlockCompatError("Vault migration V2 address", c.VaultMigrationBlock, newcfg.VaultMigrationBlock)
 	}
 	if isForkTimestampIncompatible(c.ShanghaiTime, newcfg.ShanghaiTime, headTimestamp) {
 		return newTimestampCompatError("Shanghai fork timestamp", c.ShanghaiTime, newcfg.ShanghaiTime)

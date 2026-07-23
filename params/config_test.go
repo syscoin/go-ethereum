@@ -20,11 +20,35 @@ import (
 	"math"
 	"math/big"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCheckConfigForkOrderVaultMigration(t *testing.T) {
+	validV2 := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	cfg := func(v2 common.Address) *ChainConfig {
+		return &ChainConfig{
+			NexusBlock:          big.NewInt(1),
+			VaultMigrationBlock: big.NewInt(2),
+			VaultManagerV2:      v2,
+		}
+	}
+	if err := cfg(validV2).CheckConfigForkOrder(); err != nil {
+		t.Fatalf("valid vaultManagerV2 rejected: %v", err)
+	}
+	if err := cfg(VaultManager).CheckConfigForkOrder(); err == nil {
+		t.Fatal("expected reject when vaultManagerV2 equals VaultManager")
+	} else if !strings.Contains(err.Error(), "equals current VaultManager") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := cfg(VaultManagerV2).CheckConfigForkOrder(); err == nil {
+		t.Fatal("expected reject stub vaultManagerV2")
+	}
+}
 
 func TestCheckCompatible(t *testing.T) {
 	type test struct {
