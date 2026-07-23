@@ -202,22 +202,9 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig, 
 			vmContext.BlobBaseFee = eip4844.CalcBlobFee(chainConfig, header)
 		}
 	}
-	// If DAO is supported/enabled, we need to handle it here. In geth 'proper', it's
-	// done in StateProcessor.Process(block, ...), right before transactions are applied.
-	if chainConfig.DAOForkSupport &&
-		chainConfig.DAOForkBlock != nil &&
-		chainConfig.DAOForkBlock.Cmp(new(big.Int).SetUint64(pre.Env.Number)) == 0 {
-		misc.ApplyDAOHardFork(statedb)
-	}
-	// SYSCOIN
-	if chainConfig.NexusBlock != nil &&
-		chainConfig.NexusBlock.Cmp(new(big.Int).SetUint64(pre.Env.Number)) == 0 {
-		misc.ApplyNexusHardFork(statedb)
-	}
-	if chainConfig.VaultMigrationBlock != nil &&
-		chainConfig.VaultMigrationBlock.Cmp(new(big.Int).SetUint64(pre.Env.Number)) == 0 {
-		misc.ApplyVaultMigrationHardFork(statedb, chainConfig.VaultManagerV2)
-	}
+	// If DAO / SYSCOIN hard forks are enabled, handle them here. In geth 'proper',
+	// this is done in StateProcessor.Process(block, ...), right before txs.
+	misc.ApplyBlockHardForks(chainConfig, new(big.Int).SetUint64(pre.Env.Number), statedb)
 	evm := vm.NewEVM(vmContext, statedb, chainConfig, vmConfig)
 	if beaconRoot := pre.Env.ParentBeaconBlockRoot; beaconRoot != nil {
 		core.ProcessBeaconBlockRoot(*beaconRoot, evm)

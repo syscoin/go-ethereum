@@ -4,6 +4,7 @@
 package misc
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -13,6 +14,30 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
 )
+
+func TestApplyBlockHardForksVaultMigration(t *testing.T) {
+	statedb, _ := state.New(types.EmptyRootHash, state.NewDatabaseForTesting())
+	old := params.VaultManager
+	neu := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	statedb.CreateAccount(old)
+	statedb.AddBalance(old, uint256.NewInt(500), tracing.BalanceChangeUnspecified)
+
+	cfg := &params.ChainConfig{
+		VaultMigrationBlock: big.NewInt(42),
+		VaultManagerV2:      neu,
+	}
+	ApplyBlockHardForks(cfg, big.NewInt(41), statedb)
+	if got := statedb.GetBalance(old); got.Cmp(uint256.NewInt(500)) != 0 {
+		t.Fatalf("pre-fork mutate: old=%s want 500", got)
+	}
+	ApplyBlockHardForks(cfg, big.NewInt(42), statedb)
+	if got := statedb.GetBalance(neu); got.Cmp(uint256.NewInt(500)) != 0 {
+		t.Fatalf("migration block: new=%s want 500", got)
+	}
+	if got := statedb.GetBalance(old); !got.IsZero() {
+		t.Fatalf("migration block: old=%s want 0", got)
+	}
+}
 
 func TestApplyVaultMigrationHardForkAddsWithoutOverwrite(t *testing.T) {
 	statedb, _ := state.New(types.EmptyRootHash, state.NewDatabaseForTesting())

@@ -17,12 +17,31 @@
 package misc
 
 import (
+	"math/big"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
 )
+
+// ApplyBlockHardForks applies one-shot state mutations that occur at specific
+// block numbers before transaction execution (DAO, Nexus, VaultMigration).
+// Callers that re-execute a block without going through StateProcessor.Process
+// (debug/trace paths) must invoke this so pre-tx state matches consensus.
+func ApplyBlockHardForks(config *params.ChainConfig, number *big.Int, statedb *state.StateDB) {
+	if config.DAOForkSupport && config.DAOForkBlock != nil && config.DAOForkBlock.Cmp(number) == 0 {
+		ApplyDAOHardFork(statedb)
+	}
+	// SYSCOIN
+	if config.NexusBlock != nil && config.NexusBlock.Cmp(number) == 0 {
+		ApplyNexusHardFork(statedb)
+	}
+	if config.VaultMigrationBlock != nil && config.VaultMigrationBlock.Cmp(number) == 0 {
+		ApplyVaultMigrationHardFork(statedb, config.VaultManagerV2)
+	}
+}
 
 // ApplyNexusHardFork transfers SYS from the pre-Nexus vault to the Nexus vault.
 // Historical Nexus behavior is preserved for zero balances: the destination

@@ -66,16 +66,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	)
 
 	// Mutate the block and state according to any hard-fork specs
-	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyDAOHardFork(statedb)
-	}
-	// SYSCOIN
-	if p.config.NexusBlock != nil && p.config.NexusBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyNexusHardFork(statedb)
-	}
-	if p.config.VaultMigrationBlock != nil && p.config.VaultMigrationBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyVaultMigrationHardFork(statedb, p.config.VaultManagerV2)
-	}
+	misc.ApplyBlockHardForks(p.config, block.Number(), statedb)
 	var (
 		context vm.BlockContext
 		signer  = types.MakeSigner(p.config, header.Number, header.Time)
