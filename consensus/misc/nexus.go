@@ -29,14 +29,18 @@ func ApplyNexusHardFork(statedb *state.StateDB) {
 	migrateVaultBalance(statedb, params.VaultManagerNexusOld, params.VaultManager)
 }
 
-// ApplyVaultMigrationHardFork transfers SYS from the Nexus-era vault to the V2
-// replacement vault at VaultMigrationBlock.
+// ApplyVaultMigrationHardFork transfers SYS from the Nexus-era vault to vaultV2
+// at VaultMigrationBlock. vaultV2 should be the per-network ChainConfig address
+// (falls back to params.VaultManagerV2 when zero).
 //
 // This is intentionally separate from LibertyBlock: Tanenbaum already activated
 // Liberty opcodes at 906001, so replaying that historical block with a new
 // balance mutation would invalidate existing state roots.
-func ApplyVaultMigrationHardFork(statedb *state.StateDB) {
-	migrateVaultBalance(statedb, params.VaultManager, params.VaultManagerV2)
+func ApplyVaultMigrationHardFork(statedb *state.StateDB, vaultV2 common.Address) {
+	if vaultV2 == (common.Address{}) {
+		vaultV2 = params.VaultManagerV2
+	}
+	migrateVaultBalance(statedb, params.VaultManager, vaultV2)
 }
 
 func migrateVaultBalance(statedb *state.StateDB, from, to common.Address) {

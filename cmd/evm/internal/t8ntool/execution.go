@@ -216,7 +216,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig, 
 	}
 	if chainConfig.VaultMigrationBlock != nil &&
 		chainConfig.VaultMigrationBlock.Cmp(new(big.Int).SetUint64(pre.Env.Number)) == 0 {
-		misc.ApplyVaultMigrationHardFork(statedb)
+		misc.ApplyVaultMigrationHardFork(statedb, chainConfig.VaultManagerV2)
 	}
 	evm := vm.NewEVM(vmContext, statedb, chainConfig, vmConfig)
 	if beaconRoot := pre.Env.ParentBeaconBlockRoot; beaconRoot != nil {

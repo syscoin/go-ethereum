@@ -92,6 +92,7 @@ var (
 		NexusBlock:              big.NewInt(692846),
 		LibertyBlock:            nil,
 		VaultMigrationBlock:     nil, // set to future F when V2 vault proxy is deployed
+		VaultManagerV2:          VaultManagerV2, // stub until proxy deployed; per-network
 		LondonBlock:             big.NewInt(1),
 		TerminalTotalDifficulty: big.NewInt(1),
 		//ShanghaiTime:                  newUint64(1679618404),
@@ -124,6 +125,8 @@ var (
 		// migrate vault balances. Set to future NEVM height F when the V2 proxy
 		// is deployed (paired with Core nBridgeV2StartBlock).
 		VaultMigrationBlock: nil,
+		// Per-network V2 vault; stub until proxy is deployed (may differ from mainnet).
+		VaultManagerV2: VaultManagerV2,
 		LondonBlock:         big.NewInt(1),
 		//CancunTime:          newUint64(1675118284),
 		TerminalTotalDifficulty: big.NewInt(1),
@@ -473,6 +476,9 @@ type ChainConfig struct {
 	NexusBlock          *big.Int `json:"nexusBlock,omitempty"`          // Nexus switch block (nil = no fork, 0 = already on syscoin)
 	LibertyBlock        *big.Int `json:"libertyBlock,omitempty"`        // Liberty opcode switch block (nil = no fork, 0 = already on syscoin)
 	VaultMigrationBlock *big.Int `json:"vaultMigrationBlock,omitempty"` // Bridge V2 vault balance migration block (nil = no fork)
+	// VaultManagerV2 is the destination for VaultMigrationBlock balance move.
+	// Per-network so Tanenbaum and mainnet may use different UUPS proxy addresses.
+	VaultManagerV2 common.Address `json:"vaultManagerV2,omitempty"`
 	// Fork scheduling was switched from blocks to timestamps here
 
 	ShanghaiTime *uint64 `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
@@ -871,6 +877,10 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		if c.VaultMigrationBlock.Cmp(c.NexusBlock) < 0 {
 			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock (%v) is before nexusBlock (%v)",
 				c.VaultMigrationBlock, c.NexusBlock)
+		}
+		if c.VaultManagerV2 == (common.Address{}) {
+			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock (%v) set without vaultManagerV2 address",
+				c.VaultMigrationBlock)
 		}
 	}
 

@@ -24,7 +24,7 @@ func TestApplyVaultMigrationHardForkAddsWithoutOverwrite(t *testing.T) {
 	statedb.AddBalance(old, uint256.NewInt(1000), tracing.BalanceChangeUnspecified)
 	statedb.AddBalance(neu, uint256.NewInt(50), tracing.BalanceChangeUnspecified)
 
-	ApplyVaultMigrationHardFork(statedb)
+	ApplyVaultMigrationHardFork(statedb, neu)
 
 	if got := statedb.GetBalance(neu); got.Cmp(uint256.NewInt(1050)) != 0 {
 		t.Fatalf("new vault balance=%s want 1050", got)

@@ -250,7 +250,7 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 	}
 	if miner.chainConfig.VaultMigrationBlock != nil &&
 		miner.chainConfig.VaultMigrationBlock.Cmp(header.Number) == 0 {
-		misc.ApplyVaultMigrationHardFork(env.state)
+		misc.ApplyVaultMigrationHardFork(env.state, miner.chainConfig.VaultManagerV2)
 	}
 	if header.ParentBeaconRoot != nil {
 		core.ProcessBeaconBlockRoot(*header.ParentBeaconRoot, env.evm)
