@@ -891,6 +891,11 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock (%v) still uses stub vaultManagerV2 (%v)",
 				c.VaultMigrationBlock, c.VaultManagerV2)
 		}
+		// from == to is a no-op in migrateVaultBalance; reject accidental self-migration.
+		if c.VaultManagerV2 == VaultManager {
+			return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock (%v) vaultManagerV2 equals current VaultManager (%v)",
+				c.VaultMigrationBlock, c.VaultManagerV2)
+		}
 	}
 
 	// Check that all forks with blobs explicitly define the blob schedule configuration.
