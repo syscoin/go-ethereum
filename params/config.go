@@ -859,6 +859,12 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		}
 	}
 
+	// SYSCOIN: vault migration must not precede Nexus (balance only exists after Nexus).
+	if c.VaultMigrationBlock != nil && c.NexusBlock != nil && c.VaultMigrationBlock.Cmp(c.NexusBlock) < 0 {
+		return fmt.Errorf("unsupported fork ordering: vaultMigrationBlock (%v) is before nexusBlock (%v)",
+			c.VaultMigrationBlock, c.NexusBlock)
+	}
+
 	// Check that all forks with blobs explicitly define the blob schedule configuration.
 	bsc := c.BlobScheduleConfig
 	if bsc == nil {
