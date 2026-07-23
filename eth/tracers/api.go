@@ -1142,6 +1142,23 @@ func overrideConfig(original *params.ChainConfig, override *params.ChainConfig) 
 		copy.VerkleTime = timestamp
 		canon = false
 	}
+	// SYSCOIN — allow debug_standardTraceBlockToFile to simulate vault cutover.
+	if block := override.NexusBlock; block != nil {
+		copy.NexusBlock = block
+		canon = false
+	}
+	if block := override.LibertyBlock; block != nil {
+		copy.LibertyBlock = block
+		canon = false
+	}
+	if block := override.VaultMigrationBlock; block != nil {
+		copy.VaultMigrationBlock = block
+		canon = false
+	}
+	if override.VaultManagerV2 != (common.Address{}) {
+		copy.VaultManagerV2 = override.VaultManagerV2
+		canon = false
+	}
 
 	return copy, canon
 }
