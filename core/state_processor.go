@@ -73,6 +73,9 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	if p.config.NexusBlock != nil && p.config.NexusBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyNexusHardFork(statedb)
 	}
+	if p.config.LibertyBlock != nil && p.config.LibertyBlock.Cmp(block.Number()) == 0 {
+		misc.ApplyLibertyHardFork(statedb)
+	}
 	var (
 		context vm.BlockContext
 		signer  = types.MakeSigner(p.config, header.Number, header.Time)

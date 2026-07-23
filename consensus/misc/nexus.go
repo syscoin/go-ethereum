@@ -17,24 +17,39 @@
 package misc
 
 import (
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/params"
-    "github.com/ethereum/go-ethereum/core/tracing"
-    "github.com/holiman/uint256"
+	"github.com/holiman/uint256"
 )
 
-
-// ApplyNexusHardFork modifies the state database according to the Nexus hard-fork
-// rules, transferring SYS balance from previous VaultManager to new one
+// ApplyNexusHardFork transfers SYS from the pre-Nexus vault to the Nexus vault.
 func ApplyNexusHardFork(statedb *state.StateDB) {
-    // Create the new contract account if it doesn't already exist
-    if !statedb.Exist(params.VaultManager) {
-        statedb.CreateAccount(params.VaultManager)
-    }
+	migrateVaultBalance(statedb, params.VaultManagerNexusOld, params.VaultManager)
+}
 
-    // Transfer the balance from the old contract to the new contract
-    oldBalance := statedb.GetBalance(params.VaultManagerOld)
-    statedb.AddBalance(params.VaultManager, oldBalance, tracing.BalanceIncreaseVaultManagerContract)
-    statedb.SetBalance(params.VaultManagerOld, new(uint256.Int), tracing.BalanceDecreaseVaultManagerAccount)// Reset the old contract's balance
+// ApplyLibertyHardFork transfers SYS from the Nexus-era vault to the Liberty
+// replacement vault at LibertyBlock (shared mainnet/tanenbaum rule).
+//
+// Tanenbaum LibertyBlock is already 906001; activating this requires every
+// tanenbaum node to replay from that height (no TokenFreeze logs after it).
+func ApplyLibertyHardFork(statedb *state.StateDB) {
+	migrateVaultBalance(statedb, params.VaultManager, params.VaultManagerV2)
+}
 
+func migrateVaultBalance(statedb *state.StateDB, from, to common.Address) {
+	if from == to {
+		return
+	}
+	if !statedb.Exist(to) {
+		statedb.CreateAccount(to)
+	}
+	// Copy before mutating `from` so AddBalance cannot observe a zeroed source.
+	oldBalance := new(uint256.Int).Set(statedb.GetBalance(from))
+	if oldBalance.IsZero() {
+		return
+	}
+	statedb.AddBalance(to, oldBalance, tracing.BalanceIncreaseVaultManagerContract)
+	statedb.SetBalance(from, new(uint256.Int), tracing.BalanceDecreaseVaultManagerAccount)
 }

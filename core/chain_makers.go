@@ -393,6 +393,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		if config.NexusBlock != nil && config.NexusBlock.Cmp(b.header.Number) == 0 {
 			misc.ApplyNexusHardFork(statedb)
 		}
+		if config.LibertyBlock != nil && config.LibertyBlock.Cmp(b.header.Number) == 0 {
+			misc.ApplyLibertyHardFork(statedb)
+		}
 		if config.IsPrague(b.header.Number, b.header.Time) || config.IsVerkle(b.header.Number, b.header.Time) {
 			// EIP-2935
 			blockContext := NewEVMBlockContext(b.header, cm, &b.header.Coinbase)
