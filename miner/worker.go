@@ -248,9 +248,9 @@ func (miner *Miner) prepareWork(genParams *generateParams, witness bool) (*envir
 		miner.chainConfig.NexusBlock.Cmp(header.Number) == 0 {
 		misc.ApplyNexusHardFork(env.state)
 	}
-	if miner.chainConfig.LibertyBlock != nil &&
-		miner.chainConfig.LibertyBlock.Cmp(header.Number) == 0 {
-		misc.ApplyLibertyHardFork(env.state)
+	if miner.chainConfig.VaultMigrationBlock != nil &&
+		miner.chainConfig.VaultMigrationBlock.Cmp(header.Number) == 0 {
+		misc.ApplyVaultMigrationHardFork(env.state)
 	}
 	if header.ParentBeaconRoot != nil {
 		core.ProcessBeaconBlockRoot(*header.ParentBeaconRoot, env.evm)

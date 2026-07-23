@@ -29,12 +29,13 @@ func ApplyNexusHardFork(statedb *state.StateDB) {
 	migrateVaultBalance(statedb, params.VaultManagerNexusOld, params.VaultManager)
 }
 
-// ApplyLibertyHardFork transfers SYS from the Nexus-era vault to the Liberty
-// replacement vault at LibertyBlock (shared mainnet/tanenbaum rule).
+// ApplyVaultMigrationHardFork transfers SYS from the Nexus-era vault to the V2
+// replacement vault at VaultMigrationBlock.
 //
-// Tanenbaum LibertyBlock is already 906001; activating this requires every
-// tanenbaum node to replay from that height (no TokenFreeze logs after it).
-func ApplyLibertyHardFork(statedb *state.StateDB) {
+// This is intentionally separate from LibertyBlock: Tanenbaum already activated
+// Liberty opcodes at 906001, so replaying that historical block with a new
+// balance mutation would invalidate existing state roots.
+func ApplyVaultMigrationHardFork(statedb *state.StateDB) {
 	migrateVaultBalance(statedb, params.VaultManager, params.VaultManagerV2)
 }
 
@@ -42,13 +43,13 @@ func migrateVaultBalance(statedb *state.StateDB, from, to common.Address) {
 	if from == to {
 		return
 	}
-	if !statedb.Exist(to) {
-		statedb.CreateAccount(to)
-	}
-	// Copy before mutating `from` so AddBalance cannot observe a zeroed source.
+	// Exact no-op when source has zero balance: do not CreateAccount(to).
 	oldBalance := new(uint256.Int).Set(statedb.GetBalance(from))
 	if oldBalance.IsZero() {
 		return
+	}
+	if !statedb.Exist(to) {
+		statedb.CreateAccount(to)
 	}
 	statedb.AddBalance(to, oldBalance, tracing.BalanceIncreaseVaultManagerContract)
 	statedb.SetBalance(from, new(uint256.Int), tracing.BalanceDecreaseVaultManagerAccount)

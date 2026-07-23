@@ -91,6 +91,7 @@ var (
 		ShanghaiBlock:           big.NewInt(268500),
 		NexusBlock:              big.NewInt(692846),
 		LibertyBlock:            nil,
+		VaultMigrationBlock:     nil, // set to future F when V2 vault proxy is deployed
 		LondonBlock:             big.NewInt(1),
 		TerminalTotalDifficulty: big.NewInt(1),
 		//ShanghaiTime:                  newUint64(1679618404),
@@ -117,9 +118,10 @@ var (
 		RolluxBlock:         big.NewInt(182500),
 		ShanghaiBlock:       big.NewInt(223000),
 		//ShanghaiTime:        newUint64(1675118284),
-		NexusBlock:   big.NewInt(665001),
-		LibertyBlock: big.NewInt(906001),
-		LondonBlock:  big.NewInt(1),
+		NexusBlock:          big.NewInt(665001),
+		LibertyBlock:        big.NewInt(906001), // opcode fork only; already historical
+		VaultMigrationBlock: nil,                // future F2; do not reuse LibertyBlock
+		LondonBlock:         big.NewInt(1),
 		//CancunTime:          newUint64(1675118284),
 		TerminalTotalDifficulty: big.NewInt(1),
 		Ethash:                  nil,
@@ -465,8 +467,9 @@ type ChainConfig struct {
 	SyscoinBlock  *big.Int `json:"syscoinBlock,omitempty"`  // Syscoin switch block (nil = no fork, 0 = already on syscoin)
 	RolluxBlock   *big.Int `json:"rolluxBlock,omitempty"`   // Rollux switch block (nil = no fork, 0 = already on syscoin)
 	ShanghaiBlock *big.Int `json:"shanghaiBlock,omitempty"` // Rollux switch block (nil = no fork, 0 = already on syscoin)
-	NexusBlock    *big.Int `json:"nexusBlock,omitempty"`    // Nexus switch block (nil = no fork, 0 = already on syscoin)
-	LibertyBlock  *big.Int `json:"libertyBlock,omitempty"`  // Liberty opcode switch block (nil = no fork, 0 = already on syscoin)
+	NexusBlock          *big.Int `json:"nexusBlock,omitempty"`          // Nexus switch block (nil = no fork, 0 = already on syscoin)
+	LibertyBlock        *big.Int `json:"libertyBlock,omitempty"`        // Liberty opcode switch block (nil = no fork, 0 = already on syscoin)
+	VaultMigrationBlock *big.Int `json:"vaultMigrationBlock,omitempty"` // Bridge V2 vault balance migration block (nil = no fork)
 	// Fork scheduling was switched from blocks to timestamps here
 
 	ShanghaiTime *uint64 `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
@@ -709,6 +712,11 @@ func (c *ChainConfig) IsNexus(num *big.Int) bool {
 // SYSCOIN
 func (c *ChainConfig) IsLiberty(num *big.Int) bool {
 	return isBlockForked(c.LibertyBlock, num)
+}
+
+// IsVaultMigration returns whether num is at or past the bridge V2 vault migration block.
+func (c *ChainConfig) IsVaultMigration(num *big.Int) bool {
+	return isBlockForked(c.VaultMigrationBlock, num)
 }
 
 // IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
@@ -960,6 +968,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	}
 	if isForkBlockIncompatible(c.LibertyBlock, newcfg.LibertyBlock, headNumber) {
 		return newBlockCompatError("Liberty fork block", c.LibertyBlock, newcfg.LibertyBlock)
+	}
+	if isForkBlockIncompatible(c.VaultMigrationBlock, newcfg.VaultMigrationBlock, headNumber) {
+		return newBlockCompatError("Vault migration fork block", c.VaultMigrationBlock, newcfg.VaultMigrationBlock)
 	}
 	if isForkTimestampIncompatible(c.ShanghaiTime, newcfg.ShanghaiTime, headTimestamp) {
 		return newTimestampCompatError("Shanghai fork timestamp", c.ShanghaiTime, newcfg.ShanghaiTime)

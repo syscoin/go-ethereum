@@ -73,8 +73,8 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	if p.config.NexusBlock != nil && p.config.NexusBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyNexusHardFork(statedb)
 	}
-	if p.config.LibertyBlock != nil && p.config.LibertyBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyLibertyHardFork(statedb)
+	if p.config.VaultMigrationBlock != nil && p.config.VaultMigrationBlock.Cmp(block.Number()) == 0 {
+		misc.ApplyVaultMigrationHardFork(statedb)
 	}
 	var (
 		context vm.BlockContext
