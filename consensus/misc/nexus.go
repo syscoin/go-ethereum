@@ -25,13 +25,18 @@ import (
 )
 
 // ApplyNexusHardFork transfers SYS from the pre-Nexus vault to the Nexus vault.
+// Historical Nexus behavior is preserved for zero balances: the destination
+// account is created and the source is touched via SetBalance.
 func ApplyNexusHardFork(statedb *state.StateDB) {
-	migrateVaultBalance(statedb, params.VaultManagerNexusOld, params.VaultManager)
+	migrateVaultBalance(statedb, params.VaultManagerNexusOld, params.VaultManager, false)
 }
 
 // ApplyVaultMigrationHardFork transfers SYS from the Nexus-era vault to vaultV2
 // at VaultMigrationBlock. vaultV2 should be the per-network ChainConfig address
 // (falls back to params.VaultManagerV2 when zero).
+//
+// Zero source balance is an exact no-op (unlike Nexus) so unused cutovers do
+// not create empty destination accounts.
 //
 // This is intentionally separate from LibertyBlock: Tanenbaum already activated
 // Liberty opcodes at 906001, so replaying that historical block with a new
@@ -40,21 +45,25 @@ func ApplyVaultMigrationHardFork(statedb *state.StateDB, vaultV2 common.Address)
 	if vaultV2 == (common.Address{}) {
 		vaultV2 = params.VaultManagerV2
 	}
-	migrateVaultBalance(statedb, params.VaultManager, vaultV2)
+	migrateVaultBalance(statedb, params.VaultManager, vaultV2, true)
 }
 
-func migrateVaultBalance(statedb *state.StateDB, from, to common.Address) {
+// migrateVaultBalance moves SYS from -> to. If exactNoopOnZero is true and the
+// source balance is zero, the state is left untouched. Otherwise (Nexus), a
+// missing destination is created and the source is zeroed even when empty.
+func migrateVaultBalance(statedb *state.StateDB, from, to common.Address, exactNoopOnZero bool) {
 	if from == to {
 		return
 	}
-	// Exact no-op when source has zero balance: do not CreateAccount(to).
 	oldBalance := new(uint256.Int).Set(statedb.GetBalance(from))
-	if oldBalance.IsZero() {
+	if oldBalance.IsZero() && exactNoopOnZero {
 		return
 	}
 	if !statedb.Exist(to) {
 		statedb.CreateAccount(to)
 	}
-	statedb.AddBalance(to, oldBalance, tracing.BalanceIncreaseVaultManagerContract)
+	if !oldBalance.IsZero() {
+		statedb.AddBalance(to, oldBalance, tracing.BalanceIncreaseVaultManagerContract)
+	}
 	statedb.SetBalance(from, new(uint256.Int), tracing.BalanceDecreaseVaultManagerAccount)
 }

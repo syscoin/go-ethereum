@@ -34,19 +34,32 @@ func TestApplyVaultMigrationHardForkAddsWithoutOverwrite(t *testing.T) {
 	}
 }
 
-func TestMigrateVaultBalanceZeroIsExactNoop(t *testing.T) {
+func TestMigrateVaultBalanceZeroIsExactNoopForV2(t *testing.T) {
 	statedb, _ := state.New(types.EmptyRootHash, state.NewDatabaseForTesting())
 	from := params.VaultManager
 	to := params.VaultManagerV2
 	statedb.CreateAccount(from)
-	// Zero balance on from; to must remain non-existent.
 	rootBefore := statedb.IntermediateRoot(false)
-	migrateVaultBalance(statedb, from, to)
+	migrateVaultBalance(statedb, from, to, true)
 	if statedb.Exist(to) {
-		t.Fatal("zero-balance migrate created destination account")
+		t.Fatal("zero-balance V2 migrate created destination account")
 	}
 	if rootAfter := statedb.IntermediateRoot(false); rootAfter != rootBefore {
-		t.Fatalf("zero-balance migrate changed state root: before=%s after=%s", rootBefore, rootAfter)
+		t.Fatalf("zero-balance V2 migrate changed state root: before=%s after=%s", rootBefore, rootAfter)
+	}
+}
+
+func TestNexusZeroBalanceCreatesDestination(t *testing.T) {
+	statedb, _ := state.New(types.EmptyRootHash, state.NewDatabaseForTesting())
+	from := params.VaultManagerNexusOld
+	to := params.VaultManager
+	statedb.CreateAccount(from)
+	ApplyNexusHardFork(statedb)
+	if !statedb.Exist(to) {
+		t.Fatal("Nexus zero-balance migrate did not create destination")
+	}
+	if got := statedb.GetBalance(from); !got.IsZero() {
+		t.Fatalf("source balance=%s want 0", got)
 	}
 }
 
@@ -55,7 +68,7 @@ func TestMigrateVaultBalanceSkipsIdenticalAddresses(t *testing.T) {
 	addr := common.HexToAddress("0xabc0000000000000000000000000000000000001")
 	statedb.CreateAccount(addr)
 	statedb.AddBalance(addr, uint256.NewInt(7), tracing.BalanceChangeUnspecified)
-	migrateVaultBalance(statedb, addr, addr)
+	migrateVaultBalance(statedb, addr, addr, true)
 	if got := statedb.GetBalance(addr); got.Cmp(uint256.NewInt(7)) != 0 {
 		t.Fatalf("balance changed on self-migrate: %s", got)
 	}
