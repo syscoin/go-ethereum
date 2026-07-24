@@ -468,10 +468,16 @@ func (eth *Ethereum) flushBufferedBlocks() error {
     }
 
     if _, err := eth.blockchain.InsertChain(blockBuffer); err != nil {
+        // Drop the flush batch on failure. InsertChain may have committed a
+        // prefix; those blocks are on disk and contiguity continues from tip.
+        // Leaving the rejected entry buffered wedges recovery: a valid
+        // replacement at the same height looks non-contiguous, and an exact
+        // retry of the failed pair would return success without inserting.
+        eth.blockConnectBuffer = eth.blockConnectBuffer[:0]
         return err
     }
 
-    eth.blockConnectBuffer = eth.blockConnectBuffer[:0] // safely clear buffer
+    eth.blockConnectBuffer = eth.blockConnectBuffer[:0]
     return nil
 }
 

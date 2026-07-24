@@ -385,6 +385,9 @@ func TestKnownNEVMBlockReassociatedAfterRollbackRejectsStaleSYSDependentState(t 
 	if err := eth.AddBlock(makeNEVMConnect(e2, sysB2)); err == nil {
 		t.Fatal("reconnect known e2/B2 unexpectedly succeeded with stale A1 state root")
 	}
+	if len(eth.blockConnectBuffer) != 0 {
+		t.Fatalf("rejected e2/B2 left %d buffered entries; replacement connects would wedge", len(eth.blockConnectBuffer))
+	}
 	if eth.blockchain.CurrentBlock().Hash() != e1.Hash() {
 		t.Fatalf("tip after rejected e2/B2: got %x want e1 %x", eth.blockchain.CurrentBlock().Hash(), e1.Hash())
 	}
@@ -393,5 +396,21 @@ func TestKnownNEVMBlockReassociatedAfterRollbackRejectsStaleSYSDependentState(t 
 	}
 	if got := eth.blockchain.ReadSYSHash(2); len(got) != 0 {
 		t.Fatalf("SYSHash(2) should remain unset after rejected e2/B2, got %x", got)
+	}
+
+	// Valid B-context successor must still be connectable after the reject.
+	e2b := expectedB[0]
+	if err := eth.AddBlock(makeNEVMConnect(e2b, sysB2)); err != nil {
+		t.Fatalf("connect valid e2b/B2 after stale reject: %v", err)
+	}
+	if eth.blockchain.CurrentBlock().Hash() != e2b.Hash() {
+		t.Fatalf("tip after e2b/B2: got %x want e2b %x", eth.blockchain.CurrentBlock().Hash(), e2b.Hash())
+	}
+	stateB, err := eth.blockchain.State()
+	if err != nil {
+		t.Fatalf("state after e2b: %v", err)
+	}
+	if got := stateB.GetState(probe, common.Hash{}); got != common.BytesToHash(sysB1) {
+		t.Fatalf("probe after valid e2b=%x want B1=%x", got, sysB1)
 	}
 }
