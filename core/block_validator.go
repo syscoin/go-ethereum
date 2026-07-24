@@ -51,7 +51,14 @@ func NewBlockValidator(config *params.ChainConfig, blockchain *BlockChain) *Bloc
 func (v *BlockValidator) ValidateBody(block *types.Block) error {
 	// Check whether the block is already imported.
 	if v.bc.HasBlockAndState(block.Hash(), block.NumberU64()) {
-		return ErrKnownBlock
+		// SYSCOIN: Core pairs a SYSBLOCKHASH with each NEVM block via NevmBlockConnect.
+		// After a matched disconnect, the same NEVM bytes may be reconnected under a
+		// different Core hash. Skipping execution would keep the old SYS-dependent
+		// state while writeNEVMData rewrites the mapping (history-dependent consensus).
+		// Force re-execution whenever an external Core pair is supplied.
+		if block.NevmBlockConnect == nil {
+			return ErrKnownBlock
+		}
 	}
 
 	// Header validity is known at this point. Here we verify that uncles, transactions
