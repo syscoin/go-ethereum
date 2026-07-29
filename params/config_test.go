@@ -50,6 +50,24 @@ func TestCheckConfigForkOrderVaultMigration(t *testing.T) {
 	}
 }
 
+func TestTanenbaumVaultMigrationConfig(t *testing.T) {
+	const expectedMigrationBlock int64 = 947000
+	expectedVault := common.HexToAddress("0x28bD37C0926575f2568ea8f297c0745EF16174Ab")
+
+	if TanenbaumChainConfig.VaultMigrationBlock == nil ||
+		TanenbaumChainConfig.VaultMigrationBlock.Cmp(big.NewInt(expectedMigrationBlock)) != 0 {
+		t.Fatalf("VaultMigrationBlock=%v want %d",
+			TanenbaumChainConfig.VaultMigrationBlock, expectedMigrationBlock)
+	}
+	if TanenbaumChainConfig.VaultManagerV2 != expectedVault {
+		t.Fatalf("VaultManagerV2=%s want %s",
+			TanenbaumChainConfig.VaultManagerV2, expectedVault)
+	}
+	if err := TanenbaumChainConfig.CheckConfigForkOrder(); err != nil {
+		t.Fatalf("Tanenbaum bridge V2 config rejected: %v", err)
+	}
+}
+
 func TestCheckCompatible(t *testing.T) {
 	type test struct {
 		stored, new   *ChainConfig

@@ -121,11 +121,9 @@ var (
 		//ShanghaiTime:        newUint64(1675118284),
 		NexusBlock:          big.NewInt(665001),
 		LibertyBlock: big.NewInt(906001), // opcode fork only; already historical
-		// Intentionally nil until Bridge V2 cutover: a past LibertyBlock must not
-		// migrate vault balances. Set to future NEVM height F when the V2 proxy
-		// is deployed (paired with Core nBridgeV2StartBlock).
-		VaultMigrationBlock: nil,
-		// VaultManagerV2 left zero until the real proxy address is set with F.
+		// Bridge V2 cutover F, paired with Core testnet H=1786999.
+		VaultMigrationBlock: big.NewInt(947000),
+		VaultManagerV2:      common.HexToAddress("0x28bD37C0926575f2568ea8f297c0745EF16174Ab"),
 		LondonBlock:         big.NewInt(1),
 		//CancunTime:          newUint64(1675118284),
 		TerminalTotalDifficulty: big.NewInt(1),
