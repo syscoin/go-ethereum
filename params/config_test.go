@@ -68,6 +68,29 @@ func TestTanenbaumVaultMigrationConfig(t *testing.T) {
 	}
 }
 
+func TestMainnetVaultMigrationConfig(t *testing.T) {
+	const expectedMigrationBlock int64 = 975316
+	expectedVault := common.HexToAddress("0x28bD37C0926575f2568ea8f297c0745EF16174Ab")
+
+	if SyscoinChainConfig.LibertyBlock == nil ||
+		SyscoinChainConfig.LibertyBlock.Cmp(big.NewInt(expectedMigrationBlock)) != 0 {
+		t.Fatalf("LibertyBlock=%v want %d",
+			SyscoinChainConfig.LibertyBlock, expectedMigrationBlock)
+	}
+	if SyscoinChainConfig.VaultMigrationBlock == nil ||
+		SyscoinChainConfig.VaultMigrationBlock.Cmp(big.NewInt(expectedMigrationBlock)) != 0 {
+		t.Fatalf("VaultMigrationBlock=%v want %d",
+			SyscoinChainConfig.VaultMigrationBlock, expectedMigrationBlock)
+	}
+	if SyscoinChainConfig.VaultManagerV2 != expectedVault {
+		t.Fatalf("VaultManagerV2=%s want %s",
+			SyscoinChainConfig.VaultManagerV2, expectedVault)
+	}
+	if err := SyscoinChainConfig.CheckConfigForkOrder(); err != nil {
+		t.Fatalf("mainnet bridge V2 config rejected: %v", err)
+	}
+}
+
 func TestCheckCompatible(t *testing.T) {
 	type test struct {
 		stored, new   *ChainConfig
