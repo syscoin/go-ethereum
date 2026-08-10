@@ -73,26 +73,29 @@ var (
 	}
 	// SYSCOIN
 	SyscoinChainConfig = &ChainConfig{
-		ChainID:                 big.NewInt(57),
-		HomesteadBlock:          big.NewInt(0),
-		DAOForkBlock:            nil,
-		DAOForkSupport:          false,
-		EIP150Block:             big.NewInt(0),
-		EIP155Block:             big.NewInt(0),
-		EIP158Block:             big.NewInt(0),
-		ByzantiumBlock:          big.NewInt(0),
-		ConstantinopleBlock:     big.NewInt(0),
-		PetersburgBlock:         big.NewInt(0),
-		IstanbulBlock:           big.NewInt(0),
-		MuirGlacierBlock:        big.NewInt(0),
-		BerlinBlock:             big.NewInt(0),
-		SyscoinBlock:            big.NewInt(0),
-		RolluxBlock:             big.NewInt(268500),
-		ShanghaiBlock:           big.NewInt(268500),
-		NexusBlock:              big.NewInt(692846),
-		LibertyBlock:            nil,
-		VaultMigrationBlock: nil, // set to future F when V2 vault proxy is deployed
-		// VaultManagerV2 left zero until the real proxy address is set with F.
+		ChainID:             big.NewInt(57),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		DAOForkSupport:      false,
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		SyscoinBlock:        big.NewInt(0),
+		RolluxBlock:         big.NewInt(268500),
+		ShanghaiBlock:       big.NewInt(268500),
+		NexusBlock:          big.NewInt(692846),
+		// Liberty rules and the Bridge V2 balance migration activate together.
+		// This NEVM block is committed one Core block before the paired Core
+		// manager cutover H=2292816, so F's roots are readable at H.
+		LibertyBlock:            big.NewInt(975316),
+		VaultMigrationBlock:     big.NewInt(975316),
+		VaultManagerV2:          common.HexToAddress("0x28bD37C0926575f2568ea8f297c0745EF16174Ab"),
 		LondonBlock:             big.NewInt(1),
 		TerminalTotalDifficulty: big.NewInt(1),
 		//ShanghaiTime:                  newUint64(1679618404),
@@ -119,7 +122,7 @@ var (
 		RolluxBlock:         big.NewInt(182500),
 		ShanghaiBlock:       big.NewInt(223000),
 		//ShanghaiTime:        newUint64(1675118284),
-		NexusBlock:          big.NewInt(665001),
+		NexusBlock:   big.NewInt(665001),
 		LibertyBlock: big.NewInt(906001), // opcode fork only; already historical
 		// Bridge V2 cutover F, paired with Core testnet H=1786999.
 		VaultMigrationBlock: big.NewInt(947000),
@@ -467,9 +470,9 @@ type ChainConfig struct {
 	GrayGlacierBlock    *big.Int `json:"grayGlacierBlock,omitempty"`    // Eip-5133 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	MergeNetsplitBlock  *big.Int `json:"mergeNetsplitBlock,omitempty"`  // Virtual fork after The Merge to use as a network splitter
 	// SYSCOIN
-	SyscoinBlock  *big.Int `json:"syscoinBlock,omitempty"`  // Syscoin switch block (nil = no fork, 0 = already on syscoin)
-	RolluxBlock   *big.Int `json:"rolluxBlock,omitempty"`   // Rollux switch block (nil = no fork, 0 = already on syscoin)
-	ShanghaiBlock *big.Int `json:"shanghaiBlock,omitempty"` // Rollux switch block (nil = no fork, 0 = already on syscoin)
+	SyscoinBlock        *big.Int `json:"syscoinBlock,omitempty"`        // Syscoin switch block (nil = no fork, 0 = already on syscoin)
+	RolluxBlock         *big.Int `json:"rolluxBlock,omitempty"`         // Rollux switch block (nil = no fork, 0 = already on syscoin)
+	ShanghaiBlock       *big.Int `json:"shanghaiBlock,omitempty"`       // Rollux switch block (nil = no fork, 0 = already on syscoin)
 	NexusBlock          *big.Int `json:"nexusBlock,omitempty"`          // Nexus switch block (nil = no fork, 0 = already on syscoin)
 	LibertyBlock        *big.Int `json:"libertyBlock,omitempty"`        // Liberty opcode switch block (nil = no fork, 0 = already on syscoin)
 	VaultMigrationBlock *big.Int `json:"vaultMigrationBlock,omitempty"` // Bridge V2 vault balance migration block (nil = no fork)
