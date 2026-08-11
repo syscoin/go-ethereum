@@ -32,6 +32,8 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/consensus"
+	// SYSCOIN
+	"github.com/ethereum/go-ethereum/consensus/beacon"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -638,6 +640,60 @@ func (api *BlockChainAPI) GetBlockReceipts(ctx context.Context, blockNrOrHash rp
 	}
 
 	return result, nil
+}
+
+// SYSCOIN
+type effectiveMinerRewardResult struct {
+	BlockHash    common.Hash    `json:"blockHash"`
+	BlockNumber  hexutil.Uint64 `json:"blockNumber"`
+	Miner        common.Address `json:"miner"`
+	StaticReward *hexutil.Big   `json:"staticReward"`
+	PriorityFees *hexutil.Big   `json:"priorityFees"`
+	TotalReward  *hexutil.Big   `json:"totalReward"`
+}
+
+// SYSCOIN
+// GetEffectiveMinerReward returns the effective miner reward for a block.
+// Reward is composed of static Syscoin subsidy (if active) + realized priority fees.
+func (api *BlockChainAPI) GetEffectiveMinerReward(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*effectiveMinerRewardResult, error) {
+	block, err := api.b.BlockByNumberOrHash(ctx, blockNrOrHash)
+	if block == nil || err != nil {
+		return nil, err
+	}
+	receipts, err := api.b.GetReceipts(ctx, block.Hash())
+	if err != nil {
+		return nil, err
+	}
+	txs := block.Transactions()
+	if len(txs) != len(receipts) {
+		return nil, fmt.Errorf("receipts length mismatch: %d vs %d", len(txs), len(receipts))
+	}
+
+	baseFee := block.BaseFee()
+	priorityFees := new(big.Int)
+	for i, tx := range txs {
+		effectiveTip := tx.EffectiveGasTipValue(baseFee)
+		if effectiveTip.Sign() < 0 {
+			effectiveTip = common.Big0
+		}
+		priorityFee := new(big.Int).Mul(new(big.Int).SetUint64(receipts[i].GasUsed), effectiveTip)
+		priorityFees.Add(priorityFees, priorityFee)
+	}
+
+	staticReward := new(big.Int)
+	if api.b.ChainConfig().IsSyscoin(block.Number()) {
+		staticReward = beacon.SyscoinBlockReward.ToBig()
+	}
+	totalReward := new(big.Int).Add(staticReward, priorityFees)
+
+	return &effectiveMinerRewardResult{
+		BlockHash:    block.Hash(),
+		BlockNumber:  hexutil.Uint64(block.NumberU64()),
+		Miner:        block.Coinbase(),
+		StaticReward: (*hexutil.Big)(staticReward),
+		PriorityFees: (*hexutil.Big)(priorityFees),
+		TotalReward:  (*hexutil.Big)(totalReward),
+	}, nil
 }
 
 // ChainContextBackend provides methods required to implement ChainContext.

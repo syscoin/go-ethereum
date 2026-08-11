@@ -3717,6 +3717,60 @@ func TestRPCGetBlockReceipts(t *testing.T) {
 	}
 }
 
+// SYSCOIN
+func TestRPCGetEffectiveMinerReward(t *testing.T) {
+	t.Parallel()
+
+	var (
+		backend, _ = setupReceiptBackend(t, 6)
+		api        = NewBlockChainAPI(backend)
+		ctx        = context.Background()
+	)
+
+	// Empty block: tips are zero, total must equal static reward.
+	emptyReward, err := api.GetEffectiveMinerReward(ctx, rpc.BlockNumberOrHashWithNumber(0))
+	require.NoError(t, err)
+	require.NotNil(t, emptyReward)
+	emptyExpectedStatic := new(big.Int)
+	if backend.ChainConfig().IsSyscoin(big.NewInt(0)) {
+		emptyExpectedStatic = beacon.SyscoinBlockReward.ToBig()
+	}
+	require.Equal(t, 0, (*big.Int)(emptyReward.PriorityFees).Sign())
+	require.Equal(t, 0, (*big.Int)(emptyReward.StaticReward).Cmp(emptyExpectedStatic))
+	require.Equal(t, 0, (*big.Int)(emptyReward.TotalReward).Cmp(emptyExpectedStatic))
+
+	// Dynamic-fee block: verify reward = static subsidy + realized tips.
+	block, err := backend.BlockByNumber(ctx, rpc.BlockNumber(4))
+	require.NoError(t, err)
+	require.NotNil(t, block)
+	reward, err := api.GetEffectiveMinerReward(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(4)))
+	require.NoError(t, err)
+	require.NotNil(t, reward)
+
+	receipts, err := backend.GetReceipts(ctx, block.Hash())
+	require.NoError(t, err)
+	require.Len(t, receipts, len(block.Transactions()))
+	require.NotEmpty(t, block.Transactions())
+
+	tip := block.Transactions()[0].EffectiveGasTipValue(block.BaseFee())
+	if tip.Sign() < 0 {
+		tip = common.Big0
+	}
+	expectedStatic := new(big.Int)
+	if backend.ChainConfig().IsSyscoin(block.Number()) {
+		expectedStatic = beacon.SyscoinBlockReward.ToBig()
+	}
+	expectedPriority := new(big.Int).Mul(new(big.Int).SetUint64(receipts[0].GasUsed), tip)
+	expectedTotal := new(big.Int).Add(expectedStatic, expectedPriority)
+
+	require.Equal(t, block.Hash(), reward.BlockHash)
+	require.Equal(t, hexutil.Uint64(block.NumberU64()), reward.BlockNumber)
+	require.Equal(t, block.Coinbase(), reward.Miner)
+	require.Equal(t, 0, (*big.Int)(reward.StaticReward).Cmp(expectedStatic))
+	require.Equal(t, 0, (*big.Int)(reward.PriorityFees).Cmp(expectedPriority))
+	require.Equal(t, 0, (*big.Int)(reward.TotalReward).Cmp(expectedTotal))
+}
+
 type precompileContract struct{}
 
 func (p *precompileContract) RequiredGas(input []byte) uint64 { return 0 }
