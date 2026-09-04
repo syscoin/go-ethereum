@@ -20,10 +20,12 @@ new canonical block, up to 50,001 blocks. A rewind crossing the pre-upgrade or
 pruned history floor fails closed and requires resynchronization. Resetting to
 genesis remains supported.
 
-A paired Core disconnect preflights this history before moving the head. An
-unavailable rollback returns an error without changing the head or membership,
-so the existing database remains restartable. It does not recover missing
-journals; ensure the required rollback history is available before activation.
+A paired Core disconnect preflights this history and requires available parent
+state before moving the head. It commits head/canonical/transaction indexes and
+DA/SYS/BTC/NEVM rollback metadata in one database batch under the chain lock,
+then publishes caches, head markers and events. A rejected or failed batch leaves
+the head and metadata unchanged. This does not recover missing journals or
+unavailable parent state; ensure rollback history is available before activation.
 
 This repair covers only DA-hash membership. Generic `SetHead` does not have the
 Core payloads needed to undo every Syscoin hash, BTC checkpoint, or NEVM address
@@ -32,6 +34,6 @@ generic rewind is not a complete Syscoin metadata recovery procedure.
 
 Syscoin imports must extend the current canonical head through Core's paired
 connect path. Execution-only side imports and direct sidechain promotion are
-rejected; `SetCanonical` permits only the current head or the immediate parent
-step used by paired disconnect. Same-height DA writes are exact retries only,
+rejected; `SetCanonical` permits only the current head. Paired disconnects use
+the atomic Core rollback path. Same-height DA writes are exact retries only,
 not replacements; a different pairing requires disconnect followed by reconnect.

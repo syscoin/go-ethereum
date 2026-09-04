@@ -537,11 +537,6 @@ func (bc *BlockChain) GetNEVMAddress(address common.Address) []byte {
 	return bc.hc.GetNEVMAddress(address)
 }
 
-// SYSCOIN: NewSyscoinCacheBatch defers metadata cache updates until commit.
-func (bc *BlockChain) NewSyscoinCacheBatch() ethdb.Batch {
-	return bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
-}
-
 func (bc *BlockChain) StoreNEVMAddress(db ethdb.KeyValueWriter, address common.Address, height uint32) {
 	bc.hc.StoreNEVMAddress(db, address, height)
 }
@@ -568,10 +563,6 @@ func (bc *BlockChain) DeleteDataHashes(db ethdb.KeyValueWriter, n uint64) {
 	bc.hc.DeleteDataHashes(db, n)
 }
 
-// SYSCOIN: return recoverable DA rollback errors to canonical-head callers.
-func (bc *BlockChain) TryDeleteDataHashes(db ethdb.KeyValueWriter, n uint64) error {
-	return bc.hc.TryDeleteDataHashes(db, n)
-}
 func (bc *BlockChain) DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
 	bc.hc.DeleteSYSHash(db, n)
 }

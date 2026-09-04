@@ -62,9 +62,7 @@ func TestSyscoinFailedDisconnectBatchPreservesCachesAndRetries(t *testing.T) {
 		t.Fatalf("expected failed disconnect, got %v", err)
 	}
 	check(true)
-	// Exercise the exported constructor used by Ethereum.DeleteBlock as well.
-	bc := &BlockChain{db: hc.chainDb, hc: hc}
-	retry := bc.NewSyscoinCacheBatch()
+	retry := hc.newSyscoinCacheBatch(hc.chainDb.NewBatch())
 	disconnect(retry)
 	check(true)
 	if err := retry.Write(); err != nil {

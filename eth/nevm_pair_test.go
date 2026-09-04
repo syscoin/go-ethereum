@@ -24,20 +24,18 @@ import (
 
 func newNEVMPairTestEthereum(t *testing.T, flushEveryBlock bool) (*Ethereum, *core.Genesis, *ethash.Ethash) {
 	t.Helper()
+	// SYSCOIN: exercise the same paired-import/rollback guards as production.
+	config := *params.AllEthashProtocolChanges
+	config.SyscoinBlock = big.NewInt(0)
 	gspec := &core.Genesis{
 		BaseFee: big.NewInt(params.InitialBaseFee),
-		Config:  params.AllEthashProtocolChanges,
+		Config:  &config,
 	}
 	engine := ethash.NewFaker()
 	db := rawdb.NewMemoryDatabase()
 	chain, err := core.NewBlockChain(db, core.DefaultCacheConfigWithScheme(rawdb.HashScheme), gspec, nil, engine, vm.Config{}, nil)
 	if err != nil {
 		t.Fatalf("new chain: %v", err)
-	}
-	// This helper uses a generic Ethereum config while exercising Syscoin-only
-	// metadata paths, so initialize the DA index explicitly.
-	if err := rawdb.EnsureDataHashIndex(db, chain.CurrentBlock().Number.Uint64()); err != nil {
-		t.Fatalf("initialize data-hash index: %v", err)
 	}
 	t.Cleanup(func() { chain.Stop() })
 
@@ -365,6 +363,8 @@ func TestUnpairedTipZeroSysHashRetryRejected(t *testing.T) {
 
 	_, blocks, _ := core.GenerateChainWithGenesis(gspec, engine, 1, nil)
 	e1 := blocks[0]
+	// SYSCOIN: seed an incomplete pairing through the core-only fixture.
+	e1.NevmBlockConnect = makeNEVMConnect(e1, nil)
 	if _, err := eth.blockchain.InsertChain([]*types.Block{e1}); err != nil {
 		t.Fatalf("insert unpaired tip: %v", err)
 	}
@@ -386,7 +386,8 @@ func TestDisconnectZeroSysHashRejected(t *testing.T) {
 
 	_, blocks, _ := core.GenerateChainWithGenesis(gspec, engine, 1, nil)
 	e1 := blocks[0]
-	// Insert without NevmBlockConnect so tip has no SYSHash pairing.
+	// SYSCOIN: seed an incomplete pairing through the core-only fixture.
+	e1.NevmBlockConnect = makeNEVMConnect(e1, nil)
 	if _, err := eth.blockchain.InsertChain([]*types.Block{e1}); err != nil {
 		t.Fatalf("insert unpaired tip: %v", err)
 	}

@@ -1150,17 +1150,28 @@ func (bc *BlockChain) ExportN(w io.Writer, first uint64, last uint64) error {
 func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	// Add the block to the canonical chain number scheme and mark as the head
 	batch := bc.db.NewBatch()
-	rawdb.WriteHeadHeaderHash(batch, block.Hash())
-	rawdb.WriteHeadFastBlockHash(batch, block.Hash())
-	rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64())
-	rawdb.WriteTxLookupEntriesByBlock(batch, block)
-	rawdb.WriteHeadBlockHash(batch, block.Hash())
+	bc.writeHeadBlockMarkers(batch, block)
 
 	// Flush the whole batch into the disk, exit the node if failed
 	if err := batch.Write(); err != nil {
 		log.Crit("Failed to update chain indexes and markers", "err", err)
 	}
-	// Update all in-memory chain markers in the last step
+	bc.publishHeadBlock(block)
+}
+
+// SYSCOIN: writeHeadBlockMarkers lets a paired disconnect commit its metadata
+// and canonical head markers in one database batch.
+func (bc *BlockChain) writeHeadBlockMarkers(batch ethdb.KeyValueWriter, block *types.Block) {
+	rawdb.WriteHeadHeaderHash(batch, block.Hash())
+	rawdb.WriteHeadFastBlockHash(batch, block.Hash())
+	rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64())
+	rawdb.WriteTxLookupEntriesByBlock(batch, block)
+	rawdb.WriteHeadBlockHash(batch, block.Hash())
+}
+
+// SYSCOIN: publishHeadBlock updates in-memory head markers after their database
+// batch is durable. The caller must hold chainmu.
+func (bc *BlockChain) publishHeadBlock(block *types.Block) {
 	bc.hc.SetCurrentHeader(block.Header())
 
 	bc.currentSnapBlock.Store(block.Header())
@@ -2516,16 +2527,15 @@ func (bc *BlockChain) SetCanonical(head *types.Block) (common.Hash, error) {
 		return common.Hash{}, errChainStopped
 	}
 	defer bc.chainmu.Unlock()
-	// SYSCOIN: this API does not install Core metadata. Only the current head
-	// or one canonical-parent step used by DeleteBlock's paired rollback is valid.
+	// SYSCOIN: this API does not install Core metadata. Paired canonical
+	// disconnects must use DisconnectSyscoinBlock so head and metadata commit
+	// together; only an idempotent current-head request is valid here.
 	if bc.chainConfig.SyscoinBlock != nil {
 		current := bc.CurrentBlock()
 		if head.Hash() == current.Hash() {
 			return head.Hash(), nil
 		}
-		if current.Number.Sign() == 0 || head.NumberU64() != current.Number.Uint64()-1 || head.Hash() != current.ParentHash || bc.GetCanonicalHash(head.NumberU64()) != head.Hash() {
-			return common.Hash{}, errors.New("Syscoin canonicalization requires paired Core connect/disconnect")
-		}
+		return common.Hash{}, errors.New("Syscoin canonicalization requires paired Core connect/disconnect")
 	}
 
 	// Re-execute the reorged chain in case the head state is missing.

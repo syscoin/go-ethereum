@@ -532,68 +532,9 @@ func (eth *Ethereum) DeleteBlock(nevmBlockDisconnect *types.NEVMBlockDisconnect)
         return nil
     }
 
-	current := eth.blockchain.CurrentBlock()
-	if current == nil {
-		return errors.New("deleteBlock: Current block is nil")
-	}
-	currentNumber := current.Number.Uint64()
-	if currentNumber == 0 {
-		log.Warn("Trying to disconnect block 0")
-		return nil
-	}
-
-	pairedSysHash := common.BytesToHash(eth.blockchain.ReadSYSHash(currentNumber))
-	// Missing/zero pairing or disconnect is never a match (BytesToHash(nil) == zero).
-	if pairedSysHash == (common.Hash{}) || disconnectHash == (common.Hash{}) || pairedSysHash != disconnectHash {
-		return fmt.Errorf("disconnect does not match current Core/NEVM pairing: tip=%d paired=%x disconnect=%x",
-			currentNumber, pairedSysHash.Bytes()[:4], disconnectHash.Bytes()[:4])
-	}
-
-	parent := eth.blockchain.GetBlock(current.ParentHash, currentNumber-1)
-	if parent == nil {
-		return errors.New("deleteBlock: Parent block not found")
-	}
-	// SYSCOIN: Stage the fallible DA rollback before moving the canonical head.
-	// A freshly migrated index may not yet retain the boundary journal needed
-	// for a disconnect; refusing here leaves both the head and membership intact.
-	batch := eth.blockchain.NewSyscoinCacheBatch()
-	if err := eth.blockchain.TryDeleteDataHashes(batch, currentNumber); err != nil {
-		return fmt.Errorf("cannot disconnect Syscoin DA membership at block %d: %w", currentNumber, err)
-	}
-	headHash, err := eth.blockchain.SetCanonical(parent)
-	if err != nil {
-		return err
-	}
-	if parent.Hash() != headHash {
-		return errors.New("deleteBlock: Mismatch after setting canonical head")
-	}
-
-	// SYSCOIN: rollback metadata and its read caches must commit together.
-	if nevmBlockDisconnect.HasDiff() {
-		for _, entry := range nevmBlockDisconnect.Diff.AddedMNNEVM {
-			addr := common.BytesToAddress(entry.Address)
-			eth.blockchain.StoreNEVMAddress(batch, addr, entry.CollateralHeight)
-		}
-		for _, entry := range nevmBlockDisconnect.Diff.UpdatedMNNEVM {
-			oldAddr := common.BytesToAddress(entry.OldAddress)
-			newAddr := common.BytesToAddress(entry.NewAddress)
-			eth.blockchain.RemoveNEVMAddress(batch, oldAddr)
-			eth.blockchain.StoreNEVMAddress(batch, newAddr, entry.CollateralHeight)
-		}
-		for _, entry := range nevmBlockDisconnect.Diff.RemovedMNNEVM {
-			addr := common.BytesToAddress(entry.Address)
-			eth.blockchain.RemoveNEVMAddress(batch, addr)
-		}
-	}
-
-	eth.blockchain.DeleteSYSHash(batch, currentNumber)
-	eth.blockchain.DeleteBTCCheckpoint(batch, currentNumber)
-
-	if err := batch.Write(); err != nil {
-		log.Crit("Failed to write NEVM batch during block disconnect", "err", err)
-	}
-
-	return nil
+	// SYSCOIN: persisted rollback, canonical head markers, metadata caches and
+	// event publication are coordinated by the blockchain under chainmu.
+	return eth.blockchain.DisconnectSyscoinBlock(nevmBlockDisconnect)
 }
 // SYSCOIN start networking sync once we start inserting chain meaning we are likely finished with IBD
 func (eth *Ethereum) networkingLoop() {

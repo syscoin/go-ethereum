@@ -111,7 +111,7 @@ func TestSyscoinBlockRejectsMissingNEVMConnectMetadata(t *testing.T) {
 
 // SYSCOIN: Candidate imports must not publish canonical precompile metadata.
 func TestSyscoinSideImportDoesNotChangeCanonicalMetadata(t *testing.T) {
-	for _, mode := range []string{"same-height", "next-height", "known-sibling", "canonicalize-sibling", "insert-sibling"} {
+	for _, mode := range []string{"same-height", "next-height", "known-sibling", "canonicalize-sibling", "canonicalize-parent", "insert-sibling"} {
 		t.Run(mode, func(t *testing.T) {
 			config := *params.AllEthashProtocolChanges
 			config.SyscoinBlock = big.NewInt(0)
@@ -152,7 +152,9 @@ func TestSyscoinSideImportDoesNotChangeCanonicalMetadata(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if mode == "canonicalize-sibling" {
+			if mode == "canonicalize-parent" {
+				_, err = chain.SetCanonical(chain.GetBlock(blocks[0].ParentHash(), 0))
+			} else if mode == "canonicalize-sibling" {
 				_, err = chain.SetCanonical(candidate)
 			} else if mode == "insert-sibling" {
 				_, err = chain.InsertChain([]*types.Block{candidate})
