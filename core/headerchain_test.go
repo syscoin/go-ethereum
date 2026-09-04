@@ -124,6 +124,9 @@ func newBTCCheckpointTestHeaderChain(t *testing.T) *HeaderChain {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := rawdb.EnsureDataHashIndex(db, 0); err != nil {
+		t.Fatal(err)
+	}
 	return hc
 }
 

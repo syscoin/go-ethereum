@@ -1494,6 +1494,9 @@ func (bc *BlockChain) writeBlockWithoutState(block *types.Block) (err error) {
 // writeKnownBlock updates the head block flag with a known block
 // and introduces chain reorg if necessary.
 func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
+	if err := bc.validateNEVMData(block); err != nil {
+		return err
+	}
 	current := bc.CurrentBlock()
 	if block.ParentHash() != current.Hash() {
 		if err := bc.reorg(current, block.Header()); err != nil {
@@ -1503,7 +1506,19 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 	bc.writeHeadBlock(block)
 	return nil
 }
+
+// SYSCOIN: validate transient Core metadata before any canonical-head mutation.
+func (bc *BlockChain) validateNEVMData(block *types.Block) error {
+	if bc.Config().IsSyscoin(block.Number()) && block.NevmBlockConnect == nil {
+		return errors.New("missing NEVM connect metadata for Syscoin block")
+	}
+	return nil
+}
+
 func (bc *BlockChain) writeNEVMData(blockBatch ethdb.KeyValueWriter, block *types.Block) error {
+	if err := bc.validateNEVMData(block); err != nil {
+		return err
+	}
 	nevmBlockConnect := block.NevmBlockConnect
 	if nevmBlockConnect != nil {
 		if nevmBlockConnect.HasDiff() {
@@ -1532,8 +1547,8 @@ func (bc *BlockChain) writeNEVMData(blockBatch ethdb.KeyValueWriter, block *type
 			bc.WriteBTCCheckpoint(blockBatch, proposedBlockNumber, nevmBlockConnect.BTCPrevHash)
 		}
 	} else if bc.Config().SyscoinBlock != nil {
-		log.Debug("Skipping NEVM data; no connect info for block",
-			"number", block.NumberU64(), "hash", block.Hash())
+		// Keep the index head aligned before a nonzero Syscoin activation height.
+		bc.WriteDataHashes(blockBatch, block.NumberU64(), nil)
 	}
 	return nil
 }
@@ -1552,11 +1567,10 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	rawdb.WriteBlock(blockBatch, block)
 	rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
 	rawdb.WritePreimages(blockBatch, statedb.Preimages())
-	err := bc.writeNEVMData(blockBatch, block)
-	if err != nil {
-		log.Crit("Failed to NEVM data into disk", "err", err)
+	if err := bc.writeNEVMData(blockBatch, block); err != nil {
+		return err
 	}
-	if err = blockBatch.Write(); err != nil {
+	if err := blockBatch.Write(); err != nil {
 		log.Crit("Failed to write block into disk", "err", err)
 	}
 	// Commit all cached state changes into underlying memory database.
@@ -1773,7 +1787,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 			blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
 			err = bc.writeNEVMData(blockBatch, block)
 			if err != nil {
-				log.Crit("Failed to previously known block into disk", "err", err)
 				return nil, it.index, err
 			}
 			if err = blockBatch.Write(); err != nil {
@@ -1863,7 +1876,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 			blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
 			err = bc.writeNEVMData(blockBatch, block)
 			if err != nil {
-				log.Crit("Failed to previously known block into disk", "err", err)
 				return nil, it.index, err
 			}
 			if err = blockBatch.Write(); err != nil {

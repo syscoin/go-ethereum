@@ -536,6 +536,12 @@ func (bc *BlockChain) ReadBTCCheckpointHashByIndex(idx uint64) []byte {
 func (bc *BlockChain) GetNEVMAddress(address common.Address) []byte {
 	return bc.hc.GetNEVMAddress(address)
 }
+
+// SYSCOIN: NewSyscoinCacheBatch defers metadata cache updates until commit.
+func (bc *BlockChain) NewSyscoinCacheBatch() ethdb.Batch {
+	return bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
+}
+
 func (bc *BlockChain) StoreNEVMAddress(db ethdb.KeyValueWriter, address common.Address, height uint32) {
 	bc.hc.StoreNEVMAddress(db, address, height)
 }

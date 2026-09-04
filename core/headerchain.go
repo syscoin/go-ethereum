@@ -74,7 +74,6 @@ type HeaderChain struct {
 	SYSHashCache            *lru.Cache[uint64, []byte]      // Cache for SYS hash
 	BTCCheckpointIndexCache *lru.Cache[common.Hash, uint64] // Cache for BTC hash -> checkpoint index
 	BTCCheckpointLastIndex  atomic.Uint64
-	DataHashCache           *lru.Cache[common.Hash, []byte] // Cache for Data availability
 	NEVMAddressCache        *lru.Cache[common.Address, []byte]
 
 	procInterrupt func() bool
@@ -139,7 +138,6 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 		// SYSCOIN
 		SYSHashCache:            lru.NewCache[uint64, []byte](SYSBlockCacheLimit),
 		BTCCheckpointIndexCache: lru.NewCache[common.Hash, uint64](SYSBlockCacheLimit),
-		DataHashCache:           lru.NewCache[common.Hash, []byte](SYSBlockCacheLimit),
 		NEVMAddressCache:        lru.NewCache[common.Address, []byte](NEVMAddressCacheLimit),
 		procInterrupt:           procInterrupt,
 		engine:                  engine,
@@ -211,6 +209,13 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 	}
 	hc.currentHeaderHash = hc.CurrentHeader().Hash()
 	headHeaderGauge.Update(hc.CurrentHeader().Number.Int64())
+	// SYSCOIN: repair/migrate consensus-visible DA membership from canonical
+	// per-height records before any precompile can query it.
+	if config.SyscoinBlock != nil {
+		if err := rawdb.EnsureDataHashIndex(chainDb, hc.CurrentHeader().Number.Uint64()); err != nil {
+			return nil, fmt.Errorf("initialize data-hash index: %w", err)
+		}
+	}
 	return hc, nil
 }
 
@@ -628,7 +633,8 @@ func (hc *HeaderChain) GetNEVMAddress(addr common.Address) []byte {
 	if len(data) == 0 {
 		return []byte{}
 	}
-	hc.NEVMAddressCache.Add(addr, data)
+	// SYSCOIN: only writers populate mutable caches. A delayed DB read must
+	// not overwrite a newer committed value (or resurrect a removed value).
 	return data
 }
 
@@ -642,7 +648,6 @@ func (hc *HeaderChain) ReadSYSHash(n uint64) []byte {
 	if len(sysBlockhash) == 0 {
 		return []byte{}
 	}
-	hc.SYSHashCache.Add(n, sysBlockhash)
 	return sysBlockhash
 }
 
@@ -662,7 +667,6 @@ func (hc *HeaderChain) BTCCheckpointIndex(btcHash common.Hash) uint64 {
 	if idx == 0 {
 		return 0
 	}
-	hc.BTCCheckpointIndexCache.Add(btcHash, idx)
 	return idx
 }
 
@@ -682,17 +686,9 @@ func (hc *HeaderChain) ReadBTCCheckpointHashByIndex(idx uint64) []byte {
 	return rawdb.ReadBTCCheckpointHashByIndex(hc.chainDb, idx)
 }
 func (hc *HeaderChain) ReadDataHash(hash common.Hash) []byte {
-	// Should exist in cache because we store in LRU upon creating block and delete upon disconnecting we should only store latest 50k blocks (limits to querying in opcode)
-	if hc.DataHashCache.Contains(hash) {
-		return hash.Bytes()
-	}
-	// sanity in case it doesn't exist in LRU cache
-	dataHash := rawdb.ReadDataHash(hc.chainDb, hash)
-	if len(dataHash) == 0 {
-		return []byte{}
-	}
-	hc.DataHashCache.Add(hash, []byte{0})
-	return hash.Bytes()
+	// SYSCOIN: membership is consensus-visible, so the persisted refcount is
+	// authoritative. A positive in-memory cache could outlive pruning or reorgs.
+	return rawdb.ReadDataHash(hc.chainDb, hash)
 }
 
 func (hc *HeaderChain) WriteSYSHash(db ethdb.KeyValueWriter, sysBlockhash string, n uint64) {
@@ -754,39 +750,9 @@ func (hc *HeaderChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btc
 }
 func (hc *HeaderChain) WriteDataHashes(db ethdb.KeyValueWriter, n uint64, dataHashes []*common.Hash) {
 	rawdb.WriteDataHashes(db, hc.chainDb, n, dataHashes)
-	if batch, ok := db.(*syscoinCacheBatch); ok {
-		hashes := make([]common.Hash, 0, len(dataHashes))
-		for _, dataHash := range dataHashes {
-			hashes = append(hashes, *dataHash)
-		}
-		batch.addPostCommit(func() {
-			for _, dataHash := range hashes {
-				hc.DataHashCache.Add(dataHash, []byte{0})
-			}
-		})
-		return
-	}
-	for _, dataHash := range dataHashes {
-		hc.DataHashCache.Add(*dataHash, []byte{0})
-	}
 }
 func (hc *HeaderChain) DeleteDataHashes(db ethdb.KeyValueWriter, n uint64) {
-	dataHashes := rawdb.DeleteDataHashes(db, hc.chainDb, n)
-	if batch, ok := db.(*syscoinCacheBatch); ok {
-		hashes := make([]common.Hash, 0, len(dataHashes))
-		for _, dataHash := range dataHashes {
-			hashes = append(hashes, *dataHash)
-		}
-		batch.addPostCommit(func() {
-			for _, dataHash := range hashes {
-				hc.DataHashCache.Remove(dataHash)
-			}
-		})
-		return
-	}
-	for _, dataHash := range dataHashes {
-		hc.DataHashCache.Remove(*dataHash)
-	}
+	rawdb.DeleteDataHashes(db, hc.chainDb, n)
 }
 func (hc *HeaderChain) DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
 	rawdb.DeleteSYSHash(db, n)
@@ -807,6 +773,9 @@ func (hc *HeaderChain) DeleteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64) {
 	if idx == 0 {
 		return
 	}
+	// SYSCOIN: disconnects publish cache changes only after the DB commit,
+	// just like connects; a failed batch must leave the old checkpoint visible.
+	batch, wrapped := db.(*syscoinCacheBatch)
 	// b2i exists only for carrier blocks that wrote checkpoint metadata, so
 	// mapping cleanup below applies only to those blocks.
 	rawdb.DeleteBTCCheckpointIndexByBlockNumber(db, n)
@@ -817,18 +786,30 @@ func (hc *HeaderChain) DeleteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64) {
 		// Under our model, a BTC hash is checkpointed at most once, so h2i can be deleted
 		// unconditionally when disconnecting that checkpoint block.
 		rawdb.DeleteBTCCheckpointIndexByHash(db, btcHash)
-		hc.BTCCheckpointIndexCache.Remove(btcHash)
+		if wrapped {
+			batch.addPostCommit(func() { hc.BTCCheckpointIndexCache.Remove(btcHash) })
+		} else {
+			hc.BTCCheckpointIndexCache.Remove(btcHash)
+		}
 	}
 	// Only roll back last-index if we're disconnecting in reverse order.
-	if idx == hc.BTCCheckpointLastIndex.Load() {
+	lastIdx := hc.BTCCheckpointLastIndex.Load()
+	if wrapped {
+		lastIdx = batch.pendingLastIndex
+	}
+	if idx == lastIdx {
 		newLastIdx := idx - 1
-		hc.BTCCheckpointLastIndex.Store(newLastIdx)
+		if wrapped {
+			batch.pendingLastIndex = newLastIdx
+		} else {
+			hc.BTCCheckpointLastIndex.Store(newLastIdx)
+		}
 		rawdb.WriteBTCCheckpointLastIndex(db, newLastIdx)
 	} else {
 		log.Warn("DeleteBTCCheckpoint: non-tail disconnect detected",
 			"block", n,
 			"idx", idx,
-			"lastIdx", hc.BTCCheckpointLastIndex.Load(),
+			"lastIdx", lastIdx,
 		)
 	}
 }
@@ -945,6 +926,11 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 
 		// Remove the related data from the database on all sidechains
 		for _, num := range nums {
+			// SYSCOIN: the height-keyed DA journal describes only the canonical
+			// branch and must be removed with a generic head rewind.
+			if hc.config.SyscoinBlock != nil {
+				rawdb.DeleteDataHashesJournal(batch, num)
+			}
 			// Gather all the side fork hashes
 			hashes := rawdb.ReadAllHashes(hc.chainDb, num)
 			if len(hashes) == 0 {
@@ -960,6 +946,12 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 			rawdb.DeleteCanonicalHash(batch, num)
 		}
 	}
+	// SYSCOIN: rebuild membership in the same batch as the canonical rewind.
+	if hc.config.SyscoinBlock != nil {
+		if err := rawdb.RebuildDataHashIndex(batch, hc.chainDb, hc.CurrentHeader().Number.Uint64()); err != nil {
+			log.Crit("Failed to rebuild data-hash index during rewind", "error", err)
+		}
+	}
 	// Flush all accumulated deletions.
 	if err := batch.Write(); err != nil {
 		log.Crit("Failed to rewind block", "error", err)
@@ -970,7 +962,6 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 	// SYSCOIN
 	hc.SYSHashCache.Purge()
 	hc.BTCCheckpointIndexCache.Purge()
-	hc.DataHashCache.Purge()
 }
 
 // SetGenesis sets a new genesis block header for the chain

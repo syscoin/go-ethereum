@@ -561,7 +561,8 @@ func (eth *Ethereum) DeleteBlock(nevmBlockDisconnect *types.NEVMBlockDisconnect)
 		return errors.New("deleteBlock: Mismatch after setting canonical head")
 	}
 
-	batch := eth.ChainDb().NewBatch()
+	// SYSCOIN: rollback metadata and its read caches must commit together.
+	batch := eth.blockchain.NewSyscoinCacheBatch()
 	if nevmBlockDisconnect.HasDiff() {
 		for _, entry := range nevmBlockDisconnect.Diff.AddedMNNEVM {
 			addr := common.BytesToAddress(entry.Address)

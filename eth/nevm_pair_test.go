@@ -31,6 +31,11 @@ func newNEVMPairTestEthereum(t *testing.T, flushEveryBlock bool) (*Ethereum, *co
 	if err != nil {
 		t.Fatalf("new chain: %v", err)
 	}
+	// This helper uses a generic Ethereum config while exercising Syscoin-only
+	// metadata paths, so initialize the DA index explicitly.
+	if err := rawdb.EnsureDataHashIndex(db, chain.CurrentBlock().Number.Uint64()); err != nil {
+		t.Fatalf("initialize data-hash index: %v", err)
+	}
 	t.Cleanup(func() { chain.Stop() })
 
 	eth := &Ethereum{
