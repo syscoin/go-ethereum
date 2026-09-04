@@ -55,6 +55,9 @@ const (
 	metricsGatheringInterval = 3 * time.Second
 )
 
+// SYSCOIN: preserve backend errors.Is matching while classifying atomic misses.
+var errKeyNotFound = fmt.Errorf("%w: %w", ethdb.ErrKeyNotFound, leveldb.ErrNotFound)
+
 // Database is a persistent key-value store. Apart from basic data storage
 // functionality it also supports batch writes and iterating over the keyspace in
 // binary-alphabetical order.
@@ -191,6 +194,10 @@ func (db *Database) Has(key []byte) (bool, error) {
 // Get retrieves the given key if it's present in the key-value store.
 func (db *Database) Get(key []byte) ([]byte, error) {
 	dat, err := db.db.Get(key, nil)
+	// SYSCOIN: only a genuine missing key is normalized; I/O errors are unchanged.
+	if err == leveldb.ErrNotFound {
+		return nil, errKeyNotFound
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -19,6 +19,7 @@ package rawdb
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"slices"
@@ -898,11 +899,11 @@ func writeDataHashesRecord(db ethdb.KeyValueWriter, number uint64, hashes []*com
 }
 
 func readDataHashRefCount(db ethdb.KeyValueReader, hash common.Hash) (uint64, error) {
-	exists, err := db.Has(dataHashKey(hash))
-	if err != nil || !exists {
-		return 0, err
-	}
+	// SYSCOIN: one lookup keeps expiry/disconnect from racing a prior Has check.
 	data, err := db.Get(dataHashKey(hash))
+	if errors.Is(err, ethdb.ErrKeyNotFound) {
+		return 0, nil
+	}
 	if err != nil {
 		return 0, err
 	}

@@ -28,6 +28,75 @@ func testDataHashCount(t *testing.T, db ethdb.KeyValueReader, hash common.Hash) 
 	return count
 }
 
+// SYSCOIN: commit expiry after a lookup captured its result. With Has+Get,
+// deletion falls between the two reads; a single Get retains its valid snapshot.
+type expiringDataHashReader struct {
+	ethdb.Database
+	expire             func()
+	hasCalls, getCalls int
+}
+
+func (db *expiringDataHashReader) Has(key []byte) (bool, error) {
+	db.hasCalls++
+	exists, err := db.Database.Has(key)
+	db.expire()
+	return exists, err
+}
+
+func (db *expiringDataHashReader) Get(key []byte) ([]byte, error) {
+	db.getCalls++
+	value, err := db.Database.Get(key)
+	db.expire()
+	return value, err
+}
+
+func TestDataHashReadConcurrentExpiry(t *testing.T) {
+	db := NewMemoryDatabase()
+	defer db.Close()
+	hash := *testDataHash(0x71)
+	if err := db.Put(dataHashKey(hash), binary.BigEndian.AppendUint64(nil, 1)); err != nil {
+		t.Fatal(err)
+	}
+	reader := &expiringDataHashReader{Database: db, expire: func() {
+		batch := db.NewBatch()
+		if err := batch.Delete(dataHashKey(hash)); err != nil {
+			t.Fatal(err)
+		}
+		if err := batch.Write(); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	count, err := readDataHashRefCount(reader, hash)
+	if err != nil || count != 1 {
+		t.Fatalf("expiry invalidated captured refcount: count=%d err=%v", count, err)
+	}
+	if reader.hasCalls != 0 || reader.getCalls != 1 {
+		t.Fatalf("non-atomic lookup: Has=%d Get=%d", reader.hasCalls, reader.getCalls)
+	}
+	if got := ReadDataHash(db, hash); len(got) != 0 {
+		t.Fatalf("expired hash still present: %x", got)
+	}
+}
+
+func TestDataHashReadPreservesDatabaseAndEncodingErrors(t *testing.T) {
+	db := NewMemoryDatabase()
+	defer db.Close()
+	hash := *testDataHash(0x72)
+	wantErr := errors.New("data-hash I/O failure")
+	reader := failingDataHashReader{Database: db, key: dataHashKey(hash), err: wantErr}
+	if _, err := readDataHashRefCount(reader, hash); !errors.Is(err, wantErr) {
+		t.Fatalf("missing key hid database error: %v", err)
+	}
+	for _, value := range [][]byte{nil, {0}, make([]byte, 8)} {
+		if err := db.Put(dataHashKey(hash), value); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readDataHashRefCount(db, hash); err == nil {
+			t.Fatalf("invalid refcount accepted: %x", value)
+		}
+	}
+}
+
 func TestDataHashIndexMigratesLegacyPresenceToRefcounts(t *testing.T) {
 	db := NewMemoryDatabase()
 	t.Cleanup(func() { db.Close() })
