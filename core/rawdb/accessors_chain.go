@@ -1154,11 +1154,18 @@ func deleteDataHashes(dbw ethdb.KeyValueWriter, dbr ethdb.Reader, n uint64) ([]*
 }
 
 func DeleteDataHashes(dbw ethdb.KeyValueWriter, dbr ethdb.Reader, n uint64) []*common.Hash {
-	hashes, err := deleteDataHashes(dbw, dbr, n)
+	hashes, err := TryDeleteDataHashes(dbw, dbr, n)
 	if err != nil {
 		log.Crit("Failed to roll back data-hash index", "number", n, "err", err)
 	}
 	return hashes
+}
+
+// SYSCOIN: TryDeleteDataHashes applies a tail rollback to dbw and returns
+// recoverable history or database errors. Callers may pass an uncommitted batch
+// to preflight the rollback before moving the canonical head.
+func TryDeleteDataHashes(dbw ethdb.KeyValueWriter, dbr ethdb.Reader, n uint64) ([]*common.Hash, error) {
+	return deleteDataHashes(dbw, dbr, n)
 }
 
 // DeleteDataHashesJournal removes a disconnected height before a full index rebuild.

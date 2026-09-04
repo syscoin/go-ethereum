@@ -193,3 +193,65 @@ func TestDataHashIndexRejectsLegacyValueAfterMigration(t *testing.T) {
 		t.Fatalf("refcount = %d, want 1", got)
 	}
 }
+
+// SYSCOIN: The legacy index retained only the current 50,001-block window.
+// Its first disconnect needs one older journal, so migration must refuse that
+// rollback without staging any partial index mutation.
+func TestMigratedDataHashIndexUnavailableRollbackIsNonMutating(t *testing.T) {
+	db := NewMemoryDatabase()
+	t.Cleanup(func() { db.Close() })
+	head := uint64(DataBlockLimit + 1)
+	tip := testDataHash(0x61)
+	if err := writeDataHashesRecord(db, head, []*common.Hash{tip}); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureDataHashIndex(db, head); err != nil {
+		t.Fatal(err)
+	}
+
+	batch := db.NewBatch()
+	if _, err := TryDeleteDataHashes(batch, db, head); err == nil {
+		t.Fatal("migrated index accepted rollback below its retained-history floor")
+	}
+	// Even committing the rejected staging batch must be a no-op.
+	if err := batch.Write(); err != nil {
+		t.Fatal(err)
+	}
+	state, initialized, err := readDataHashIndexState(db)
+	if err != nil || !initialized || state.head != head || state.historyFloor != 2 {
+		t.Fatalf("index changed after rejected rollback: state=%+v initialized=%v err=%v", state, initialized, err)
+	}
+	if got := testDataHashCount(t, db, *tip); got != 1 {
+		t.Fatalf("tip membership changed after rejected rollback: count=%d", got)
+	}
+	if got := ReadRawDataHashes(db, head); len(got) != 1 || *got[0] != *tip {
+		t.Fatalf("tip journal changed after rejected rollback: %v", got)
+	}
+	// A restart at the unchanged canonical head remains valid.
+	if err := EnsureDataHashIndex(db, head); err != nil {
+		t.Fatalf("restart repair at unchanged head failed: %v", err)
+	}
+
+	// Advancing once moves the rollback target onto the retained migration-head
+	// journal. The earlier rejected batch must not poison later progress.
+	if err := writeDataHashes(db, db, head+1, nil); err != nil {
+		t.Fatalf("append after rejected rollback: %v", err)
+	}
+	rollback := db.NewBatch()
+	if _, err := TryDeleteDataHashes(rollback, db, head+1); err != nil {
+		t.Fatalf("rollback after retained history advanced: %v", err)
+	}
+	if err := rollback.Write(); err != nil {
+		t.Fatal(err)
+	}
+	state, initialized, err = readDataHashIndexState(db)
+	if err != nil || !initialized || state.head != head || state.historyFloor != 2 {
+		t.Fatalf("index after valid append/rollback: state=%+v initialized=%v err=%v", state, initialized, err)
+	}
+	if got := testDataHashCount(t, db, *tip); got != 1 {
+		t.Fatalf("tip membership after valid append/rollback: count=%d", got)
+	}
+	if err := EnsureDataHashIndex(db, head); err != nil {
+		t.Fatalf("restart repair after valid append/rollback failed: %v", err)
+	}
+}

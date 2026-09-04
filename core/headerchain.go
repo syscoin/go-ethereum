@@ -754,6 +754,12 @@ func (hc *HeaderChain) WriteDataHashes(db ethdb.KeyValueWriter, n uint64, dataHa
 func (hc *HeaderChain) DeleteDataHashes(db ethdb.KeyValueWriter, n uint64) {
 	rawdb.DeleteDataHashes(db, hc.chainDb, n)
 }
+
+// SYSCOIN: return recoverable DA rollback errors to canonical-head callers.
+func (hc *HeaderChain) TryDeleteDataHashes(db ethdb.KeyValueWriter, n uint64) error {
+	_, err := rawdb.TryDeleteDataHashes(db, hc.chainDb, n)
+	return err
+}
 func (hc *HeaderChain) DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
 	rawdb.DeleteSYSHash(db, n)
 	if batch, ok := db.(*syscoinCacheBatch); ok {

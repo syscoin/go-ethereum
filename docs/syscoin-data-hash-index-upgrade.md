@@ -20,6 +20,11 @@ new canonical block, up to 50,001 blocks. A rewind crossing the pre-upgrade or
 pruned history floor fails closed and requires resynchronization. Resetting to
 genesis remains supported.
 
+A paired Core disconnect preflights this history before moving the head. An
+unavailable rollback returns an error without changing the head or membership,
+so the existing database remains restartable. It does not recover missing
+journals; ensure the required rollback history is available before activation.
+
 This repair covers only DA-hash membership. Generic `SetHead` does not have the
 Core payloads needed to undo every Syscoin hash, BTC checkpoint, or NEVM address
 mapping. Production rollback must continue through paired Core disconnects;

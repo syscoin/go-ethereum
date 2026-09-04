@@ -553,6 +553,13 @@ func (eth *Ethereum) DeleteBlock(nevmBlockDisconnect *types.NEVMBlockDisconnect)
 	if parent == nil {
 		return errors.New("deleteBlock: Parent block not found")
 	}
+	// SYSCOIN: Stage the fallible DA rollback before moving the canonical head.
+	// A freshly migrated index may not yet retain the boundary journal needed
+	// for a disconnect; refusing here leaves both the head and membership intact.
+	batch := eth.blockchain.NewSyscoinCacheBatch()
+	if err := eth.blockchain.TryDeleteDataHashes(batch, currentNumber); err != nil {
+		return fmt.Errorf("cannot disconnect Syscoin DA membership at block %d: %w", currentNumber, err)
+	}
 	headHash, err := eth.blockchain.SetCanonical(parent)
 	if err != nil {
 		return err
@@ -562,7 +569,6 @@ func (eth *Ethereum) DeleteBlock(nevmBlockDisconnect *types.NEVMBlockDisconnect)
 	}
 
 	// SYSCOIN: rollback metadata and its read caches must commit together.
-	batch := eth.blockchain.NewSyscoinCacheBatch()
 	if nevmBlockDisconnect.HasDiff() {
 		for _, entry := range nevmBlockDisconnect.Diff.AddedMNNEVM {
 			addr := common.BytesToAddress(entry.Address)
@@ -582,7 +588,6 @@ func (eth *Ethereum) DeleteBlock(nevmBlockDisconnect *types.NEVMBlockDisconnect)
 
 	eth.blockchain.DeleteSYSHash(batch, currentNumber)
 	eth.blockchain.DeleteBTCCheckpoint(batch, currentNumber)
-	eth.blockchain.DeleteDataHashes(batch, currentNumber)
 
 	if err := batch.Write(); err != nil {
 		log.Crit("Failed to write NEVM batch during block disconnect", "err", err)

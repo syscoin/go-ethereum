@@ -567,6 +567,11 @@ func (bc *BlockChain) WriteDataHashes(db ethdb.KeyValueWriter, n uint64, dataHas
 func (bc *BlockChain) DeleteDataHashes(db ethdb.KeyValueWriter, n uint64) {
 	bc.hc.DeleteDataHashes(db, n)
 }
+
+// SYSCOIN: return recoverable DA rollback errors to canonical-head callers.
+func (bc *BlockChain) TryDeleteDataHashes(db ethdb.KeyValueWriter, n uint64) error {
+	return bc.hc.TryDeleteDataHashes(db, n)
+}
 func (bc *BlockChain) DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
 	bc.hc.DeleteSYSHash(db, n)
 }
