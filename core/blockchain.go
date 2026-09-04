@@ -1718,6 +1718,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 	if bc.insertStopped() {
 		return nil, 0, nil
 	}
+	// SYSCOIN: Core chooses the canonical pairing. Candidate/side execution
+	// cannot publish its height-keyed metadata; reorgs require paired disconnects
+	// followed by contiguous Core connects, including for already-stored blocks.
+	if bc.chainConfig.SyscoinBlock != nil {
+		current := bc.CurrentBlock()
+		if !setHead || chain[0].NumberU64() != current.Number.Uint64()+1 || chain[0].ParentHash() != current.Hash() {
+			return nil, 0, errors.New("Syscoin imports require a paired canonical extension")
+		}
+	}
 
 	if atomic.AddInt32(&bc.blockProcCounter, 1) == 1 {
 		bc.blockProcFeed.Send(true)
@@ -2507,6 +2516,17 @@ func (bc *BlockChain) SetCanonical(head *types.Block) (common.Hash, error) {
 		return common.Hash{}, errChainStopped
 	}
 	defer bc.chainmu.Unlock()
+	// SYSCOIN: this API does not install Core metadata. Only the current head
+	// or one canonical-parent step used by DeleteBlock's paired rollback is valid.
+	if bc.chainConfig.SyscoinBlock != nil {
+		current := bc.CurrentBlock()
+		if head.Hash() == current.Hash() {
+			return head.Hash(), nil
+		}
+		if current.Number.Sign() == 0 || head.NumberU64() != current.Number.Uint64()-1 || head.Hash() != current.ParentHash || bc.GetCanonicalHash(head.NumberU64()) != head.Hash() {
+			return common.Hash{}, errors.New("Syscoin canonicalization requires paired Core connect/disconnect")
+		}
+	}
 
 	// Re-execute the reorged chain in case the head state is missing.
 	if !bc.HasState(head.Root()) {

@@ -1056,9 +1056,17 @@ func writeDataHashes(dbw ethdb.KeyValueWriter, dbr ethdb.Reader, n uint64, dataH
 		if err != nil {
 			return err
 		}
-		if err := collectDataHashDeltas(deltas, previous, false); err != nil {
-			return err
+		// SYSCOIN: only an exact retry is idempotent. A replacement must first
+		// disconnect the old canonical height and then append its new pairing.
+		if len(previous) != len(dataHashes) {
+			return fmt.Errorf("conflicting data-hash retry at height %d", n)
 		}
+		for i, hash := range previous {
+			if *hash != *dataHashes[i] {
+				return fmt.Errorf("conflicting data-hash retry at height %d", n)
+			}
+		}
+		return nil
 	case state.head != ^uint64(0) && n == state.head+1:
 		if n > DataBlockLimit {
 			expired, err := readDataHashes(dbr, n-DataBlockLimit)

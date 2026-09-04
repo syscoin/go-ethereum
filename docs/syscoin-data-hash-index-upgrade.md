@@ -24,3 +24,9 @@ This repair covers only DA-hash membership. Generic `SetHead` does not have the
 Core payloads needed to undo every Syscoin hash, BTC checkpoint, or NEVM address
 mapping. Production rollback must continue through paired Core disconnects;
 generic rewind is not a complete Syscoin metadata recovery procedure.
+
+Syscoin imports must extend the current canonical head through Core's paired
+connect path. Execution-only side imports and direct sidechain promotion are
+rejected; `SetCanonical` permits only the current head or the immediate parent
+step used by paired disconnect. Same-height DA writes are exact retries only,
+not replacements; a different pairing requires disconnect followed by reconnect.

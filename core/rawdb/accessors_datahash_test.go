@@ -82,17 +82,17 @@ func TestDataHashIndexDuplicateExpiryRollbackAndRestart(t *testing.T) {
 		t.Fatalf("expired block journal was not retained: %v", got)
 	}
 
-	// Same-height writes replace, rather than double-count, the active record.
-	WriteDataHashes(db, db, DataBlockLimit+1, []*common.Hash{replacement})
-	if got := ReadDataHash(db, *tip); len(got) != 0 {
-		t.Fatalf("idempotent replacement retained old hash: %x", got)
+	// SYSCOIN: retries are no-ops, not permission to replace canonical data.
+	WriteDataHashes(db, db, DataBlockLimit+1, []*common.Hash{tip})
+	if err := writeDataHashes(db, db, DataBlockLimit+1, []*common.Hash{replacement}); err == nil {
+		t.Fatal("same-height replacement was accepted without a disconnect")
 	}
-	if got := testDataHashCount(t, db, *replacement); got != 1 {
-		t.Fatalf("replacement refcount = %d, want 1", got)
+	if got := testDataHashCount(t, db, *tip); got != 1 || len(ReadDataHash(db, *replacement)) != 0 {
+		t.Fatalf("retry changed canonical membership: tip count=%d", got)
 	}
 
 	DeleteDataHashes(db, db, DataBlockLimit+1)
-	if got := ReadDataHash(db, *replacement); len(got) != 0 {
+	if got := ReadDataHash(db, *tip); len(got) != 0 {
 		t.Fatalf("disconnected tip membership survived: %x", got)
 	}
 	if got := testDataHashCount(t, db, *shared); got != 2 {
