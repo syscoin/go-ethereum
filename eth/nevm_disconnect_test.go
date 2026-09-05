@@ -222,3 +222,110 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 		})
 	}
 }
+
+// SYSCOIN: body/state persistence must not publish canonical metadata early.
+// Supplied Core pairs deliberately re-execute even if their block is stored.
+func TestNEVMConnectAtomicMetadata(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		stored, fail bool
+	}{
+		{"fresh", false, false}, {"stored-reexecution", true, false},
+		{"fresh-failed-write-retry", false, true}, {"stored-failed-write-retry", true, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := *params.AllEthashProtocolChanges
+			config.SyscoinBlock = big.NewInt(0)
+			genesis := &core.Genesis{BaseFee: big.NewInt(params.InitialBaseFee), Config: &config}
+			engine := ethash.NewFaker()
+			db := &disconnectTestDB{Database: rawdb.NewMemoryDatabase()}
+			defer db.Close()
+			chain, err := core.NewBlockChain(db, core.DefaultCacheConfigWithScheme(rawdb.HashScheme), genesis, nil, engine, vm.Config{}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if chain != nil {
+					chain.Stop()
+				}
+			}()
+			genDB, blocks, _ := core.GenerateChainWithGenesis(genesis, engine, 1, nil)
+			defer genDB.Close()
+			block := blocks[0]
+			hash, btc, addr := common.HexToHash("0x1234"), common.HexToHash("0x2345"), common.HexToAddress("0x3456")
+			connect := makeNEVMConnect(block, bytes.Repeat([]byte{0x45}, common.HashLength))
+			connect.VersionHashes = []*common.Hash{&hash}
+			connect.BTCPrevHash = btc
+			connect.Diff.AddedMNNEVM = []wire.NEVMAddressEntry{{Address: addr.Bytes(), CollateralHeight: 3}}
+			block.NevmBlockConnect = connect
+			if test.stored {
+				rawdb.WriteBlock(db, block)
+				rawdb.WriteReceipts(db, block.Hash(), 1, nil)
+			}
+			check := func() {
+				t.Helper()
+				present := rawdb.ReadHeadBlockHash(db) == block.Hash()
+				if (len(rawdb.ReadDataHash(db, hash)) > 0) != present ||
+					(len(rawdb.ReadSYSHash(db, 1)) > 0) != present ||
+					(rawdb.ReadBTCCheckpointIndexByHash(db, btc) == 1) != present ||
+					(len(rawdb.GetNEVMAddress(db, addr)) > 0) != (present && len(connect.Diff.AddedMNNEVM) > 0) {
+					t.Error("connect committed metadata separately from canonical head")
+				}
+			}
+			if test.fail {
+				writeErr := errors.New("injected canonical connect write failure")
+				events := make(chan core.ChainHeadEvent, 1)
+				sub := chain.SubscribeChainHeadEvent(events)
+				defer sub.Unsubscribe()
+				db.mu.Lock()
+				db.afterWrite = func() {
+					check()
+					// At block 1 in hash mode, trie state stays in memory. After its
+					// body batch, the next write is the canonical metadata/head batch.
+					db.fail = writeErr
+				}
+				db.mu.Unlock()
+				_, insertErr := chain.InsertChain(blocks)
+				db.mu.Lock()
+				db.fail, db.afterWrite = nil, nil
+				db.mu.Unlock()
+				if !errors.Is(insertErr, writeErr) {
+					t.Fatalf("connect error: %v", insertErr)
+				}
+				check()
+				if rawdb.ReadHeadBlockHash(db) != block.ParentHash() || chain.CurrentBlock().Hash() != block.ParentHash() ||
+					len(chain.ReadDataHash(hash)) != 0 || len(chain.ReadSYSHash(1)) != 0 || chain.BTCCheckpointIndex(btc) != 0 || len(chain.GetNEVMAddress(addr)) != 0 {
+					t.Fatal("failed connect published its head or metadata caches")
+				}
+				select {
+				case <-events:
+					t.Fatal("failed connect published a head event")
+				default:
+				}
+				chain.Stop()
+				chain, err = core.NewBlockChain(db, core.DefaultCacheConfigWithScheme(rawdb.HashScheme), genesis, nil, engine, vm.Config{}, nil)
+				if err != nil {
+					t.Fatalf("restart after failed connect: %v", err)
+				}
+				check()
+				// Retry the stored EVM block with a different Core pair and no address
+				// diff. The failed pair must not have left its address behind.
+				connect.Sysblockhash = string(bytes.Repeat([]byte{0x46}, common.HashLength))
+				connect.Diff.AddedMNNEVM = nil
+			}
+			db.mu.Lock()
+			db.afterWrite = check
+			db.mu.Unlock()
+			if _, err := chain.InsertChain(blocks); err != nil {
+				t.Fatal(err)
+			}
+			db.mu.Lock()
+			db.afterWrite = nil
+			db.mu.Unlock()
+			check()
+			if len(chain.ReadDataHash(hash)) == 0 || string(chain.ReadSYSHash(1)) != connect.Sysblockhash || chain.BTCCheckpointIndex(btc) != 1 || (len(chain.GetNEVMAddress(addr)) > 0) != !test.fail {
+				t.Fatal("successful connect did not publish metadata caches")
+			}
+		})
+	}
+}

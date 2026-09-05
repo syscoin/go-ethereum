@@ -85,7 +85,7 @@ func TestSyscoinBlockRejectsMissingNEVMConnectMetadata(t *testing.T) {
 	if err := chain.writeBlockWithoutState(blocks[0]); err != nil {
 		t.Fatal(err)
 	}
-	if err := chain.writeKnownBlock(blocks[0]); err == nil {
+	if err := chain.writeCanonicalBlock(blocks[0]); err == nil {
 		t.Fatal("known Syscoin block without Core metadata was accepted")
 	}
 	if got := chain.CurrentBlock().Number.Uint64(); got != 0 {

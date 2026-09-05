@@ -1159,7 +1159,7 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	bc.publishHeadBlock(block)
 }
 
-// SYSCOIN: writeHeadBlockMarkers lets a paired disconnect commit its metadata
+// SYSCOIN: writeHeadBlockMarkers lets a paired connect/disconnect commit metadata
 // and canonical head markers in one database batch.
 func (bc *BlockChain) writeHeadBlockMarkers(batch ethdb.KeyValueWriter, block *types.Block) {
 	rawdb.WriteHeadHeaderHash(batch, block.Hash())
@@ -1502,9 +1502,9 @@ func (bc *BlockChain) writeBlockWithoutState(block *types.Block) (err error) {
 	return nil
 }
 
-// writeKnownBlock updates the head block flag with a known block
-// and introduces chain reorg if necessary.
-func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
+// SYSCOIN: writeCanonicalBlock commits paired metadata with the canonical head.
+// For other chains it retains the standard head update and reorg behavior.
+func (bc *BlockChain) writeCanonicalBlock(block *types.Block) error {
 	if err := bc.validateNEVMData(block); err != nil {
 		return err
 	}
@@ -1513,6 +1513,20 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 		if err := bc.reorg(current, block.Header()); err != nil {
 			return err
 		}
+	}
+	if bc.chainConfig.SyscoinBlock != nil {
+		// SYSCOIN: canonical head markers and transient Core metadata must become
+		// durable together. Publishing the in-memory head is deferred until then.
+		batch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
+		if err := bc.writeNEVMData(batch, block); err != nil {
+			return err
+		}
+		bc.writeHeadBlockMarkers(batch, block)
+		if err := batch.Write(); err != nil {
+			return fmt.Errorf("write paired Syscoin canonical block: %w", err)
+		}
+		bc.publishHeadBlock(block)
+		return nil
 	}
 	bc.writeHeadBlock(block)
 	return nil
@@ -1564,23 +1578,24 @@ func (bc *BlockChain) writeNEVMData(blockBatch ethdb.KeyValueWriter, block *type
 	return nil
 }
 
-// writeBlockWithState writes block, metadata and corresponding state data to the
-// database.
+// writeBlockWithState writes a block and corresponding state data to the database.
 func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, statedb *state.StateDB) error {
 	if !bc.HasHeader(block.ParentHash(), block.NumberU64()-1) {
 		return consensus.ErrUnknownAncestor
+	}
+	// SYSCOIN: validate transient Core metadata before persisting any portion of
+	// the block. Canonical metadata is committed with the head after state commit.
+	if err := bc.validateNEVMData(block); err != nil {
+		return err
 	}
 	// Irrelevant of the canonical status, write the block itself to the database.
 	//
 	// Note all the components of block(hash->number map, header, body, receipts)
 	// should be written atomically. BlockBatch is used for containing all components.
-	blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
+	blockBatch := bc.db.NewBatch()
 	rawdb.WriteBlock(blockBatch, block)
 	rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
 	rawdb.WritePreimages(blockBatch, statedb.Preimages())
-	if err := bc.writeNEVMData(blockBatch, block); err != nil {
-		return err
-	}
 	if err := blockBatch.Write(); err != nil {
 		log.Crit("Failed to write block into disk", "err", err)
 	}
@@ -1655,17 +1670,9 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
 	if err := bc.writeBlockWithState(block, receipts, state); err != nil {
 		return NonStatTy, err
 	}
-	currentBlock := bc.CurrentBlock()
-
-	// Reorganise the chain if the parent is not the head block
-	if block.ParentHash() != currentBlock.Hash() {
-		if err := bc.reorg(currentBlock, block.Header()); err != nil {
-			return NonStatTy, err
-		}
+	if err := bc.writeCanonicalBlock(block); err != nil {
+		return NonStatTy, err
 	}
-
-	// Set new head.
-	bc.writeHeadBlock(block)
 
 	bc.chainFeed.Send(ChainEvent{Header: block.Header()})
 	if len(logs) > 0 {
@@ -1800,17 +1807,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		// head full block(new pivot point).
 		for block != nil && bc.skipBlock(err, it) {
 			log.Debug("Writing previously known block", "number", block.Number(), "hash", block.Hash())
-			if err := bc.writeKnownBlock(block); err != nil {
-				return nil, it.index, err
-			}
-			// SYSCOIN
-			blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
-			err = bc.writeNEVMData(blockBatch, block)
-			if err != nil {
-				return nil, it.index, err
-			}
-			if err = blockBatch.Write(); err != nil {
-				log.Crit("Failed to previously known block into disk", "err", err)
+			if err := bc.writeCanonicalBlock(block); err != nil {
 				return nil, it.index, err
 			}
 			lastCanon = block
@@ -1889,17 +1886,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 				log.Error("Please file an issue, skip known block execution without receipt",
 					"hash", block.Hash(), "number", block.NumberU64())
 			}
-			if err := bc.writeKnownBlock(block); err != nil {
-				return nil, it.index, err
-			}
-			// SYSCOIN
-			blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
-			err = bc.writeNEVMData(blockBatch, block)
-			if err != nil {
-				return nil, it.index, err
-			}
-			if err = blockBatch.Write(); err != nil {
-				log.Crit("Failed to previously known block into disk", "err", err)
+			if err := bc.writeCanonicalBlock(block); err != nil {
 				return nil, it.index, err
 			}
 			stats.processed++
