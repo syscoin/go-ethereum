@@ -27,6 +27,52 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 )
 
+// SYSCOIN: an RPC whose selected state and live metadata span publications must
+// be retried. This is not an execution revert or a historical metadata snapshot.
+var ErrSyscoinMetadataChanged = errors.New("Syscoin canonical metadata changed during RPC execution; retry the request")
+
+// BeginSyscoinMetadataRead starts an optimistic RPC read before header/state
+// selection. The returned check must run before delivering any result, including
+// execution errors. No lock is held while the RPC executes. Historical queries
+// retain their existing tip-metadata semantics, but cannot mix tip generations.
+func (bc *BlockChain) BeginSyscoinMetadataRead() func() error {
+	if bc.chainConfig.SyscoinBlock == nil {
+		return func() error { return nil }
+	}
+	bc.syscoinMetadataMu.RLock()
+	generation := bc.syscoinMetadataGeneration
+	bc.syscoinMetadataMu.RUnlock()
+	return func() error {
+		bc.syscoinMetadataMu.RLock()
+		defer bc.syscoinMetadataMu.RUnlock()
+		if generation != bc.syscoinMetadataGeneration {
+			return ErrSyscoinMetadataChanged
+		}
+		return nil
+	}
+}
+
+// LockSyscoinMetadataRead protects a single API metadata lookup from partial
+// cache/head publication. Never hold it for EVM execution, acquire chainmu under
+// it, or use it in import callbacks (which already execute under chainmu).
+func (bc *BlockChain) LockSyscoinMetadataRead() func() {
+	if bc.chainConfig.SyscoinBlock == nil {
+		return func() {}
+	}
+	bc.syscoinMetadataMu.RLock()
+	return bc.syscoinMetadataMu.RUnlock
+}
+
+// lockSyscoinMetadataPublication is called with chainmu held, immediately before
+// a canonical commit. Release it after all head/cache publication and BEFORE
+// sending synchronous events. Even a failed attempt invalidates readers, since
+// a storage error need not prove that no writes became visible.
+func (bc *BlockChain) lockSyscoinMetadataPublication() func() {
+	bc.syscoinMetadataMu.Lock()
+	bc.syscoinMetadataGeneration++
+	return bc.syscoinMetadataMu.Unlock
+}
+
 // SYSCOIN: save only the pre-block values of touched addresses. The raw accessor
 // deduplicates them before reading; updates may touch the same key repeatedly.
 func (bc *BlockChain) writeNEVMAddressUndo(batch ethdb.KeyValueWriter, block *types.Block) error {
@@ -170,6 +216,8 @@ func (bc *BlockChain) rewindSyscoinHead(head, timestamp uint64, root common.Hash
 	}
 	bc.txLookupLock.Lock()
 	defer bc.txLookupLock.Unlock()
+	unlockMetadata := bc.lockSyscoinMetadataPublication()
+	defer unlockMetadata()
 	if err := batch.Write(); err != nil {
 		return 0, fmt.Errorf("write Syscoin rewind batch: %w", err)
 	}
@@ -267,12 +315,15 @@ func (bc *BlockChain) DisconnectSyscoinBlock(disconnect *types.NEVMBlockDisconne
 
 	// Keep transaction lookups stable across the atomic database transition.
 	bc.txLookupLock.Lock()
+	unlockMetadata := bc.lockSyscoinMetadataPublication()
 	if err := batch.Write(); err != nil {
+		unlockMetadata()
 		bc.txLookupLock.Unlock()
 		return fmt.Errorf("write Syscoin disconnect batch: %w", err)
 	}
 	bc.publishHeadBlock(parent)
 	bc.txLookupCache.Purge()
+	unlockMetadata()
 	bc.txLookupLock.Unlock()
 
 	if len(removedLogs) > 0 {

@@ -229,6 +229,8 @@ type blockTraceResult struct {
 	Block  hexutil.Uint64   `json:"block"`  // Block number corresponding to this trace
 	Hash   common.Hash      `json:"hash"`   // Block hash corresponding to this trace
 	Traces []*txTraceResult `json:"traces"` // Trace results produced by the task
+	// SYSCOIN: a terminal error invalidates the current, unpublished trace result.
+	Error string `json:"error,omitempty"`
 }
 
 // txTraceTask represents a single transaction trace task when an entire block
@@ -240,7 +242,17 @@ type txTraceTask struct {
 
 // TraceChain returns the structured logs created during the execution of EVM
 // between two blocks (excluding start) and returns them as a JSON object.
-func (api *API) TraceChain(ctx context.Context, start, end rpc.BlockNumber, config *TraceConfig) (*rpc.Subscription, error) { // Fetch the block interval that we want to trace
+func (api *API) TraceChain(ctx context.Context, start, end rpc.BlockNumber, config *TraceConfig) (subscription *rpc.Subscription, err error) { // Fetch the block interval that we want to trace
+	// SYSCOIN: capture before block selection; the asynchronous publisher checks
+	// this same generation before every result instead of only on RPC return.
+	checkMetadata := ethapi.BeginSyscoinMetadataRead(api.backend)
+	defer func() {
+		if err != nil {
+			if changed := checkMetadata(); changed != nil {
+				subscription, err = nil, changed
+			}
+		}
+	}()
 	from, err := api.blockByNumber(ctx, start)
 	if err != nil {
 		return nil, err
@@ -257,12 +269,36 @@ func (api *API) TraceChain(ctx context.Context, start, end rpc.BlockNumber, conf
 	if !supported {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
+	if err := checkMetadata(); err != nil {
+		return nil, err
+	}
 	sub := notifier.CreateSubscription()
 
-	resCh := api.traceChain(from, to, config, sub.Err())
+	// SYSCOIN: a metadata change aborts workers without holding up block imports.
+	closed := make(chan error)
+	resCh := api.traceChain(from, to, config, closed)
 	go func() {
-		for result := range resCh {
-			notifier.Notify(sub.ID, result)
+		defer close(closed)
+		for {
+			select {
+			case <-sub.Err():
+				return
+			case result, ok := <-resCh:
+				if changed := checkMetadata(); changed != nil {
+					failure := &blockTraceResult{Error: changed.Error()}
+					if ok {
+						failure.Block, failure.Hash = result.Block, result.Hash
+					}
+					notifier.Notify(sub.ID, failure)
+					return
+				}
+				if !ok {
+					return
+				}
+				if err := notifier.Notify(sub.ID, result); err != nil {
+					return
+				}
+			}
 		}
 	}()
 	return sub, nil
@@ -297,6 +333,14 @@ func (api *API) traceChain(start, end *types.Block, config *TraceConfig, closed 
 
 			// Fetch and execute the block trace taskCh
 			for task := range taskCh {
+				// SYSCOIN: after invalidation, drain queued state references
+				// without executing them or stranding the producer's tracker.
+				select {
+				case <-closed:
+					tracker.releaseState(task.block.NumberU64()-1, task.release)
+					continue
+				default:
+				}
 				var (
 					signer   = types.MakeSigner(api.backend.ChainConfig(), task.block.Number(), task.block.Time())
 					blockCtx = core.NewEVMBlockContext(task.block.Header(), api.chainContext(ctx), nil)
@@ -327,7 +371,7 @@ func (api *API) traceChain(start, end *types.Block, config *TraceConfig, closed 
 				select {
 				case resCh <- task:
 				case <-closed:
-					return
+					// SYSCOIN: continue draining taskCh to release queued states.
 				}
 			}
 		}()
@@ -463,7 +507,12 @@ func (api *API) traceChain(start, end *types.Block, config *TraceConfig, closed 
 					// tracing result in time(e.g. the websocket connect is not stable)
 					// which will eventually block the entire chain tracer. It's the
 					// expected behavior to not waste node resources for a non-active user.
-					retCh <- result
+					// SYSCOIN: drain worker results after metadata invalidation so
+					// shutdown cannot strand workers behind an abandoned consumer.
+					select {
+					case retCh <- result:
+					case <-closed:
+					}
 				}
 				delete(done, next)
 				next++
@@ -475,7 +524,14 @@ func (api *API) traceChain(start, end *types.Block, config *TraceConfig, closed 
 
 // TraceBlockByNumber returns the structured logs created during the execution of
 // EVM and returns them as a JSON object.
-func (api *API) TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *TraceConfig) ([]*txTraceResult, error) {
+func (api *API) TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *TraceConfig) (result []*txTraceResult, err error) {
+	// SYSCOIN: include block selection, state reconstruction, and tracing.
+	checkMetadata := ethapi.BeginSyscoinMetadataRead(api.backend)
+	defer func() {
+		if changed := checkMetadata(); changed != nil {
+			result, err = nil, changed
+		}
+	}()
 	block, err := api.blockByNumber(ctx, number)
 	if err != nil {
 		return nil, err
@@ -485,7 +541,14 @@ func (api *API) TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, 
 
 // TraceBlockByHash returns the structured logs created during the execution of
 // EVM and returns them as a JSON object.
-func (api *API) TraceBlockByHash(ctx context.Context, hash common.Hash, config *TraceConfig) ([]*txTraceResult, error) {
+func (api *API) TraceBlockByHash(ctx context.Context, hash common.Hash, config *TraceConfig) (result []*txTraceResult, err error) {
+	// SYSCOIN: include block selection, state reconstruction, and tracing.
+	checkMetadata := ethapi.BeginSyscoinMetadataRead(api.backend)
+	defer func() {
+		if changed := checkMetadata(); changed != nil {
+			result, err = nil, changed
+		}
+	}()
 	block, err := api.blockByHash(ctx, hash)
 	if err != nil {
 		return nil, err
@@ -495,7 +558,14 @@ func (api *API) TraceBlockByHash(ctx context.Context, hash common.Hash, config *
 
 // TraceBlock returns the structured logs created during the execution of EVM
 // and returns them as a JSON object.
-func (api *API) TraceBlock(ctx context.Context, blob hexutil.Bytes, config *TraceConfig) ([]*txTraceResult, error) {
+func (api *API) TraceBlock(ctx context.Context, blob hexutil.Bytes, config *TraceConfig) (result []*txTraceResult, err error) {
+	// SYSCOIN: raw blocks also reconstruct state and read live metadata.
+	checkMetadata := ethapi.BeginSyscoinMetadataRead(api.backend)
+	defer func() {
+		if changed := checkMetadata(); changed != nil {
+			result, err = nil, changed
+		}
+	}()
 	block := new(types.Block)
 	if err := rlp.DecodeBytes(blob, block); err != nil {
 		return nil, fmt.Errorf("could not decode block: %v", err)
@@ -516,7 +586,14 @@ func (api *API) TraceBlockFromFile(ctx context.Context, file string, config *Tra
 // TraceBadBlock returns the structured logs created during the execution of
 // EVM against a block pulled from the pool of bad ones and returns them as a JSON
 // object.
-func (api *API) TraceBadBlock(ctx context.Context, hash common.Hash, config *TraceConfig) ([]*txTraceResult, error) {
+func (api *API) TraceBadBlock(ctx context.Context, hash common.Hash, config *TraceConfig) (result []*txTraceResult, err error) {
+	// SYSCOIN: bad-block execution must not mix metadata generations either.
+	checkMetadata := ethapi.BeginSyscoinMetadataRead(api.backend)
+	defer func() {
+		if changed := checkMetadata(); changed != nil {
+			result, err = nil, changed
+		}
+	}()
 	block := rawdb.ReadBadBlock(api.backend.ChainDb(), hash)
 	if block == nil {
 		return nil, fmt.Errorf("bad block %#x not found", hash)
@@ -527,7 +604,15 @@ func (api *API) TraceBadBlock(ctx context.Context, hash common.Hash, config *Tra
 // StandardTraceBlockToFile dumps the structured logs created during the
 // execution of EVM to the local file system and returns a list of files
 // to the caller.
-func (api *API) StandardTraceBlockToFile(ctx context.Context, hash common.Hash, config *StdTraceConfig) ([]string, error) {
+func (api *API) StandardTraceBlockToFile(ctx context.Context, hash common.Hash, config *StdTraceConfig) (result []string, err error) {
+	// SYSCOIN: never return files containing a mixed-generation trace.
+	checkMetadata := ethapi.BeginSyscoinMetadataRead(api.backend)
+	defer func() {
+		if changed := checkMetadata(); changed != nil {
+			removeSyscoinTraceFiles(result)
+			result, err = nil, changed
+		}
+	}()
 	block, err := api.blockByHash(ctx, hash)
 	if err != nil {
 		return nil, err
@@ -537,7 +622,14 @@ func (api *API) StandardTraceBlockToFile(ctx context.Context, hash common.Hash, 
 
 // IntermediateRoots executes a block (bad- or canon- or side-), and returns a list
 // of intermediate roots: the stateroot after each transaction.
-func (api *API) IntermediateRoots(ctx context.Context, hash common.Hash, config *TraceConfig) ([]common.Hash, error) {
+func (api *API) IntermediateRoots(ctx context.Context, hash common.Hash, config *TraceConfig) (result []common.Hash, err error) {
+	// SYSCOIN: validate partial roots as well as complete execution results.
+	checkMetadata := ethapi.BeginSyscoinMetadataRead(api.backend)
+	defer func() {
+		if changed := checkMetadata(); changed != nil {
+			result, err = nil, changed
+		}
+	}()
 	block, _ := api.blockByHash(ctx, hash)
 	if block == nil {
 		// Check in the bad blocks
@@ -604,12 +696,29 @@ func (api *API) IntermediateRoots(ctx context.Context, hash common.Hash, config 
 // StandardTraceBadBlockToFile dumps the structured logs created during the
 // execution of EVM against a block pulled from the pool of bad ones to the
 // local file system and returns a list of files to the caller.
-func (api *API) StandardTraceBadBlockToFile(ctx context.Context, hash common.Hash, config *StdTraceConfig) ([]string, error) {
+func (api *API) StandardTraceBadBlockToFile(ctx context.Context, hash common.Hash, config *StdTraceConfig) (result []string, err error) {
+	// SYSCOIN: delete only this request's newly created temporary trace files.
+	checkMetadata := ethapi.BeginSyscoinMetadataRead(api.backend)
+	defer func() {
+		if changed := checkMetadata(); changed != nil {
+			removeSyscoinTraceFiles(result)
+			result, err = nil, changed
+		}
+	}()
 	block := rawdb.ReadBadBlock(api.backend.ChainDb(), hash)
 	if block == nil {
 		return nil, fmt.Errorf("bad block %#x not found", hash)
 	}
 	return api.standardTraceBlockToFile(ctx, block, config)
+}
+
+// SYSCOIN: invalidated traces must not leave misleading dump files behind.
+func removeSyscoinTraceFiles(files []string) {
+	for _, file := range files {
+		if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
+			log.Warn("Failed to remove invalidated SYSCOIN trace", "file", file, "err", err)
+		}
+	}
 }
 
 // traceBlock configures a new tracer according to the provided configuration, and
@@ -842,7 +951,8 @@ func (api *API) standardTraceBlockToFile(ctx context.Context, block *types.Block
 			}
 			dump, err = os.CreateTemp(os.TempDir(), prefix)
 			if err != nil {
-				return nil, err
+				// SYSCOIN: preserve earlier dump names for invalidation cleanup.
+				return dumps, err
 			}
 			dumps = append(dumps, dump.Name())
 
@@ -897,7 +1007,14 @@ func containsTx(block *types.Block, hash common.Hash) bool {
 
 // TraceTransaction returns the structured logs created during the execution of EVM
 // and returns them as a JSON object.
-func (api *API) TraceTransaction(ctx context.Context, hash common.Hash, config *TraceConfig) (interface{}, error) {
+func (api *API) TraceTransaction(ctx context.Context, hash common.Hash, config *TraceConfig) (result interface{}, err error) {
+	// SYSCOIN: capture before transaction lookup and any historical reexecution.
+	checkMetadata := ethapi.BeginSyscoinMetadataRead(api.backend)
+	defer func() {
+		if changed := checkMetadata(); changed != nil {
+			result, err = nil, changed
+		}
+	}()
 	found, _, blockHash, blockNumber, index, err := api.backend.GetTransaction(ctx, hash)
 	if err != nil {
 		return nil, ethapi.NewTxIndexingError()
@@ -944,10 +1061,16 @@ func (api *API) TraceTransaction(ctx context.Context, hash common.Hash, config *
 // after executing the specified block. However, if a transaction index is provided,
 // the trace will be conducted on the state after executing the specified transaction
 // within the specified block.
-func (api *API) TraceCall(ctx context.Context, args ethapi.TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, config *TraceCallConfig) (interface{}, error) {
+func (api *API) TraceCall(ctx context.Context, args ethapi.TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, config *TraceCallConfig) (result interface{}, err error) {
+	// SYSCOIN: capture before selecting a block, not only when creating the EVM.
+	checkMetadata := ethapi.BeginSyscoinMetadataRead(api.backend)
+	defer func() {
+		if changed := checkMetadata(); changed != nil {
+			result, err = nil, changed
+		}
+	}()
 	// Try to retrieve the specified block
 	var (
-		err         error
 		block       *types.Block
 		statedb     *state.StateDB
 		release     StateReleaseFunc

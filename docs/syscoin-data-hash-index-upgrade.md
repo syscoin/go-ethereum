@@ -59,3 +59,20 @@ connect path. Execution-only side imports and direct sidechain promotion are
 rejected; `SetCanonical` permits only the current head. Paired disconnects use
 the atomic Core rollback path. Same-height DA writes are exact retries only,
 not replacements; a different pairing requires disconnect followed by reconnect.
+
+EVM RPC reads use an optimistic metadata-generation check: capture before
+selecting the header/state and validate before returning results. Canonical
+commit, cache updates and in-memory head publication share a short lock; RPC
+reads hold only short lookup/check locks, not a lock for the execution duration.
+Any connect, disconnect or recovery commit attempt during a call invalidates its
+result with a retry error, even when that attempt reports a storage error.
+Callers should retry the request.
+This also covers gas estimation, simulation, access-list creation and tracing;
+streamed traces terminate with an error if their generation changes, and
+invalidated file traces discard their newly created output files.
+
+This is a consistency fence, not a historical metadata index. Historical,
+pending and simulated EVM state retain their existing current-tip metadata
+semantics. Long historical traces can therefore require retry after a normal
+head change; this patch does not reconstruct metadata for their historical
+block or change consensus execution rules.

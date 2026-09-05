@@ -256,6 +256,11 @@ type BlockChain struct {
 	// Readers don't need to take it, they can just read the database.
 	chainmu *syncx.ClosableMutex
 
+	// SYSCOIN: fence metadata commits through in-memory head publication. RPCs
+	// validate this generation after execution instead of blocking chain imports.
+	syscoinMetadataMu         sync.RWMutex
+	syscoinMetadataGeneration uint64
+
 	currentBlock      atomic.Pointer[types.Header] // Current head of the chain
 	currentSnapBlock  atomic.Pointer[types.Header] // Current head of snap-sync
 	currentFinalBlock atomic.Pointer[types.Header] // Latest (consensus) finalized block
@@ -1168,6 +1173,11 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	// Add the block to the canonical chain number scheme and mark as the head
 	batch := bc.db.NewBatch()
 	bc.writeHeadBlockMarkers(batch, block)
+	// SYSCOIN: also fence the generic genesis-reset head publication.
+	if bc.chainConfig.SyscoinBlock != nil {
+		unlockMetadata := bc.lockSyscoinMetadataPublication()
+		defer unlockMetadata()
+	}
 
 	// Flush the whole batch into the disk, exit the node if failed
 	if err := batch.Write(); err != nil {
@@ -1542,6 +1552,8 @@ func (bc *BlockChain) writeCanonicalBlock(block *types.Block) error {
 			return err
 		}
 		bc.writeHeadBlockMarkers(batch, block)
+		unlockMetadata := bc.lockSyscoinMetadataPublication()
+		defer unlockMetadata()
 		if err := batch.Write(); err != nil {
 			return fmt.Errorf("write paired Syscoin canonical block: %w", err)
 		}
