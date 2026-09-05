@@ -536,6 +536,7 @@ func (bc *BlockChain) ReadBTCCheckpointHashByIndex(idx uint64) []byte {
 func (bc *BlockChain) GetNEVMAddress(address common.Address) []byte {
 	return bc.hc.GetNEVMAddress(address)
 }
+
 func (bc *BlockChain) StoreNEVMAddress(db ethdb.KeyValueWriter, address common.Address, height uint32) {
 	bc.hc.StoreNEVMAddress(db, address, height)
 }
@@ -561,6 +562,7 @@ func (bc *BlockChain) WriteDataHashes(db ethdb.KeyValueWriter, n uint64, dataHas
 func (bc *BlockChain) DeleteDataHashes(db ethdb.KeyValueWriter, n uint64) {
 	bc.hc.DeleteDataHashes(db, n)
 }
+
 func (bc *BlockChain) DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
 	bc.hc.DeleteSYSHash(db, n)
 }

@@ -19,6 +19,7 @@ package rawdb
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"slices"
@@ -787,57 +788,392 @@ func ReadDataHashesRLP(db ethdb.Reader, number uint64) rlp.RawValue {
 	return data
 }
 
+// SYSCOIN: Data-hash membership is consensus-visible through a precompile. Keep the
+// canonical database authoritative; an in-memory cache must never extend membership.
+const (
+	dataHashIndexVersion = byte(1)
+	dataHashIndexSize    = 17 // version + indexed head + retained-history floor
+)
+
+type dataHashIndexState struct {
+	head         uint64
+	historyFloor uint64
+}
+
+type dataHashIndexReader interface {
+	ethdb.Reader
+	ethdb.Iteratee
+}
+
+func readDataHashIndexState(db ethdb.KeyValueReader) (dataHashIndexState, bool, error) {
+	exists, err := db.Has(dataHashIndexStateKey)
+	if err != nil {
+		return dataHashIndexState{}, false, err
+	}
+	if !exists {
+		return dataHashIndexState{}, false, nil
+	}
+	data, err := db.Get(dataHashIndexStateKey)
+	if err != nil {
+		return dataHashIndexState{}, false, err
+	}
+	if len(data) != dataHashIndexSize {
+		return dataHashIndexState{}, false, fmt.Errorf("invalid data-hash index state size %d", len(data))
+	}
+	if data[0] != dataHashIndexVersion {
+		return dataHashIndexState{}, false, fmt.Errorf("unsupported data-hash index version %d", data[0])
+	}
+	return dataHashIndexState{
+		head:         binary.BigEndian.Uint64(data[1:9]),
+		historyFloor: binary.BigEndian.Uint64(data[9:17]),
+	}, true, nil
+}
+
+func writeDataHashIndexState(db ethdb.KeyValueWriter, state dataHashIndexState) error {
+	data := make([]byte, dataHashIndexSize)
+	data[0] = dataHashIndexVersion
+	binary.BigEndian.PutUint64(data[1:9], state.head)
+	binary.BigEndian.PutUint64(data[9:17], state.historyFloor)
+	return db.Put(dataHashIndexStateKey, data)
+}
+
+func dataHashWindowStart(head uint64) uint64 {
+	// Genesis is never delivered through NEVMBlockConnect and cannot contain a
+	// data-hash journal. At head DataBlockLimit it is therefore harmless that the
+	// arithmetic window starts at block 1 while pruning begins on the next block.
+	if head >= DataBlockLimit {
+		return head - DataBlockLimit + 1
+	}
+	return 0
+}
+
+func readDataHashes(db ethdb.Reader, number uint64) ([]*common.Hash, error) {
+	key := dataHashesKey(number)
+	exists, err := db.Has(key)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, nil
+	}
+	data, err := db.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	var hashes []*common.Hash
+	if err := rlp.DecodeBytes(data, &hashes); err != nil {
+		return nil, fmt.Errorf("invalid data-hash array RLP at block %d: %w", number, err)
+	}
+	for i, hash := range hashes {
+		if hash == nil {
+			return nil, fmt.Errorf("nil data hash at block %d index %d", number, i)
+		}
+	}
+	return hashes, nil
+}
+
 // ReadRawDataHashes retrieves all the data hashes belonging to a block.
 func ReadRawDataHashes(db ethdb.Reader, number uint64) []*common.Hash {
-	// Retrieve the flattened datahash slice
-	data := ReadDataHashesRLP(db, number)
-	if len(data) == 0 {
+	hashes, err := readDataHashes(db, number)
+	if err != nil {
+		log.Error("Failed to read block data hashes", "number", number, "err", err)
 		return nil
 	}
-	dataHashes := []*common.Hash{}
-	if err := rlp.DecodeBytes(data, &dataHashes); err != nil {
-		log.Error("Invalid datahash array RLP", "number", number, "err", err)
-		return nil
+	return hashes
+}
+
+func writeDataHashesRecord(db ethdb.KeyValueWriter, number uint64, hashes []*common.Hash) error {
+	if len(hashes) == 0 {
+		return db.Delete(dataHashesKey(number))
 	}
-	return dataHashes
+	for i, hash := range hashes {
+		if hash == nil {
+			return fmt.Errorf("nil data hash at index %d", i)
+		}
+	}
+	encoded, err := rlp.EncodeToBytes(hashes)
+	if err != nil {
+		return err
+	}
+	return db.Put(dataHashesKey(number), encoded)
+}
+
+func readDataHashRefCount(db ethdb.KeyValueReader, hash common.Hash) (uint64, error) {
+	// SYSCOIN: one lookup keeps expiry/disconnect from racing a prior Has check.
+	data, err := db.Get(dataHashKey(hash))
+	if errors.Is(err, ethdb.ErrKeyNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if len(data) != 8 {
+		return 0, fmt.Errorf("invalid data-hash refcount length %d", len(data))
+	}
+	count := binary.BigEndian.Uint64(data)
+	if count == 0 {
+		return 0, fmt.Errorf("zero data-hash refcount")
+	}
+	return count, nil
+}
+
+type dataHashDelta struct{ add, remove uint64 }
+
+func collectDataHashDeltas(deltas map[common.Hash]dataHashDelta, hashes []*common.Hash, add bool) error {
+	for _, hash := range hashes {
+		delta := deltas[*hash] // nil pointers are rejected when records/inputs are decoded
+		counter := &delta.remove
+		if add {
+			counter = &delta.add
+		}
+		if *counter == ^uint64(0) {
+			return fmt.Errorf("data-hash delta overflow for %x", *hash)
+		}
+		*counter = *counter + 1
+		deltas[*hash] = delta
+	}
+	return nil
+}
+
+func applyDataHashDeltas(dbw ethdb.KeyValueWriter, dbr ethdb.KeyValueReader, deltas map[common.Hash]dataHashDelta) error {
+	for hash, delta := range deltas {
+		count, err := readDataHashRefCount(dbr, hash)
+		if err != nil {
+			return fmt.Errorf("read data-hash refcount %x: %w", hash, err)
+		}
+		if delta.remove > count {
+			return fmt.Errorf("data-hash refcount underflow for %x", hash)
+		}
+		count -= delta.remove
+		if ^uint64(0)-count < delta.add {
+			return fmt.Errorf("data-hash refcount overflow for %x", hash)
+		}
+		count += delta.add
+		if count == 0 {
+			if err := dbw.Delete(dataHashKey(hash)); err != nil {
+				return err
+			}
+			continue
+		}
+		var encoded [8]byte
+		binary.BigEndian.PutUint64(encoded[:], count)
+		if err := dbw.Put(dataHashKey(hash), encoded[:]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RebuildDataHashIndex reconstructs consensus-visible membership from the
+// retained per-height journal. Callers commit dbw atomically with any head move.
+func RebuildDataHashIndex(dbw ethdb.KeyValueWriter, dbr dataHashIndexReader, head uint64) error {
+	state, initialized, err := readDataHashIndexState(dbr)
+	if err != nil {
+		return err
+	}
+	if initialized && head > state.head {
+		return fmt.Errorf("data-hash index trails canonical head: indexed=%d canonical=%d", state.head, head)
+	}
+	start := dataHashWindowStart(head)
+	if head == 0 {
+		// Resetting to genesis is always reconstructable: genesis cannot carry
+		// NEVM data hashes, and subsequent Core connects rebuild the journal.
+		state.historyFloor = 0
+	} else if !initialized {
+		state.historyFloor = start
+	} else if start < state.historyFloor {
+		return fmt.Errorf("data-hash history unavailable: requested window starts at %d, retained floor is %d", start, state.historyFloor)
+	}
+
+	iterator := dbr.NewIterator(dataHashKeyPrefix, nil)
+	for iterator.Next() {
+		key := iterator.Key()
+		if len(key) == len(dataHashKeyPrefix)+common.HashLength {
+			if err := dbw.Delete(bytes.Clone(key)); err != nil {
+				iterator.Release()
+				return err
+			}
+		}
+	}
+	if err := iterator.Error(); err != nil {
+		iterator.Release()
+		return err
+	}
+	iterator.Release()
+
+	counts := make(map[common.Hash]uint64)
+	for number := start; ; number++ {
+		hashes, err := readDataHashes(dbr, number)
+		if err != nil {
+			return err
+		}
+		for _, hash := range hashes {
+			if counts[*hash] == ^uint64(0) {
+				return fmt.Errorf("data-hash refcount overflow for %x", *hash)
+			}
+			counts[*hash]++
+		}
+		if number == head {
+			break
+		}
+	}
+	for hash, count := range counts {
+		var encoded [8]byte
+		binary.BigEndian.PutUint64(encoded[:], count)
+		if err := dbw.Put(dataHashKey(hash), encoded[:]); err != nil {
+			return err
+		}
+	}
+	state.head = head
+	return writeDataHashIndexState(dbw, state)
+}
+
+// EnsureDataHashIndex atomically migrates or repairs the index at node startup.
+func EnsureDataHashIndex(db ethdb.Database, head uint64) error {
+	batch := db.NewBatch()
+	if err := RebuildDataHashIndex(batch, db, head); err != nil {
+		return err
+	}
+	return batch.Write()
+}
+
+func writeDataHashes(dbw ethdb.KeyValueWriter, dbr ethdb.Reader, n uint64, dataHashes []*common.Hash) error {
+	state, initialized, err := readDataHashIndexState(dbr)
+	if err != nil {
+		return err
+	}
+	if !initialized {
+		return fmt.Errorf("data-hash index is not initialized")
+	}
+	for i, hash := range dataHashes {
+		if hash == nil {
+			return fmt.Errorf("nil data hash at index %d", i)
+		}
+	}
+	deltas := make(map[common.Hash]dataHashDelta)
+	switch {
+	case n == state.head:
+		previous, err := readDataHashes(dbr, n)
+		if err != nil {
+			return err
+		}
+		// SYSCOIN: only an exact retry is idempotent. A replacement must first
+		// disconnect the old canonical height and then append its new pairing.
+		if len(previous) != len(dataHashes) {
+			return fmt.Errorf("conflicting data-hash retry at height %d", n)
+		}
+		for i, hash := range previous {
+			if *hash != *dataHashes[i] {
+				return fmt.Errorf("conflicting data-hash retry at height %d", n)
+			}
+		}
+		return nil
+	case state.head != ^uint64(0) && n == state.head+1:
+		if n > DataBlockLimit {
+			expired, err := readDataHashes(dbr, n-DataBlockLimit)
+			if err != nil {
+				return err
+			}
+			if err := collectDataHashDeltas(deltas, expired, false); err != nil {
+				return err
+			}
+		}
+		if n > 2*DataBlockLimit {
+			oldest := n - 2*DataBlockLimit
+			if err := dbw.Delete(dataHashesKey(oldest)); err != nil {
+				return err
+			}
+			if state.historyFloor <= oldest {
+				state.historyFloor = oldest + 1
+			}
+		}
+		state.head = n
+	default:
+		return fmt.Errorf("non-sequential data-hash write: indexed head=%d write=%d", state.head, n)
+	}
+	if err := collectDataHashDeltas(deltas, dataHashes, true); err != nil {
+		return err
+	}
+	if err := writeDataHashesRecord(dbw, n, dataHashes); err != nil {
+		return err
+	}
+	if err := applyDataHashDeltas(dbw, dbr, deltas); err != nil {
+		return err
+	}
+	return writeDataHashIndexState(dbw, state)
 }
 
 func WriteDataHashes(dbw ethdb.KeyValueWriter, dbr ethdb.Reader, n uint64, dataHashes []*common.Hash) {
-	// prune older data hashes after a safe amount of blocks
-	if n > DataBlockLimit {
-		DeleteDataHashes(dbw, dbr, n-DataBlockLimit)
-	}
-	if len(dataHashes) == 0 {
-		return
-	}
-	bytes, err := rlp.EncodeToBytes(dataHashes)
-	if err != nil {
-		log.Crit("Failed to encode block dataHashes", "err", err)
-	}
-	// Store the flattened datahash slice
-	if err := dbw.Put(dataHashesKey(n), bytes); err != nil {
-		log.Crit("Failed to store block dataHashes", "err", err)
-	}
-	for _, dataHash := range dataHashes {
-		if err := dbw.Put(dataHashKey(*dataHash), []byte{0}); err != nil {
-			log.Crit("Failed to write dataHash", "err", err)
-		}
+	if err := writeDataHashes(dbw, dbr, n, dataHashes); err != nil {
+		log.Crit("Failed to update data-hash index", "number", n, "err", err)
 	}
 }
-func DeleteDataHashes(dbw ethdb.KeyValueWriter, dbr ethdb.Reader, n uint64) []*common.Hash {
-	dataHashes := ReadRawDataHashes(dbr, n)
-	if len(dataHashes) == 0 {
-		return nil
+
+func deleteDataHashes(dbw ethdb.KeyValueWriter, dbr ethdb.Reader, n uint64) ([]*common.Hash, error) {
+	state, initialized, err := readDataHashIndexState(dbr)
+	if err != nil {
+		return nil, err
 	}
-	for _, dataHash := range dataHashes {
-		if err := dbw.Delete(dataHashKey(*dataHash)); err != nil {
-			log.Crit("Failed to delete dataHashKey", "err", err)
+	if !initialized {
+		return nil, fmt.Errorf("data-hash index is not initialized")
+	}
+	if n == 0 || n != state.head {
+		return nil, fmt.Errorf("non-tail data-hash delete: indexed head=%d delete=%d", state.head, n)
+	}
+	removed, err := readDataHashes(dbr, n)
+	if err != nil {
+		return nil, err
+	}
+	deltas := make(map[common.Hash]dataHashDelta)
+	if err := collectDataHashDeltas(deltas, removed, false); err != nil {
+		return nil, err
+	}
+	if n > DataBlockLimit {
+		restoredNumber := n - DataBlockLimit
+		if restoredNumber < state.historyFloor {
+			return nil, fmt.Errorf("data-hash history unavailable at block %d (retained floor %d); resync required", restoredNumber, state.historyFloor)
+		}
+		restored, err := readDataHashes(dbr, restoredNumber)
+		if err != nil {
+			return nil, err
+		}
+		if err := collectDataHashDeltas(deltas, restored, true); err != nil {
+			return nil, err
 		}
 	}
 	if err := dbw.Delete(dataHashesKey(n)); err != nil {
-		log.Crit("Failed to delete dataHashesKey", "err", err)
+		return nil, err
 	}
-	return dataHashes
+	if err := applyDataHashDeltas(dbw, dbr, deltas); err != nil {
+		return nil, err
+	}
+	state.head--
+	if err := writeDataHashIndexState(dbw, state); err != nil {
+		return nil, err
+	}
+	return removed, nil
+}
+
+func DeleteDataHashes(dbw ethdb.KeyValueWriter, dbr ethdb.Reader, n uint64) []*common.Hash {
+	hashes, err := TryDeleteDataHashes(dbw, dbr, n)
+	if err != nil {
+		log.Crit("Failed to roll back data-hash index", "number", n, "err", err)
+	}
+	return hashes
+}
+
+// SYSCOIN: TryDeleteDataHashes applies a tail rollback to dbw and returns
+// recoverable history or database errors. Callers may pass an uncommitted batch
+// to preflight the rollback before moving the canonical head.
+func TryDeleteDataHashes(dbw ethdb.KeyValueWriter, dbr ethdb.Reader, n uint64) ([]*common.Hash, error) {
+	return deleteDataHashes(dbw, dbr, n)
+}
+
+// DeleteDataHashesJournal removes a disconnected height before a full index rebuild.
+func DeleteDataHashesJournal(dbw ethdb.KeyValueWriter, n uint64) {
+	if err := dbw.Delete(dataHashesKey(n)); err != nil {
+		log.Crit("Failed to delete data-hash journal", "number", n, "err", err)
+	}
 }
 func ReadSYSHash(db ethdb.Reader, n uint64) []byte {
 	data, err := db.Get(blockNumToSysKey(n))
@@ -919,8 +1255,13 @@ func DeleteBTCCheckpointIndexByBlockNumber(db ethdb.KeyValueWriter, n uint64) {
 	}
 }
 func ReadDataHash(db ethdb.Reader, hash common.Hash) []byte {
-	data, err := db.Get(dataHashKey(hash))
-	if data == nil || err != nil {
+	count, err := readDataHashRefCount(db, hash)
+	if err != nil {
+		// SYSCOIN: this result feeds a consensus-visible precompile. Corrupt or
+		// mixed-schema state must stop the node, not be interpreted as absence.
+		log.Crit("Failed to read data-hash refcount", "hash", hash, "err", err)
+	}
+	if count == 0 {
 		return []byte{}
 	}
 	return hash.Bytes()

@@ -61,28 +61,39 @@ func (b *EthAPIBackend) CurrentBlock() *types.Header {
 	return b.eth.blockchain.CurrentBlock()
 }
 
-func (b *EthAPIBackend) SetHead(number uint64) {
+// SYSCOIN: expose refused bounded rewinds to the caller instead of reporting success.
+func (b *EthAPIBackend) SetHead(number uint64) error {
 	b.eth.handler.downloader.Cancel()
-	b.eth.blockchain.SetHead(number)
+	return b.eth.blockchain.SetHead(number)
 }
 
 // SYSCOIN
+func (b *EthAPIBackend) BeginSyscoinMetadataRead() func() error {
+	return b.eth.blockchain.BeginSyscoinMetadataRead()
+}
+
 func (b *EthAPIBackend) ReadSYSHash(ctx context.Context, number rpc.BlockNumber) ([]byte, error) {
+	defer b.eth.blockchain.LockSyscoinMetadataRead()()
 	return b.eth.blockchain.ReadSYSHash(uint64(number)), nil
 }
 func (b *EthAPIBackend) BTCCheckpointIndex(ctx context.Context, hash common.Hash) (uint64, error) {
+	defer b.eth.blockchain.LockSyscoinMetadataRead()()
 	return b.eth.blockchain.BTCCheckpointIndex(hash), nil
 }
 func (b *EthAPIBackend) ReadBTCCheckpointLastIndex(ctx context.Context) (uint64, error) {
+	defer b.eth.blockchain.LockSyscoinMetadataRead()()
 	return b.eth.blockchain.ReadBTCCheckpointLastIndex(), nil
 }
 func (b *EthAPIBackend) ReadBTCCheckpointHashByIndex(ctx context.Context, idx uint64) ([]byte, error) {
+	defer b.eth.blockchain.LockSyscoinMetadataRead()()
 	return b.eth.blockchain.ReadBTCCheckpointHashByIndex(idx), nil
 }
 func (b *EthAPIBackend) ReadDataHash(ctx context.Context, hash common.Hash) ([]byte, error) {
+	defer b.eth.blockchain.LockSyscoinMetadataRead()()
 	return b.eth.blockchain.ReadDataHash(hash), nil
 }
 func (b *EthAPIBackend) GetNEVMAddress(ctx context.Context, address common.Address) ([]byte, error) {
+	defer b.eth.blockchain.LockSyscoinMetadataRead()()
 	return b.eth.blockchain.GetNEVMAddress(address), nil
 }
 
