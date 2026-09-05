@@ -365,6 +365,11 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if err := bc.loadLastState(); err != nil {
 		return nil, err
 	}
+	// SYSCOIN: an older partial repair may already have separated these markers.
+	// Its address history cannot be inferred from the lower execution head.
+	if chainConfig.SyscoinBlock != nil && (bc.CurrentHeader().Hash() != bc.CurrentBlock().Hash() || bc.CurrentSnapBlock().Hash() != bc.CurrentBlock().Hash()) {
+		return nil, errors.New("inconsistent Syscoin head markers; rebuild Geth state explicitly")
+	}
 	// Make sure the state associated with the block is available, or log out
 	// if there is no available state, waiting for state sync.
 	head := bc.CurrentBlock()
@@ -483,10 +488,15 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	// Rewind the chain in case of an incompatible config upgrade.
 	if compatErr != nil {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compatErr)
+		// SYSCOIN: a refused metadata rewind must not install the new config.
+		var rewindErr error
 		if compatErr.RewindToTime > 0 {
-			bc.SetHeadWithTimestamp(compatErr.RewindToTime)
+			rewindErr = bc.SetHeadWithTimestamp(compatErr.RewindToTime)
 		} else {
-			bc.SetHead(compatErr.RewindToBlock)
+			rewindErr = bc.SetHead(compatErr.RewindToBlock)
+		}
+		if rewindErr != nil {
+			return nil, rewindErr
 		}
 		rawdb.WriteChainConfig(db, genesisHash, chainConfig)
 	}
@@ -801,7 +811,9 @@ func (bc *BlockChain) rewindHashHead(head *types.Header, root common.Hash) (*typ
 }
 
 // rewindPathHead implements the logic of rewindHead in the context of path scheme.
-func (bc *BlockChain) rewindPathHead(head *types.Header, root common.Hash) (*types.Header, uint64) {
+// SYSCOIN: recoverState=false discovers a target without changing trie state,
+// allowing metadata history to be checked before any recovery writes.
+func (bc *BlockChain) rewindPathHead(head *types.Header, root common.Hash, recoverState bool) (*types.Header, uint64) {
 	var (
 		pivot      = rawdb.ReadLastPivotNumber(bc.db) // Associated block number of pivot block
 		rootNumber uint64                             // Associated block number of requested root
@@ -866,7 +878,7 @@ func (bc *BlockChain) rewindPathHead(head *types.Header, root common.Hash) (*typ
 		}
 	}
 	// Recover if the target state if it's not available yet.
-	if !bc.HasState(head.Root) {
+	if recoverState && !bc.HasState(head.Root) {
 		if err := bc.triedb.Recover(head.Root); err != nil {
 			log.Crit("Failed to rollback state", "err", err)
 		}
@@ -885,7 +897,7 @@ func (bc *BlockChain) rewindPathHead(head *types.Header, root common.Hash) (*typ
 // and the whole snapshot should be auto-generated in case of head mismatch.
 func (bc *BlockChain) rewindHead(head *types.Header, root common.Hash) (*types.Header, uint64) {
 	if bc.triedb.Scheme() == rawdb.PathScheme {
-		return bc.rewindPathHead(head, root)
+		return bc.rewindPathHead(head, root, true)
 	}
 	return bc.rewindHashHead(head, root)
 }
@@ -907,6 +919,11 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 		return 0, errChainStopped
 	}
 	defer bc.chainmu.Unlock()
+	// SYSCOIN: generic marker-first repair cannot restore Core-derived state.
+	// Use local, bounded undo and commit metadata with all head markers instead.
+	if bc.chainConfig.SyscoinBlock != nil {
+		return bc.rewindSyscoinHead(head, time, root, repair)
+	}
 
 	var (
 		// Track the block number of the requested root hash
@@ -1518,6 +1535,9 @@ func (bc *BlockChain) writeCanonicalBlock(block *types.Block) error {
 		// SYSCOIN: canonical head markers and transient Core metadata must become
 		// durable together. Publishing the in-memory head is deferred until then.
 		batch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
+		if err := bc.writeNEVMAddressUndo(batch, block); err != nil {
+			return err
+		}
 		if err := bc.writeNEVMData(batch, block); err != nil {
 			return err
 		}

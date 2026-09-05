@@ -61,9 +61,10 @@ func (b *EthAPIBackend) CurrentBlock() *types.Header {
 	return b.eth.blockchain.CurrentBlock()
 }
 
-func (b *EthAPIBackend) SetHead(number uint64) {
+// SYSCOIN: expose refused bounded rewinds to the caller instead of reporting success.
+func (b *EthAPIBackend) SetHead(number uint64) error {
 	b.eth.handler.downloader.Cancel()
-	b.eth.blockchain.SetHead(number)
+	return b.eth.blockchain.SetHead(number)
 }
 
 // SYSCOIN

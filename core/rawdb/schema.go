@@ -123,6 +123,7 @@ var (
 	dataHashesKeyPrefix                = []byte("y")                    // dataHashesKeyPrefix + block number -> versioned hashes
 	dataHashKeyPrefix                  = []byte("w")                    // dataHashKeyPrefix + versioned hash -> versioned hash
 	dataHashIndexStateKey              = []byte("datahash-index-state") // SYSCOIN: version + indexed head + retained-history floor
+	nevmAddressUndoPrefix              = []byte("nevm-address-undo-")   // SYSCOIN: prefix + uint64 block number -> paired address before-images
 
 	// Path-based storage scheme of merkle patricia trie.
 	TrieNodeAccountPrefix = []byte("A") // TrieNodeAccountPrefix + hexPath -> trie node
@@ -365,6 +366,12 @@ func blockNumToBtcCheckpointIndexKey(n uint64) []byte {
 func nevmAddressKey(addr common.Address) []byte {
 	return append([]byte("nevm-address-"), addr.Bytes()...)
 }
+
+// SYSCOIN
+func nevmAddressUndoKey(number uint64) []byte {
+	return append(nevmAddressUndoPrefix, encodeBlockNumber(number)...)
+}
+
 func dataHashesKey(n uint64) []byte {
 	return append(dataHashesKeyPrefix, []byte(new(big.Int).SetUint64(n).String())...)
 }

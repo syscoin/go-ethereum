@@ -848,19 +848,27 @@ type (
 
 // SetHead rewinds the local chain to a new head. Everything above the new head
 // will be deleted and the new one set.
-func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) {
-	hc.setHead(head, 0, updateFn, delFn)
+func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) error {
+	return hc.setHead(head, 0, updateFn, delFn)
 }
 
 // SetHeadWithTimestamp rewinds the local chain to a new head timestamp. Everything
 // above the new head will be deleted and the new one set.
-func (hc *HeaderChain) SetHeadWithTimestamp(time uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) {
-	hc.setHead(0, time, updateFn, delFn)
+func (hc *HeaderChain) SetHeadWithTimestamp(time uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) error {
+	return hc.setHead(0, time, updateFn, delFn)
 }
 
 // setHead rewinds the local chain to a new head block or a head timestamp.
 // Everything above the new head will be deleted and the new one set.
-func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) {
+func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) error {
+	// SYSCOIN: only BlockChain's bounded recovery can rewind the execution
+	// metadata. Refuse direct header-only rewinds before callbacks or writes.
+	if hc.config.SyscoinBlock != nil {
+		if (headTime == 0 && hc.CurrentHeader().Number.Uint64() <= headBlock) || (headTime > 0 && hc.CurrentHeader().Time <= headTime) {
+			return nil
+		}
+		return errors.New("Syscoin header rewind requires BlockChain metadata recovery")
+	}
 	// Sanity check that there's no attempt to undo the genesis block. This is
 	// a fairly synthetic case where someone enables a timestamp based fork
 	// below the genesis timestamp. It's nice to not allow that instead of the
@@ -932,11 +940,6 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 
 		// Remove the related data from the database on all sidechains
 		for _, num := range nums {
-			// SYSCOIN: the height-keyed DA journal describes only the canonical
-			// branch and must be removed with a generic head rewind.
-			if hc.config.SyscoinBlock != nil {
-				rawdb.DeleteDataHashesJournal(batch, num)
-			}
 			// Gather all the side fork hashes
 			hashes := rawdb.ReadAllHashes(hc.chainDb, num)
 			if len(hashes) == 0 {
@@ -952,12 +955,6 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 			rawdb.DeleteCanonicalHash(batch, num)
 		}
 	}
-	// SYSCOIN: rebuild membership in the same batch as the canonical rewind.
-	if hc.config.SyscoinBlock != nil {
-		if err := rawdb.RebuildDataHashIndex(batch, hc.chainDb, hc.CurrentHeader().Number.Uint64()); err != nil {
-			log.Crit("Failed to rebuild data-hash index during rewind", "error", err)
-		}
-	}
 	// Flush all accumulated deletions.
 	if err := batch.Write(); err != nil {
 		log.Crit("Failed to rewind block", "error", err)
@@ -968,6 +965,7 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 	// SYSCOIN
 	hc.SYSHashCache.Purge()
 	hc.BTCCheckpointIndexCache.Purge()
+	return nil
 }
 
 // SetGenesis sets a new genesis block header for the chain

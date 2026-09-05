@@ -1894,8 +1894,9 @@ func (api *DebugAPI) ChaindbCompact() error {
 }
 
 // SetHead rewinds the head of the blockchain to a previous block.
-func (api *DebugAPI) SetHead(number hexutil.Uint64) {
-	api.b.SetHead(uint64(number))
+// SYSCOIN: a rejected recovery must be returned as an RPC error.
+func (api *DebugAPI) SetHead(number hexutil.Uint64) error {
+	return api.b.SetHead(uint64(number))
 }
 
 // NetAPI offers network related RPC methods
