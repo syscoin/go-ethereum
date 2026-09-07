@@ -89,6 +89,11 @@ func TestDuplicateNEVMConnectRejectsUnpairedReplay(t *testing.T) {
 	if got := eth.blockchain.ReadSYSHash(1); !bytes.Equal(got, sysB1) {
 		t.Fatalf("SYSHash(1)=%x want %x", got, sysB1)
 	}
+	status := &ZMQRep{eth: eth}
+	count, pairedHash, ok := status.currentNEVMBlockInfo()
+	if !ok || count != 1 || pairedHash != encodeSyscoinDisplayHash(sysB1) {
+		t.Fatalf("paired status got ok=%v count=%d hash=%s", ok, count, pairedHash)
+	}
 
 	// Same NEVM block, different Core pairing — must not be a successful no-op.
 	if err := eth.AddBlock(makeNEVMConnect(e1, sysB2)); err == nil {
@@ -121,6 +126,10 @@ func TestDuplicateNEVMConnectRejectsUnpairedReplay(t *testing.T) {
 	}
 	if got := eth.blockchain.ReadSYSHash(1); len(got) != 0 {
 		t.Fatalf("SYSHash(1) left after matched disconnect: %x", got)
+	}
+	count, pairedHash, ok = status.currentNEVMBlockInfo()
+	if !ok || count != 0 || pairedHash != encodeSyscoinDisplayHash(nil) {
+		t.Fatalf("genesis status got ok=%v count=%d hash=%s", ok, count, pairedHash)
 	}
 }
 

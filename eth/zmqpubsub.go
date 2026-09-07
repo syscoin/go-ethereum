@@ -19,6 +19,7 @@ package eth
 
 import (
 	"context"
+	"encoding/hex"
 	"strconv"
 
 	"github.com/ethereum/go-ethereum/core/types"
@@ -27,30 +28,46 @@ import (
 	"github.com/go-zeromq/zmq4"
 )
 
+func encodeSyscoinDisplayHash(serializedHash []byte) string {
+	// SYSCOIN: The pairing DB stores uint256's 32 serialized little-endian
+	// bytes. Status uses the conventional display order consumed by SetHex.
+	display := make([]byte, 32)
+	if len(serializedHash) == len(display) {
+		for i := range serializedHash {
+			display[len(display)-1-i] = serializedHash[i]
+		}
+	}
+	return hex.EncodeToString(display)
+}
+
+func (zmq *ZMQRep) currentNEVMBlockInfo() (uint64, string, bool) {
+	count, sysHash, ok := zmq.eth.blockchain.CurrentSyscoinPair()
+	return count, encodeSyscoinDisplayHash(sysHash), ok
+}
+
 type ZMQRep struct {
-	NEVMPubEP   string
-	eth         *Ethereum
-	rep         zmq4.Socket
-	inited      bool
-	ctx         context.Context
-	cancel      context.CancelFunc
+	NEVMPubEP string
+	eth       *Ethereum
+	rep       zmq4.Socket
+	inited    bool
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 func (zmq *ZMQRep) Close() {
-    if !zmq.inited {
-        return
-    }
-    zmq.inited = false
+	if !zmq.inited {
+		return
+	}
+	zmq.inited = false
 
-    zmq.cancel()
+	zmq.cancel()
 
-    if err := zmq.rep.Close(); err != nil {
-        log.Error("ZMQ socket close error", "err", err)
-    } else {
-        log.Info("ZMQ socket closed successfully")
-    }
+	if err := zmq.rep.Close(); err != nil {
+		log.Error("ZMQ socket close error", "err", err)
+	} else {
+		log.Info("ZMQ socket closed successfully")
+	}
 }
-
 
 func (zmq *ZMQRep) InitZMQListener() error {
 	err := zmq.rep.Listen(zmq.NEVMPubEP)
@@ -95,7 +112,7 @@ func (zmq *ZMQRep) InitZMQListener() error {
 					msgSend := zmq4.NewMsgFrom([]byte("nevmcomms"), []byte("ack"))
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
-					}					
+					}
 				} else if strTopic == "nevmconnect" {
 					result := "connected"
 					var nevmBlockConnect types.NEVMBlockConnect
@@ -113,7 +130,7 @@ func (zmq *ZMQRep) InitZMQListener() error {
 					msgSend := zmq4.NewMsgFrom([]byte("nevmconnect"), []byte(result))
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
-					}					
+					}
 				} else if strTopic == "nevmdisconnect" {
 					result := "disconnected"
 					var nevmBlockDisconnect types.NEVMBlockDisconnect
@@ -131,10 +148,10 @@ func (zmq *ZMQRep) InitZMQListener() error {
 					msgSend := zmq4.NewMsgFrom([]byte("nevmdisconnect"), []byte(result))
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
-					}	
+					}
 				} else if strTopic == "nevmblock" {
 					var nevmBlockConnectBytes []byte
-				
+
 					block := zmq.eth.CreateBlock()
 					if block == nil {
 						log.Error("createBlockSub", "err", "block is nil")
@@ -148,20 +165,28 @@ func (zmq *ZMQRep) InitZMQListener() error {
 							nevmBlockConnectBytes = []byte{} // explicitly empty if serialization fails
 						}
 					}
-				
+
 					msgSend := zmq4.NewMsgFrom([]byte("nevmblock"), nevmBlockConnectBytes)
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
 					}
-				
+
 					// explicitly clear bytes after send (optional, helps GC)
 					nevmBlockConnectBytes = nil
 				} else if strTopic == "nevmblockinfo" {
-					str := strconv.FormatUint(zmq.eth.blockchain.CurrentBlock().Number.Uint64(), 10)
-					msgSend := zmq4.NewMsgFrom([]byte("nevmblockinfo"), []byte(str))
+					current, lastSysHash, ok := zmq.currentNEVMBlockInfo()
+					count := strconv.FormatUint(current, 10)
+					if !ok {
+						// A non-numeric count makes the Core side fail closed instead
+						// of accepting a torn or unpaired status snapshot.
+						count = "unavailable"
+					}
+					// SYSCOIN: Count alone cannot distinguish equal-height Syscoin
+					// forks after a crash. Return the exact paired branch tip atomically.
+					msgSend := zmq4.NewMsgFrom([]byte("nevmblockinfo"), []byte(count), []byte(lastSysHash))
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
-					}	
+					}
 				} else {
 					log.Error("Unknown ZMQ request topic", "topic", strTopic)
 					msgSend := zmq4.NewMsgFrom([]byte(strTopic), []byte("unknown-topic"))
@@ -179,13 +204,12 @@ func (zmq *ZMQRep) InitZMQListener() error {
 func NewZMQRep(stackIn *node.Node, ethIn *Ethereum, NEVMPubEPIn string) *ZMQRep {
 	ctx, cancel := context.WithCancel(context.Background())
 	zmq := &ZMQRep{
-		NEVMPubEP:       NEVMPubEPIn,
-		eth:         ethIn,
-		rep:         zmq4.NewRep(ctx),
-		ctx:         ctx,
-		cancel:      cancel,
+		NEVMPubEP: NEVMPubEPIn,
+		eth:       ethIn,
+		rep:       zmq4.NewRep(ctx),
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 	log.Info("zmq Init")
 	return zmq
 }
-

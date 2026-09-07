@@ -17,6 +17,7 @@
 package core
 
 import (
+	"bytes"
 	"errors"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -43,6 +44,30 @@ func (bc *BlockChain) CurrentHeader() *types.Header {
 // block is retrieved from the blockchain's internal cache.
 func (bc *BlockChain) CurrentBlock() *types.Header {
 	return bc.currentBlock.Load()
+}
+
+// SYSCOIN: CurrentSyscoinPair returns one chain-mutex-consistent NEVM
+// height/Syscoin hash pair. Reading these separately can combine equal-height
+// reorg branches.
+func (bc *BlockChain) CurrentSyscoinPair() (uint64, []byte, bool) {
+	if !bc.chainmu.TryLock() {
+		return 0, nil, false
+	}
+	defer bc.chainmu.Unlock()
+
+	head := bc.currentBlock.Load()
+	if head == nil {
+		return 0, nil, false
+	}
+	number := head.Number.Uint64()
+	if number == 0 {
+		return 0, nil, true
+	}
+	sysHash := bc.hc.ReadSYSHash(number)
+	if len(sysHash) != common.HashLength {
+		return number, nil, false
+	}
+	return number, bytes.Clone(sysHash), true
 }
 
 // CurrentSnapBlock retrieves the current snap-sync head block of the canonical
