@@ -45,6 +45,23 @@ func (zmq *ZMQRep) currentNEVMBlockInfo() (uint64, string, bool) {
 	return count, encodeSyscoinDisplayHash(sysHash), ok
 }
 
+// handleNEVMComms receives Core's serialized string, including its length byte.
+// The generic ack is not proof of a flush. Core must require flushed and then
+// query blockinfo to verify the exact committed pair before completing replay.
+func (zmq *ZMQRep) handleNEVMComms(command string) string {
+	switch command {
+	case "\x05flush":
+		if err := zmq.eth.flushBufferedBlocks(); err != nil {
+			log.Error("NEVM buffer flush failed", "err", err)
+			return "flush-failed: " + err.Error()
+		}
+		return "flushed"
+	case "\fstartnetwork":
+		zmq.eth.Downloader().StartNetworkEvent()
+	}
+	return "ack"
+}
+
 type ZMQRep struct {
 	NEVMPubEP string
 	eth       *Ethereum
@@ -106,10 +123,8 @@ func (zmq *ZMQRep) InitZMQListener() error {
 						go zmq.eth.Shutdown()
 						return
 					}
-					if string(msg.Frames[1]) == "\fstartnetwork" {
-						zmq.eth.Downloader().StartNetworkEvent()
-					}
-					msgSend := zmq4.NewMsgFrom([]byte("nevmcomms"), []byte("ack"))
+					result := zmq.handleNEVMComms(string(msg.Frames[1]))
+					msgSend := zmq4.NewMsgFrom([]byte("nevmcomms"), []byte(result))
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
 					}
