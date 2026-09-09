@@ -49,14 +49,24 @@ func nevmInsertError(err error, index int, pairs []*types.NEVMBlockConnect) erro
 }
 
 func nevmConnectResult(err error) string {
+	return nevmBlockResult(err, "connected", "error:")
+}
+
+func nevmFlushResult(err error) string {
+	return nevmBlockResult(err, "flushed", "flush-failed: ")
+}
+
+// nevmBlockResult preserves the rejected pair through both import boundaries.
+// Error text alone never establishes a classified validation rejection.
+func nevmBlockResult(err error, success, errorPrefix string) string {
 	if err == nil {
-		return "connected"
+		return success
 	}
 	var invalid *nevmInvalidBlockError
 	if errors.As(err, &invalid) {
 		return "invalid:" + encodeSyscoinDisplayHash(invalid.nevmHash[:]) + ":" + encodeSyscoinDisplayHash(invalid.sysHash[:])
 	}
-	return "error:" + err.Error()
+	return errorPrefix + err.Error()
 }
 
 func (zmq *ZMQRep) handleNEVMConnect(payload []byte) string {

@@ -53,11 +53,11 @@ func (zmq *ZMQRep) handleNEVMComms(command string) string {
 	case "\x0aconnect-v1":
 		return "connect-v1"
 	case "\x05flush":
-		if err := zmq.eth.flushBufferedBlocks(); err != nil {
+		err := zmq.eth.flushBufferedBlocks()
+		if err != nil {
 			log.Error("NEVM buffer flush failed", "err", err)
-			return "flush-failed: " + err.Error()
 		}
-		return "flushed"
+		return nevmFlushResult(err)
 	case "\fstartnetwork":
 		zmq.eth.Downloader().StartNetworkEvent()
 	}
