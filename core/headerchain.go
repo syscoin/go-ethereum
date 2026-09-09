@@ -142,16 +142,34 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 		procInterrupt:           procInterrupt,
 		engine:                  engine,
 	}
-	// SYSCOIN: load persisted checkpoint last-index (best effort)
-	hc.BTCCheckpointLastIndex.Store(rawdb.ReadBTCCheckpointLastIndex(chainDb))
-	origBTCCheckpointLastIndex := hc.BTCCheckpointLastIndex.Load()
+	// SYSCOIN: failed or malformed checkpoint reads must stop initialization,
+	// not be interpreted as missing entries and persisted as a lower index.
+	origBTCCheckpointLastIndex, err := rawdb.ReadBTCCheckpointLastIndexWithError(chainDb)
+	if err != nil {
+		return nil, fmt.Errorf("initialize BTC checkpoint last index: %w", err)
+	}
+	hc.BTCCheckpointLastIndex.Store(origBTCCheckpointLastIndex)
+	hasCheckpoint := func(index uint64) (bool, error) {
+		hash, err := rawdb.ReadBTCCheckpointHashWithError(chainDb, index)
+		if err != nil {
+			return false, fmt.Errorf("initialize BTC checkpoint hash at index %d: %w", index, err)
+		}
+		return len(hash) != 0, nil
+	}
+	var hasTail bool
+	if origBTCCheckpointLastIndex > 0 {
+		hasTail, err = hasCheckpoint(origBTCCheckpointLastIndex)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// Self-heal: if lastIndex points past existing i2h entries (e.g. partial writes),
 	// clamp it down so BTC checkpoint queries remain correct and future writes stay consistent.
 	//
 	// IMPORTANT: Do not linearly scan down from a corrupt huge lastIndex; use
 	// exponential step-down + binary search for O(log lastIndex) DB reads.
-	if lastIndex := hc.BTCCheckpointLastIndex.Load(); lastIndex > 0 && len(rawdb.ReadBTCCheckpointHashByIndex(chainDb, lastIndex)) == 0 {
-		hi := lastIndex // hi is known-missing (or treated as missing)
+	if lastIndex := hc.BTCCheckpointLastIndex.Load(); lastIndex > 0 && !hasTail {
+		hi := lastIndex // hi is known-missing
 		var lo uint64   // lo is known-existing (0 treated as existing sentinel)
 
 		// Find a lower bound 'lo' where i2h exists (or 0), by stepping down exponentially.
@@ -162,7 +180,11 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 				break
 			}
 			cand := hi - step
-			if cand > 0 && len(rawdb.ReadBTCCheckpointHashByIndex(chainDb, cand)) != 0 {
+			exists, err := hasCheckpoint(cand)
+			if err != nil {
+				return nil, err
+			}
+			if exists {
 				lo = cand
 				break
 			}
@@ -185,7 +207,11 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 		right := hi
 		for right-left > 1 {
 			mid := left + (right-left)/2
-			if mid > 0 && len(rawdb.ReadBTCCheckpointHashByIndex(chainDb, mid)) != 0 {
+			exists, err := hasCheckpoint(mid)
+			if err != nil {
+				return nil, err
+			}
+			if exists {
 				left = mid
 			} else {
 				right = mid

@@ -338,6 +338,11 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	}
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
 	if err != nil {
+		// No chain is returned to close the constructor-owned trie database.
+		// Release its state-history lock so a healthy startup can retry.
+		if closeErr := triedb.Close(); closeErr != nil {
+			log.Error("Failed to close trie database", "err", closeErr)
+		}
 		return nil, err
 	}
 	bc.flushInterval.Store(int64(cacheConfig.TrieTimeLimit))
