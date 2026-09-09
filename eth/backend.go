@@ -429,7 +429,7 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
     // Zero SYS hash: validate next candidate only; never pair or treat as retry.
     if incomingSysHash == (common.Hash{}) {
         if err := eth.engine.VerifyHeader(eth.blockchain, nevmBlockConnectIn.Block.Header()); err != nil {
-            return err
+            return nevmConnectError(err, nevmBlockConnectIn)
         }
         return nil
     }
@@ -467,7 +467,10 @@ func (eth *Ethereum) flushBufferedBlocks() error {
         blockBuffer = append(blockBuffer, nevmBlockConnect.Block)
     }
 
-    if _, err := eth.blockchain.InsertChain(blockBuffer); err != nil {
+    if index, err := eth.blockchain.InsertChain(blockBuffer); err != nil {
+        // Preserve the failing pair before dropping the batch. Only a typed
+        // consensus rejection and a valid failing index identify invalidity.
+        err = nevmInsertError(err, index, eth.blockConnectBuffer)
         // Drop the flush batch on failure. InsertChain may have committed a
         // prefix; those blocks are on disk and contiguity continues from tip.
         // Leaving the rejected entry buffered wedges recovery: a valid

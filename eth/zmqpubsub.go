@@ -50,6 +50,8 @@ func (zmq *ZMQRep) currentNEVMBlockInfo() (uint64, string, bool) {
 // query blockinfo to verify the exact committed pair before completing replay.
 func (zmq *ZMQRep) handleNEVMComms(command string) string {
 	switch command {
+	case "\x0aconnect-v1":
+		return "connect-v1"
 	case "\x05flush":
 		if err := zmq.eth.flushBufferedBlocks(); err != nil {
 			log.Error("NEVM buffer flush failed", "err", err)
@@ -129,19 +131,7 @@ func (zmq *ZMQRep) InitZMQListener() error {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
 					}
 				} else if strTopic == "nevmconnect" {
-					result := "connected"
-					var nevmBlockConnect types.NEVMBlockConnect
-					err = nevmBlockConnect.Deserialize(msg.Frames[1])
-					if err != nil {
-						log.Error("addBlockSub Deserialize", "err", err)
-						result = err.Error()
-					} else {
-						err = zmq.eth.AddBlock(&nevmBlockConnect)
-						if err != nil {
-							log.Error("addBlockSub AddBlock", "err", err)
-							result = err.Error()
-						}
-					}
+					result := zmq.handleNEVMConnect(msg.Frames[1])
 					msgSend := zmq4.NewMsgFrom([]byte("nevmconnect"), []byte(result))
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
