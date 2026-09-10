@@ -405,6 +405,11 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
             return errors.New("NEVM block already paired with a different Syscoin block")
         }
         eth.bufferLock.Unlock()
+        // Retrying an already-present pair bypasses import validation. Check only
+        // this supplied retry, without replacing the original buffered provenance.
+        if err := core.ValidateNEVMPayload(nevmBlockConnectIn.Block); err != nil {
+            return nevmConnectError(err, nevmBlockConnectIn)
+        }
         log.Trace("Exact NEVM/Syscoin pair retry, skipping insert", "number", incomingBlockNumber, "hash", incomingBlockHash)
         return nil
     }

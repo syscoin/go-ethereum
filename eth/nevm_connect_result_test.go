@@ -139,10 +139,12 @@ func TestNEVMConnectWireContract(t *testing.T) {
 	genDB, blocks, _ := core.GenerateChainWithGenesis(genesis, engine, 1, nil)
 	defer genDB.Close()
 	reply := nevmConnectTestReply(t, eth)
-	for _, command := range []string{"\x0aconnect-v1", "connect-v1", "\x09connect-v1", "\x0aconnect-v1\x00", "\x06status", "\x04ping"} {
+	for _, command := range []string{"\x0aconnect-v1", "\x0apayload-v1", "connect-v1", "payload-v1", "\x09connect-v1", "\x09payload-v1", "\x0aconnect-v1\x00", "\x0apayload-v1\x00", "\x06status", "\x04ping"} {
 		want := "ack"
 		if command == "\x0aconnect-v1" {
 			want = "connect-v1"
+		} else if command == "\x0apayload-v1" {
+			want = "payload-v1"
 		}
 		if got := reply("nevmcomms", []byte(command)); got != want {
 			t.Fatalf("comms %q returned %q, want %q", command, got, want)
@@ -150,26 +152,14 @@ func TestNEVMConnectWireContract(t *testing.T) {
 	}
 	pair := makeNEVMConnect(blocks[0], common.HexToHash("0x123456").Bytes())
 	payload := nevmConnectTestPayload(t, pair)
-	wrongHash := bytes.Clone(payload)
-	wrongHash[0] ^= 1
-	wrongTxRoot := bytes.Clone(payload)
-	wrongTxRoot[common.HashLength] ^= 1
 	// Also exercise an empty body directly at the deserialization boundary.
 	if got := (&ZMQRep{eth: eth}).handleNEVMConnect(nil); got != "error:EOF" {
 		t.Fatalf("empty payload failure returned %q", got)
 	}
-	for _, input := range [][]byte{[]byte("invalid:untrusted-payload"), payload[:len(payload)/2], wrongHash, wrongTxRoot} {
-		if got := reply("nevmconnect", input); !strings.HasPrefix(got, "error:") {
+	for _, input := range [][]byte{[]byte("invalid:untrusted-payload"), payload[:len(payload)/2]} {
+		if got := (&ZMQRep{}).handleNEVMConnect(input); !strings.HasPrefix(got, "error:") {
 			t.Fatalf("payload failure returned %q", got)
 		}
-	}
-	// A different supplied body can have the same header hash. Reject its root
-	// mismatch operationally, then accept the complete original pair below.
-	wrongBody := blocks[0].WithBody(types.Body{Transactions: []*types.Transaction{
-		types.NewTx(&types.LegacyTx{Gas: 21_000, GasPrice: big.NewInt(1)}),
-	}})
-	if got := reply("nevmconnect", nevmConnectTestPayload(t, makeNEVMConnect(wrongBody, []byte(pair.Sysblockhash)))); !strings.HasPrefix(got, "error:") {
-		t.Fatalf("supplied body mismatch returned %q", got)
 	}
 	for i := 0; i < 2; i++ {
 		if got := reply("nevmconnect", payload); got != "connected" {

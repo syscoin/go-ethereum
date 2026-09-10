@@ -52,6 +52,8 @@ func (zmq *ZMQRep) handleNEVMComms(command string) string {
 	switch command {
 	case "\x0aconnect-v1":
 		return "connect-v1"
+	case "\x0apayload-v1":
+		return "payload-v1"
 	case "\x05flush":
 		err := zmq.eth.flushBufferedBlocks()
 		if err != nil {
@@ -133,6 +135,12 @@ func (zmq *ZMQRep) InitZMQListener() error {
 				} else if strTopic == "nevmconnect" {
 					result := zmq.handleNEVMConnect(msg.Frames[1])
 					msgSend := zmq4.NewMsgFrom([]byte("nevmconnect"), []byte(result))
+					if err := zmq.rep.SendMulti(msgSend); err != nil {
+						log.Error("ZMQ send error", "topic", strTopic, "err", err)
+					}
+				} else if strTopic == "nevmvalidate" {
+					result := zmq.handleNEVMValidate(msg.Frames[1])
+					msgSend := zmq4.NewMsgFrom([]byte("nevmvalidate"), []byte(result))
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
 					}

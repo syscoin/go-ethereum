@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -23,7 +24,18 @@ type nevmInvalidBlockError struct {
 func (e *nevmInvalidBlockError) Error() string { return e.err.Error() }
 func (e *nevmInvalidBlockError) Unwrap() error { return e.err }
 
+type nevmPayloadError struct {
+	err                       error
+	nevmHash, sysHash, digest common.Hash
+}
+
+func (e *nevmPayloadError) Error() string { return e.err.Error() }
+func (e *nevmPayloadError) Unwrap() error { return e.err }
+
 func nevmConnectError(err error, pair *types.NEVMBlockConnect) error {
+	if nevmHash, sysHash, digest, ok := pair.PayloadRejection(err); ok {
+		return &nevmPayloadError{err: err, nevmHash: nevmHash, sysHash: sysHash, digest: digest}
+	}
 	var invalid *consensus.InvalidBlockError
 	if !errors.As(err, &invalid) || pair == nil || pair.Block == nil {
 		return err
@@ -62,6 +74,11 @@ func nevmBlockResult(err error, success, errorPrefix string) string {
 	if err == nil {
 		return success
 	}
+	var payload *nevmPayloadError
+	if errors.As(err, &payload) {
+		return "payload-invalid:" + encodeSyscoinDisplayHash(payload.nevmHash[:]) + ":" +
+			encodeSyscoinDisplayHash(payload.sysHash[:]) + ":" + encodeSyscoinDisplayHash(payload.digest[:])
+	}
 	var invalid *nevmInvalidBlockError
 	if errors.As(err, &invalid) {
 		return "invalid:" + encodeSyscoinDisplayHash(invalid.nevmHash[:]) + ":" + encodeSyscoinDisplayHash(invalid.sysHash[:])
@@ -72,13 +89,23 @@ func nevmBlockResult(err error, success, errorPrefix string) string {
 func (zmq *ZMQRep) handleNEVMConnect(payload []byte) string {
 	var pair types.NEVMBlockConnect
 	if err := pair.Deserialize(payload); err != nil {
-		// Transport/body-input errors do not establish immutable block invalidity.
 		log.Error("addBlockSub Deserialize", "err", err)
-		return "error:" + err.Error()
+		return nevmConnectResult(nevmConnectError(err, &pair))
 	}
 	err := zmq.eth.AddBlock(&pair)
 	if err != nil {
 		log.Error("addBlockSub AddBlock", "err", err)
 	}
 	return nevmConnectResult(err)
+}
+
+// handleNEVMValidate is a pure recovery check. In particular, a successful reply
+// does not buffer, pair, execute or import the supplied block.
+func (zmq *ZMQRep) handleNEVMValidate(payload []byte) string {
+	var pair types.NEVMBlockConnect
+	err := pair.Deserialize(payload)
+	if err == nil {
+		err = core.ValidateNEVMPayload(pair.Block)
+	}
+	return nevmBlockResult(nevmConnectError(err, &pair), "payload-valid", "error:")
 }

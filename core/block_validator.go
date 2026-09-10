@@ -61,7 +61,7 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 		}
 	}
 
-	if err := validateBodyCommitments(block); err != nil {
+	if err := ValidateNEVMPayload(block); err != nil {
 		return err
 	}
 	if err := validateBodySemantics(block); err != nil {
@@ -79,6 +79,16 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 		return consensus.ErrPrunedAncestor
 	}
 	return nil
+}
+
+// ValidateNEVMPayload checks only body representation commitments. It does not
+// consult chain state, verify ancestry or execute transactions. Import uses this
+// same check once; recovery may invoke it separately for a replacement payload.
+func ValidateNEVMPayload(block *types.Block) error {
+	if block == nil {
+		return errors.New("empty block")
+	}
+	return types.MarkNEVMPayloadError(validateBodyCommitments(block), block)
 }
 
 // validateBodyCommitments checks the supplied body against its immutable header.
