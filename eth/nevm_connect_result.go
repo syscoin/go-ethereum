@@ -37,7 +37,7 @@ func nevmConnectError(err error, pair *types.NEVMBlockConnect) error {
 		return &nevmPayloadError{err: err, nevmHash: nevmHash, sysHash: sysHash, digest: digest}
 	}
 	var invalid *consensus.InvalidBlockError
-	if !errors.As(err, &invalid) || pair == nil || pair.Block == nil {
+	if (!errors.As(err, &invalid) && !pair.HasCommittedRootContradiction(err)) || pair == nil || pair.Block == nil {
 		return err
 	}
 	// An empty SYS hash is the existing header-only candidate check. Do not

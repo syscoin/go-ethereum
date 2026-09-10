@@ -12,8 +12,9 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
-// nevmPayloadContext records only provenance on successful deserialization. Raw
-// payload bytes and their digest are neither retained nor hashed on that path.
+// nevmPayloadContext records the immutable wire context and, after successful
+// deserialization, its decoded block. Raw payload bytes and their digest are
+// neither retained nor hashed on the successful path.
 type nevmPayloadContext struct {
 	nevmHash, txRoot, receiptRoot, sysHash common.Hash
 	block                                  *Block
@@ -44,6 +45,32 @@ type NEVMPayloadError struct {
 
 func (e *NEVMPayloadError) Error() string { return e.err.Error() }
 func (e *NEVMPayloadError) Unwrap() error { return e.err }
+
+// nevmCommittedRootError is created only after the current decoded header
+// matches the committed NEVM hash but contradicts a separately committed root.
+type nevmCommittedRootError struct {
+	err     error
+	block   *Block
+	context *nevmPayloadContext
+}
+
+func (e *nevmCommittedRootError) Error() string { return e.err.Error() }
+func (e *nevmCommittedRootError) Unwrap() error { return e.err }
+
+// HasCommittedRootContradiction authenticates an immutable rejection against
+// this exact decode. A stale Block on a reused receiver cannot authorize it.
+// A zero SYS hash retains the existing header-only candidate-check semantics.
+func (n *NEVMBlockConnect) HasCommittedRootContradiction(err error) bool {
+	var rejected *nevmCommittedRootError
+	if n == nil || n.payload == nil || !errors.As(err, &rejected) {
+		return false
+	}
+	p := n.payload
+	return rejected.context == p && rejected.block != nil && n.Block == rejected.block &&
+		n.Blockhash == p.nevmHash && n.Block.Hash() == p.nevmHash &&
+		len(n.Sysblockhash) == common.HashLength && common.BytesToHash([]byte(n.Sysblockhash)) == p.sysHash &&
+		(n.Block.TxHash() != p.txRoot || n.Block.ReceiptHash() != p.receiptRoot)
+}
 
 // MarkNEVMPayloadError marks an existing body commitment failure at its source.
 // It performs no encoding or hashing; the checked block is retained for reply

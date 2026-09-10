@@ -128,7 +128,7 @@ func TestNEVMPayloadRawFingerprint(t *testing.T) {
 }
 
 func TestNEVMPayloadDeserializeEnvelopeMismatch(t *testing.T) {
-	for _, field := range []string{"transaction-root", "receipt-root", "block-hash"} {
+	for _, field := range []string{"transaction-root", "receipt-root", "block-hash", "block-hash-and-transaction-root", "block-hash-and-receipt-root"} {
 		t.Run(field, func(t *testing.T) {
 			envelope := nevmPayloadTestWire(t)
 			expected := common.Hash{0xa1, 0xb2, 0xc3}
@@ -139,19 +139,126 @@ func TestNEVMPayloadDeserializeEnvelopeMismatch(t *testing.T) {
 				envelope.ReceiptRoot = expected.Bytes()
 			case "block-hash":
 				envelope.NEVMBlockHash = expected.Bytes()
+			case "block-hash-and-transaction-root":
+				envelope.NEVMBlockHash, envelope.TxRoot = expected.Bytes(), expected.Bytes()
+			case "block-hash-and-receipt-root":
+				envelope.NEVMBlockHash, envelope.ReceiptRoot = expected.Bytes(), expected.Bytes()
 			}
 			var n NEVMBlockConnect
 			err := n.Deserialize(nevmPayloadTestSerialize(t, envelope))
-			var rejected *NEVMPayloadError
-			if !errors.As(err, &rejected) {
-				t.Fatalf("envelope mismatch was not a payload rejection: %v", err)
-			}
 			if n.Block == nil || n.payload.block != nil {
 				t.Fatal("envelope rejection recorded successful decoded-block provenance")
 			}
-			nevmPayloadTestAssertRejection(t, &n, err, envelope)
-			if field == "block-hash" && n.Block.Hash() == expected {
-				t.Fatal("fixture must distinguish envelope identity from decoded block hash")
+			if field == "transaction-root" || field == "receipt-root" {
+				if !n.HasCommittedRootContradiction(err) {
+					t.Fatalf("matched-header root contradiction was not immutable: %v", err)
+				}
+				nevmPayloadTestAssertNoRejection(t, &n, err)
+			} else {
+				if n.Block.Hash() == expected || n.HasCommittedRootContradiction(err) {
+					t.Fatal("different decoded header cannot authenticate an immutable contradiction")
+				}
+				nevmPayloadTestAssertRejection(t, &n, err, envelope)
+			}
+		})
+	}
+}
+
+func TestNEVMCommittedRootProvenanceFailsClosed(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(*NEVMBlockConnect, error) (*NEVMBlockConnect, error)
+	}{
+		{"nil-receiver", func(n *NEVMBlockConnect, err error) (*NEVMBlockConnect, error) { return nil, err }},
+		{"missing-context", func(n *NEVMBlockConnect, err error) (*NEVMBlockConnect, error) { n.payload = nil; return n, err }},
+		{"copied-context", func(n *NEVMBlockConnect, err error) (*NEVMBlockConnect, error) {
+			copy := *n.payload
+			n.payload = &copy
+			return n, err
+		}},
+		{"missing-block", func(n *NEVMBlockConnect, err error) (*NEVMBlockConnect, error) { n.Block = nil; return n, err }},
+		{"different-block-pointer", func(n *NEVMBlockConnect, err error) (*NEVMBlockConnect, error) {
+			n.Block = NewBlockWithHeader(n.Block.Header())
+			return n, err
+		}},
+		{"changed-nevm-hash", func(n *NEVMBlockConnect, err error) (*NEVMBlockConnect, error) { n.Blockhash[0] ^= 1; return n, err }},
+		{"changed-sys-pair", func(n *NEVMBlockConnect, err error) (*NEVMBlockConnect, error) {
+			n.Sysblockhash = string(common.Hash{9}.Bytes())
+			return n, err
+		}},
+		{"short-sys-pair", func(n *NEVMBlockConnect, err error) (*NEVMBlockConnect, error) {
+			n.Sysblockhash = n.Sysblockhash[1:]
+			return n, err
+		}},
+		{"no-root-contradiction", func(n *NEVMBlockConnect, err error) (*NEVMBlockConnect, error) {
+			n.payload.txRoot, n.payload.receiptRoot = n.Block.TxHash(), n.Block.ReceiptHash()
+			return n, err
+		}},
+		{"unmarked-text", func(n *NEVMBlockConnect, err error) (*NEVMBlockConnect, error) { return n, errors.New(err.Error()) }},
+		{"wrapped-unmarked-text", func(n *NEVMBlockConnect, err error) (*NEVMBlockConnect, error) {
+			return n, fmt.Errorf("outer: %w", errors.New(err.Error()))
+		}},
+		{"nil-error", func(n *NEVMBlockConnect, err error) (*NEVMBlockConnect, error) { return n, nil }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			envelope := nevmPayloadTestWire(t)
+			envelope.TxRoot = common.Hash{0xa1}.Bytes()
+			n := new(NEVMBlockConnect)
+			err := n.Deserialize(nevmPayloadTestSerialize(t, envelope))
+			wrapped := fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", err))
+			if !n.HasCommittedRootContradiction(wrapped) || !errors.Is(wrapped, err) {
+				t.Fatalf("fixture lost marked contradiction through wrapping: %v", wrapped)
+			}
+			n, err = test.change(n, err)
+			if n.HasCommittedRootContradiction(err) {
+				t.Fatal("uncorrelated error authorized an immutable rejection")
+			}
+		})
+	}
+}
+
+func TestNEVMCommittedRootDeserializeClearsProvenance(t *testing.T) {
+	for _, mode := range []string{"same-contradictory-wire", "valid-wire", "malformed-rlp", "end-of-input"} {
+		t.Run(mode, func(t *testing.T) {
+			envelope := nevmPayloadTestWire(t)
+			envelope.TxRoot = common.Hash{0xa1}.Bytes()
+			var n NEVMBlockConnect
+			oldErr := n.Deserialize(nevmPayloadTestSerialize(t, envelope))
+			if !n.HasCommittedRootContradiction(oldErr) {
+				t.Fatalf("fixture did not produce an immutable rejection: %v", oldErr)
+			}
+			oldBlock, oldContext := n.Block, n.payload
+			var err error
+			switch mode {
+			case "same-contradictory-wire":
+				err = n.Deserialize(nevmPayloadTestSerialize(t, envelope))
+				if !n.HasCommittedRootContradiction(err) {
+					t.Fatalf("new contradictory decode was not authenticated: %v", err)
+				}
+			case "valid-wire":
+				err = n.Deserialize(nevmPayloadTestSerialize(t, nevmPayloadTestWire(t)))
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "malformed-rlp":
+				envelope.NEVMBlockData = []byte{0xff}
+				err = n.Deserialize(nevmPayloadTestSerialize(t, envelope))
+				if n.Block != oldBlock {
+					t.Fatal("fixture did not exercise a failure before Block assignment")
+				}
+				nevmPayloadTestAssertRejection(t, &n, err, envelope)
+			case "end-of-input":
+				err = n.Deserialize(nil)
+				if !errors.Is(err, io.EOF) || n.payload != nil {
+					t.Fatalf("end-of-input retained provenance or changed error: %v", err)
+				}
+			}
+			if n.payload == oldContext || n.HasCommittedRootContradiction(oldErr) {
+				t.Fatal("reused receiver retained prior immutable-rejection authority")
+			}
+			if mode != "same-contradictory-wire" && n.HasCommittedRootContradiction(err) {
+				t.Fatal("new decode improperly inherited an immutable rejection")
 			}
 		})
 	}

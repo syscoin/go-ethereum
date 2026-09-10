@@ -129,3 +129,91 @@ func TestNEVMPayloadBufferedRetryRetainsProvenance(t *testing.T) {
 		t.Fatalf("retry provenance substituted into buffered error: %q", got)
 	}
 }
+
+func TestNEVMCommittedRootContradictions(t *testing.T) {
+	block := types.NewBlockWithHeader(&types.Header{
+		Number: big.NewInt(1), UncleHash: types.EmptyUncleHash,
+		TxHash: types.EmptyTxsHash, ReceiptHash: types.EmptyReceiptsHash,
+	})
+	for _, field := range []string{"transaction-root", "receipt-root"} {
+		for _, candidateOnly := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/candidate-only-%v", field, candidateOnly), func(t *testing.T) {
+				sysHash := common.HexToHash("0x1234").Bytes()
+				if candidateOnly {
+					sysHash = nil
+				}
+				pair := makeNEVMConnect(block, sysHash)
+				var envelope wire.NEVMBlockWire
+				if err := envelope.Deserialize(bytes.NewReader(nevmConnectTestPayload(t, pair))); err != nil {
+					t.Fatal(err)
+				}
+				// The committed NEVM hash already authenticates this exact header.
+				// Changing a separately committed root makes the tuple impossible
+				// to satisfy by replacing the uncommitted block representation.
+				if field == "transaction-root" {
+					envelope.TxRoot = common.Hash{0xa1}.Bytes()
+				} else {
+					envelope.ReceiptRoot = common.Hash{0xb2}.Bytes()
+				}
+				var encoded bytes.Buffer
+				if err := envelope.Serialize(&encoded); err != nil {
+					t.Fatal(err)
+				}
+				want := nevmConnectTestInvalidReply(pair)
+				for _, result := range []string{
+					(&ZMQRep{}).handleNEVMConnect(encoded.Bytes()),
+					(&ZMQRep{}).handleNEVMValidate(encoded.Bytes()),
+				} {
+					if result != want {
+						t.Errorf("committed-root contradiction returned %q, want %q", result, want)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestNEVMCommittedRootRepairableRepresentations(t *testing.T) {
+	block := types.NewBlockWithHeader(&types.Header{
+		Number: big.NewInt(1), UncleHash: types.EmptyUncleHash,
+		TxHash: types.EmptyTxsHash, ReceiptHash: types.EmptyReceiptsHash,
+	})
+	for _, mode := range []string{"different-header", "different-header-and-tx-root", "different-header-and-receipt-root", "malformed-rlp", "body-tx-root"} {
+		t.Run(mode, func(t *testing.T) {
+			candidate := block
+			if mode == "body-tx-root" {
+				header := block.Header()
+				header.TxHash = common.Hash{0xa1}
+				candidate = types.NewBlockWithHeader(header)
+			}
+			pair := makeNEVMConnect(candidate, common.HexToHash("0x1234").Bytes())
+			var envelope wire.NEVMBlockWire
+			if err := envelope.Deserialize(bytes.NewReader(nevmConnectTestPayload(t, pair))); err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "different-header":
+				envelope.NEVMBlockHash = common.Hash{0xc3}.Bytes()
+			case "different-header-and-tx-root":
+				envelope.NEVMBlockHash, envelope.TxRoot = common.Hash{0xc3}.Bytes(), common.Hash{0xa1}.Bytes()
+			case "different-header-and-receipt-root":
+				envelope.NEVMBlockHash, envelope.ReceiptRoot = common.Hash{0xc3}.Bytes(), common.Hash{0xb2}.Bytes()
+			case "malformed-rlp":
+				envelope.NEVMBlockData = []byte{0xff}
+			}
+			var encoded bytes.Buffer
+			if err := envelope.Serialize(&encoded); err != nil {
+				t.Fatal(err)
+			}
+			want := nevmPayloadTestReply(t, encoded.Bytes())
+			if got := (&ZMQRep{}).handleNEVMValidate(encoded.Bytes()); got != want {
+				t.Fatalf("replaceable representation returned %q, want %q", got, want)
+			}
+			if mode != "body-tx-root" {
+				if got := (&ZMQRep{}).handleNEVMConnect(encoded.Bytes()); got != want {
+					t.Fatalf("replaceable connect representation returned %q, want %q", got, want)
+				}
+			}
+		})
+	}
+}

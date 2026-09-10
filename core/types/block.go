@@ -319,19 +319,21 @@ func (n *NEVMBlockConnect) Deserialize(bytesIn []byte) error {
 	// Create NEVMBlockConnect object from deserialized block and NEVM wire data
 	n.Block = &block
 
+	// A different header remains a replaceable representation. Only after
+	// matching its committed hash are contradictions in its roots immutable.
+	if n.Blockhash != block.Hash() {
+		return n.rejectPayload(errors.New("blockhash mismatch"), NEVMBlockWire.NEVMBlockData)
+	}
+
 	// Validate that tx root and receipt root is correct based on the block
 	txRootHash := common.BytesToHash(NEVMBlockWire.TxRoot)
 	if txRootHash != block.TxHash() {
-		return n.rejectPayload(errors.New("transaction Root mismatch"), NEVMBlockWire.NEVMBlockData)
+		return &nevmCommittedRootError{err: errors.New("transaction Root mismatch"), block: &block, context: n.payload}
 	}
 
 	receiptRootHash := common.BytesToHash(NEVMBlockWire.ReceiptRoot)
 	if receiptRootHash != block.ReceiptHash() {
-		return n.rejectPayload(errors.New("receipt Root mismatch"), NEVMBlockWire.NEVMBlockData)
-	}
-
-	if n.Blockhash != block.Hash() {
-		return n.rejectPayload(errors.New("blockhash mismatch"), NEVMBlockWire.NEVMBlockData)
+		return &nevmCommittedRootError{err: errors.New("receipt Root mismatch"), block: &block, context: n.payload}
 	}
 
 	// Process VersionHashes
