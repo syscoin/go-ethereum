@@ -239,6 +239,28 @@ func (dl *diffLayer) journal(w io.Writer) error {
 //
 // The supplied root must be a valid trie hash value.
 func (db *Database) Journal(root common.Hash) error {
+	return db.journal(root, true)
+}
+
+// SYSCOIN: Checkpoint preserves the live diff hierarchy without disabling
+// subsequent imports/rollbacks. The caller must sync the hot database before
+// treating the staged journal and its matching head markers as durable.
+func (db *Database) Checkpoint(root common.Hash) error {
+	return db.journal(root, false)
+}
+
+func (db *Database) journal(root common.Hash, readOnly bool) error {
+	// SYSCOIN: exclude mutations while selecting and serializing the layers.
+	db.lock.Lock()
+	defer db.lock.Unlock()
+	if db.readOnly {
+		return errDatabaseReadOnly
+	}
+	if !readOnly {
+		if err := db.modifyAllowed(); err != nil {
+			return err
+		}
+	}
 	// Retrieve the head layer to journal from.
 	l := db.tree.get(root)
 	if l == nil {
@@ -252,13 +274,11 @@ func (db *Database) Journal(root common.Hash) error {
 	}
 	start := time.Now()
 
-	// Run the journaling
-	db.lock.Lock()
-	defer db.lock.Unlock()
-
-	// Short circuit if the database is in read only mode.
-	if db.readOnly {
-		return errDatabaseReadOnly
+	// SYSCOIN: journaled layers may rely on already-written state histories.
+	if !readOnly && db.freezer != nil {
+		if err := db.freezer.Sync(); err != nil {
+			return err
+		}
 	}
 	// Firstly write out the metadata of journal
 	journal := new(bytes.Buffer)
@@ -279,10 +299,13 @@ func (db *Database) Journal(root common.Hash) error {
 		return err
 	}
 	// Store the journal into the database and return
-	rawdb.WriteTrieJournal(db.diskdb, journal.Bytes())
+	// SYSCOIN: a recovery fence must return storage errors, never a false ack.
+	if err := rawdb.WriteTrieJournalChecked(db.diskdb, journal.Bytes()); err != nil {
+		return err
+	}
 
 	// Set the db in read only mode to reject all following mutations
-	db.readOnly = true
+	db.readOnly = readOnly // SYSCOIN: only shutdown journaling disables writes.
 	log.Info("Persisted dirty state to disk", "size", common.StorageSize(journal.Len()), "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }

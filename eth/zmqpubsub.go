@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/hex"
 	"strconv"
+	"strings" // SYSCOIN: exact recovery durability command.
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -49,6 +50,18 @@ func (zmq *ZMQRep) currentNEVMBlockInfo() (uint64, string, bool) {
 // The generic ack is not proof of a flush. Core must require flushed and then
 // query blockinfo to verify the exact committed pair before completing replay.
 func (zmq *ZMQRep) handleNEVMComms(command string) string {
+	// SYSCOIN: generic legacy ack is never proof of this storage barrier.
+	if len(command) > 1 && strings.HasPrefix(command[1:], nevmDurablePairPrefix) {
+		text, number, hash, err := parseNEVMDurablePair(command)
+		if err == nil {
+			err = zmq.eth.syncNEVMPair(number, hash)
+		}
+		if err != nil {
+			log.Error("NEVM durability fence failed", "err", err)
+			return "durable-pair-error"
+		}
+		return text
+	}
 	switch command {
 	case "\x0aconnect-v1":
 		return "connect-v1"

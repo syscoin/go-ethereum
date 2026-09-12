@@ -62,8 +62,9 @@ var errKeyNotFound = fmt.Errorf("%w: %w", ethdb.ErrKeyNotFound, leveldb.ErrNotFo
 // functionality it also supports batch writes and iterating over the keyspace in
 // binary-alphabetical order.
 type Database struct {
-	fn string      // filename for reporting
-	db *leveldb.DB // LevelDB instance
+	fn     string      // filename for reporting
+	db     *leveldb.DB // LevelDB instance
+	noSync bool        // SYSCOIN: disallow durability acknowledgements in unsafe custom mode.
 
 	compTimeMeter       *metrics.Meter // Meter for measuring the total time spent in database compaction
 	compReadMeter       *metrics.Meter // Meter for measuring the data read during compaction
@@ -133,6 +134,7 @@ func NewCustom(file string, namespace string, customize func(options *opt.Option
 	ldb := &Database{
 		fn:       file,
 		db:       db,
+		noSync:   options.GetNoSync(), // SYSCOIN
 		log:      logger,
 		quitChan: make(chan chan error),
 	}
