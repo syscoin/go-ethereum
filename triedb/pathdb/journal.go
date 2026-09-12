@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 )
@@ -287,7 +288,17 @@ func (db *Database) journal(root common.Hash, readOnly bool) error {
 	}
 	// Secondly write out the state root in disk, ensure all layers
 	// on top are continuous with disk.
-	diskRoot, err := db.hasher(rawdb.ReadAccountTrieNode(db.diskdb, nil))
+	// SYSCOIN: the empty-path account node uses the prefix itself as its key.
+	// Preserve read failures before replacing the journal; only a typed miss
+	// identifies an absent base that the hasher may interpret as an empty trie.
+	diskBlob, err := db.diskdb.Get(rawdb.TrieNodeAccountPrefix)
+	if err != nil {
+		if !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return fmt.Errorf("read journal disk root: %w", err)
+		}
+		diskBlob = nil
+	}
+	diskRoot, err := db.hasher(diskBlob)
 	if err != nil {
 		return err
 	}

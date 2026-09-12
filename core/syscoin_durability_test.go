@@ -17,6 +17,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/triedb"
+	"github.com/ethereum/go-ethereum/triedb/pathdb"
 	"github.com/syscoin/syscoinwire/syscoin/wire"
 )
 
@@ -30,7 +32,29 @@ type syscoinDurabilityDB struct {
 	durable    map[string][]byte
 	syncErr    error
 	journalErr error
+	rootErr    error
+	rootReads  int
 	syncCalls  int
+}
+
+func (db *syscoinDurabilityDB) Get(key []byte) ([]byte, error) {
+	if bytes.Equal(key, rawdb.TrieNodeAccountPrefix) {
+		db.mu.Lock()
+		db.rootReads++
+		err := db.rootErr
+		db.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return db.Database.Get(key)
+}
+
+func (db *syscoinDurabilityDB) setRootError(err error) int {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	db.rootErr = err
+	return db.rootReads
 }
 
 func (db *syscoinDurabilityDB) Put(key, value []byte) error {
@@ -298,4 +322,99 @@ func TestSyscoinPairDurabilityPathCheckpointFailure(t *testing.T) {
 	}
 	successImage := db.crashImage(t)
 	checkSyscoinDurabilityParent(t, f, reopenSyscoinDurabilityChain(t, f, successImage), successImage)
+}
+
+// A physical-root read failure must not turn the nonempty disk base B into
+// an empty-base journal while the selected endpoint P lives in recent layers.
+func TestSyscoinPairDurabilityPathCheckpointRootReadFailure(t *testing.T) {
+	db := &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}
+	t.Cleanup(func() { db.Close() })
+	f := newSyscoinRecoveryFixture(t, rawdb.PathScheme, false, db)
+	base, parent, child := f.blocks[0], f.blocks[1], f.blocks[2]
+	physical, err := db.Database.Get(rawdb.TrieNodeAccountPrefix)
+	if err != nil || len(physical) == 0 || crypto.Keccak256Hash(physical) != base.Root() {
+		t.Fatalf("fixture physical base is not committed block B: bytes=%d err=%v", len(physical), err)
+	}
+	if base.Root() == types.EmptyRootHash || base.Root() == parent.Root() {
+		t.Fatal("fixture needs distinct nonempty physical B and recent endpoint P")
+	}
+	diffs, _, _ := f.chain.TrieDB().Size()
+	if diffs == 0 {
+		t.Fatal("fixture endpoint has no recent diff state")
+	}
+	if db.calls() != 0 {
+		t.Fatal("healthy forward imports added a hot KV sync")
+	}
+	if err := f.chain.SyncSyscoinPair(3, []byte(child.NevmBlockConnect.Sysblockhash)); err != nil {
+		t.Fatal(err)
+	}
+	priorJournal := rawdb.ReadTrieJournal(db)
+	if len(priorJournal) == 0 || db.calls() != 1 {
+		t.Fatal("initial child fence did not establish a usable durable checkpoint")
+	}
+	priorImage := db.crashImage(t)
+	f.check(t, reopenSyscoinDurabilityChain(t, f, priorImage), priorImage, 3)
+	disconnectSyscoinDurabilityChild(t, f)
+	checkSyscoinDurabilityParent(t, f, f.chain, db)
+	if !bytes.Equal(rawdb.ReadAccountTrieNode(db, nil), physical) {
+		t.Fatal("ordinary child disconnect changed the physical base B")
+	}
+	if db.calls() != 1 {
+		t.Fatal("ordinary disconnect added a hot KV sync")
+	}
+	failure := errors.New("injected physical account-root read failure")
+	reads := db.setRootError(failure)
+	defer db.setRootError(nil)
+	// The endpoint is available from real recent layers. This earlier success
+	// must not authorize a later unreadable physical base during Checkpoint.
+	if !f.chain.HasState(parent.Root()) {
+		t.Fatal("parent state was unavailable before checkpoint construction")
+	}
+	if got := db.setRootError(failure); got != reads {
+		t.Fatal("HasState consumed the physical-root fault before checkpoint")
+	}
+	if err := f.chain.SyncSyscoinPair(2, []byte(parent.NevmBlockConnect.Sysblockhash)); !errors.Is(err, failure) {
+		t.Errorf("unreadable physical base obtained durability result %v; want injected error", err)
+	}
+	if got := db.setRootError(nil); got != reads+1 {
+		t.Errorf("physical root reads during checkpoint = %d, want 1", got-reads)
+	}
+	if db.calls() != 1 {
+		t.Errorf("failed physical-root read reached hot KV sync: calls=%d, want 1", db.calls())
+	}
+	if !bytes.Equal(rawdb.ReadTrieJournal(db), priorJournal) {
+		t.Error("failed checkpoint replaced the prior usable trie journal")
+	}
+	failedImage := db.crashImage(t)
+	if !bytes.Equal(rawdb.ReadTrieJournal(failedImage), priorJournal) || rawdb.ReadHeadBlockHash(failedImage) != child.Hash() {
+		t.Error("failed checkpoint changed the previously durable child image")
+	}
+	// Inspect the actual cold trie loader before blockchain repair/rewind can
+	// hide an unusable journal. The prior C journal also contains P's layer.
+	coldTrie := triedb.NewDatabase(failedImage, &triedb.Config{PathDB: pathdb.Defaults})
+	if _, err := coldTrie.NodeReader(parent.Root()); err != nil {
+		t.Errorf("previously available P state lost on cold trie reopen: %v", err)
+	}
+	if err := coldTrie.Close(); err != nil {
+		t.Fatal(err)
+	}
+	checkSyscoinDurabilityParent(t, f, f.chain, db)
+
+	// A transient read failure must leave P retryable and the original live
+	// trie writable. Copy the fenced image before any clean Stop can mask it.
+	beforeRetry := db.calls()
+	if err := f.chain.SyncSyscoinPair(2, []byte(parent.NevmBlockConnect.Sysblockhash)); err != nil {
+		t.Fatal(err)
+	}
+	if db.calls() != beforeRetry+1 {
+		t.Fatal("successful checkpoint retry did not reach exactly one hot KV sync")
+	}
+	successImage := db.crashImage(t)
+	checkSyscoinDurabilityParent(t, f, reopenSyscoinDurabilityChain(t, f, successImage), successImage)
+	if _, err := f.chain.InsertChain(types.Blocks{child}); err != nil {
+		t.Fatalf("live trie was not writable after checkpoint retry: %v", err)
+	}
+	if db.calls() != beforeRetry+1 {
+		t.Fatal("healthy child reapplication added a hot KV sync")
+	}
 }
