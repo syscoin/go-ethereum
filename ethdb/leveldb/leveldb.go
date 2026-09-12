@@ -22,6 +22,7 @@ package leveldb
 
 import (
 	"bytes"
+	stderrors "errors"
 	"fmt"
 	"sync"
 	"time"
@@ -62,9 +63,11 @@ var errKeyNotFound = fmt.Errorf("%w: %w", ethdb.ErrKeyNotFound, leveldb.ErrNotFo
 // functionality it also supports batch writes and iterating over the keyspace in
 // binary-alphabetical order.
 type Database struct {
-	fn     string      // filename for reporting
-	db     *leveldb.DB // LevelDB instance
-	noSync bool        // SYSCOIN: disallow durability acknowledgements in unsafe custom mode.
+	fn       string             // filename for reporting
+	db       *leveldb.DB        // LevelDB instance
+	noSync   bool               // SYSCOIN: disallow durability acknowledgements in unsafe custom mode.
+	readOnly bool               // SYSCOIN: a read-only database cannot acknowledge a durability barrier.
+	storage  *durabilityStorage // SYSCOIN: owns retained WAL writers and the underlying storage.
 
 	compTimeMeter       *metrics.Meter // Meter for measuring the total time spent in database compaction
 	compReadMeter       *metrics.Meter // Meter for measuring the data read during compaction
@@ -123,9 +126,9 @@ func NewCustom(file string, namespace string, customize func(options *opt.Option
 	logger.Info("Allocated cache and file handles", logCtx...)
 
 	// Open the db and recover any potential corruptions
-	db, err := leveldb.OpenFile(file, options)
+	db, store, err := openDurableLevelDB(file, options, false) // SYSCOIN
 	if _, corrupted := err.(*errors.ErrCorrupted); corrupted {
-		db, err = leveldb.RecoverFile(file, nil)
+		db, store, err = openDurableLevelDB(file, nil, true) // SYSCOIN
 	}
 	if err != nil {
 		return nil, err
@@ -134,7 +137,9 @@ func NewCustom(file string, namespace string, customize func(options *opt.Option
 	ldb := &Database{
 		fn:       file,
 		db:       db,
-		noSync:   options.GetNoSync(), // SYSCOIN
+		noSync:   options.GetNoSync(),   // SYSCOIN
+		readOnly: options.GetReadOnly(), // SYSCOIN
+		storage:  store,                 // SYSCOIN
 		log:      logger,
 		quitChan: make(chan chan error),
 	}
@@ -185,7 +190,13 @@ func (db *Database) Close() error {
 		}
 		db.quitChan = nil
 	}
-	return db.db.Close()
+	// SYSCOIN: leveldb.Open does not close caller-owned storage. Stop the engine
+	// first, then release retained journal handles and the filesystem lock.
+	err := db.db.Close()
+	if db.storage != nil {
+		err = stderrors.Join(err, db.storage.Close())
+	}
+	return err
 }
 
 // Has retrieves if a key is present in the key-value store.
