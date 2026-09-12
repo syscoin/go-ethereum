@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/hex"
 	"strconv"
+	"strings" // SYSCOIN: exact recovery durability command.
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -43,6 +44,39 @@ func encodeSyscoinDisplayHash(serializedHash []byte) string {
 func (zmq *ZMQRep) currentNEVMBlockInfo() (uint64, string, bool) {
 	count, sysHash, ok := zmq.eth.blockchain.CurrentSyscoinPair()
 	return count, encodeSyscoinDisplayHash(sysHash), ok
+}
+
+// handleNEVMComms receives Core's serialized string, including its length byte.
+// The generic ack is not proof of a flush. Core must require flushed and then
+// query blockinfo to verify the exact committed pair before completing replay.
+func (zmq *ZMQRep) handleNEVMComms(command string) string {
+	// SYSCOIN: generic legacy ack is never proof of this storage barrier.
+	if len(command) > 1 && strings.HasPrefix(command[1:], nevmDurablePairPrefix) {
+		text, number, hash, err := parseNEVMDurablePair(command)
+		if err == nil {
+			err = zmq.eth.syncNEVMPair(number, hash)
+		}
+		if err != nil {
+			log.Error("NEVM durability fence failed", "err", err)
+			return "durable-pair-error"
+		}
+		return text
+	}
+	switch command {
+	case "\x0aconnect-v1":
+		return "connect-v1"
+	case "\x0apayload-v1":
+		return "payload-v1"
+	case "\x05flush":
+		err := zmq.eth.flushBufferedBlocks()
+		if err != nil {
+			log.Error("NEVM buffer flush failed", "err", err)
+		}
+		return nevmFlushResult(err)
+	case "\fstartnetwork":
+		zmq.eth.Downloader().StartNetworkEvent()
+	}
+	return "ack"
 }
 
 type ZMQRep struct {
@@ -106,28 +140,20 @@ func (zmq *ZMQRep) InitZMQListener() error {
 						go zmq.eth.Shutdown()
 						return
 					}
-					if string(msg.Frames[1]) == "\fstartnetwork" {
-						zmq.eth.Downloader().StartNetworkEvent()
-					}
-					msgSend := zmq4.NewMsgFrom([]byte("nevmcomms"), []byte("ack"))
+					result := zmq.handleNEVMComms(string(msg.Frames[1]))
+					msgSend := zmq4.NewMsgFrom([]byte("nevmcomms"), []byte(result))
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
 					}
 				} else if strTopic == "nevmconnect" {
-					result := "connected"
-					var nevmBlockConnect types.NEVMBlockConnect
-					err = nevmBlockConnect.Deserialize(msg.Frames[1])
-					if err != nil {
-						log.Error("addBlockSub Deserialize", "err", err)
-						result = err.Error()
-					} else {
-						err = zmq.eth.AddBlock(&nevmBlockConnect)
-						if err != nil {
-							log.Error("addBlockSub AddBlock", "err", err)
-							result = err.Error()
-						}
-					}
+					result := zmq.handleNEVMConnect(msg.Frames[1])
 					msgSend := zmq4.NewMsgFrom([]byte("nevmconnect"), []byte(result))
+					if err := zmq.rep.SendMulti(msgSend); err != nil {
+						log.Error("ZMQ send error", "topic", strTopic, "err", err)
+					}
+				} else if strTopic == "nevmvalidate" {
+					result := zmq.handleNEVMValidate(msg.Frames[1])
+					msgSend := zmq4.NewMsgFrom([]byte("nevmvalidate"), []byte(result))
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
 					}

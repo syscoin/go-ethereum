@@ -6,6 +6,8 @@ package eth
 import (
 	"bytes"
 	"math/big"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -16,14 +18,18 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/syscoin/syscoinwire/syscoin/wire"
 )
 
 func newNEVMPairTestEthereum(t *testing.T, flushEveryBlock bool) (*Ethereum, *core.Genesis, *ethash.Ethash) {
 	t.Helper()
+	// SYSCOIN: exercise the same paired-import/rollback guards as production.
+	config := *params.AllEthashProtocolChanges
+	config.SyscoinBlock = big.NewInt(0)
 	gspec := &core.Genesis{
 		BaseFee: big.NewInt(params.InitialBaseFee),
-		Config:  params.AllEthashProtocolChanges,
+		Config:  &config,
 	}
 	engine := ethash.NewFaker()
 	db := rawdb.NewMemoryDatabase()
@@ -151,6 +157,123 @@ func TestExactNEVMPairRetryAllowed(t *testing.T) {
 	}
 }
 
+// SYSCOIN: A legacy database has no journal immediately before its retained
+// 50,001-block window. A matched disconnect at the migration frontier must fail
+// before moving the head, and the unchanged database must remain restartable.
+func TestMigratedDataHashDisconnectFailsBeforeHeadMove(t *testing.T) {
+	config := *params.AllEthashProtocolChanges
+	config.SyscoinBlock = big.NewInt(0)
+	gspec := &core.Genesis{
+		BaseFee: big.NewInt(params.InitialBaseFee),
+		Config:  &config,
+	}
+	engine := ethash.NewFaker()
+	db, _, _ := core.GenerateChainWithGenesis(gspec, engine, 0, nil)
+	t.Cleanup(func() { db.Close() })
+	genesisHash := rawdb.ReadCanonicalHash(db, 0)
+	genesis := rawdb.ReadBlock(db, genesisHash, 0)
+	if genesis == nil {
+		t.Fatal("missing genesis block")
+	}
+
+	headNumber := uint64(rawdb.DataBlockLimit + 1)
+	parentHeader := genesis.Header()
+	parentHeader.ParentHash = genesis.Hash()
+	parentHeader.Number = new(big.Int).SetUint64(headNumber - 1)
+	parentHeader.Time++
+	parentHeader.Extra = []byte("migration-parent")
+	parent := types.NewBlockWithHeader(parentHeader)
+	tipHeader := parent.Header()
+	tipHeader.ParentHash = parent.Hash()
+	tipHeader.Number = new(big.Int).SetUint64(headNumber)
+	tipHeader.Time++
+	tipHeader.Extra = []byte("migration-tip")
+	tip := types.NewBlockWithHeader(tipHeader)
+	for _, block := range []*types.Block{parent, tip} {
+		rawdb.WriteBlock(db, block)
+		rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
+	}
+	rawdb.WriteHeadHeaderHash(db, tip.Hash())
+	rawdb.WriteHeadFastBlockHash(db, tip.Hash())
+	rawdb.WriteHeadBlockHash(db, tip.Hash())
+
+	sysHash := bytes.Repeat([]byte{0x71}, common.HashLength)
+	dataHash := common.HexToHash("0x72")
+	rawdb.WriteSYSHash(db, string(sysHash), headNumber)
+	journal, err := rlp.EncodeToBytes([]*common.Hash{&dataHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// These are the legacy on-disk keys being migrated: y+height journals and
+	// one-byte w+hash membership sentinels. The preceding height's journal was
+	// already pruned by the old client.
+	journalKey := append([]byte("y"), strconv.AppendUint(nil, headNumber, 10)...)
+	if err := db.Put(journalKey, journal); err != nil {
+		t.Fatal(err)
+	}
+	membershipKey := append([]byte("w"), dataHash[:]...)
+	if err := db.Put(membershipKey, []byte{0}); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheConfig := core.DefaultCacheConfigWithScheme(rawdb.HashScheme)
+	// The synthetic legacy database intentionally stores only the two tip
+	// blocks. Archive mode avoids shutdown's recent-state flush, which would
+	// otherwise require constructing the entire 50,001-block chain here.
+	cacheConfig.TrieDirtyDisabled = true
+	chain, err := core.NewBlockChain(db, cacheConfig, gspec, nil, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatalf("migrate chain: %v", err)
+	}
+	eth := &Ethereum{
+		blockchain:         chain,
+		chainDb:            db,
+		engine:             engine,
+		blockConnectBuffer: make([]*types.NEVMBlockConnect, 0, 1),
+	}
+	err = eth.DeleteBlock(makeNEVMDisconnect(sysHash))
+	if err == nil {
+		chain.Stop()
+		t.Fatal("disconnect below migrated retained-history floor succeeded")
+	}
+	if !strings.Contains(err.Error(), "data-hash history unavailable") {
+		chain.Stop()
+		t.Fatalf("disconnect failed through wrong path: %v", err)
+	}
+	if got := chain.CurrentBlock().Number.Uint64(); got != headNumber {
+		chain.Stop()
+		t.Fatalf("head moved after rejected disconnect: got %d want %d", got, headNumber)
+	}
+	if got := chain.ReadDataHash(dataHash); !bytes.Equal(got, dataHash.Bytes()) {
+		chain.Stop()
+		t.Fatalf("membership changed after rejected disconnect: %x", got)
+	}
+	if got := rawdb.ReadRawDataHashes(db, headNumber); len(got) != 1 || *got[0] != dataHash {
+		chain.Stop()
+		t.Fatalf("tip journal changed after rejected disconnect: %v", got)
+	}
+	if got := chain.ReadSYSHash(headNumber); !bytes.Equal(got, sysHash) {
+		chain.Stop()
+		t.Fatalf("SYS pairing changed after rejected disconnect: %x", got)
+	}
+	chain.Stop()
+
+	restarted, err := core.NewBlockChain(db, cacheConfig, gspec, nil, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatalf("restart after rejected disconnect: %v", err)
+	}
+	defer restarted.Stop()
+	if got := restarted.CurrentBlock().Number.Uint64(); got != headNumber {
+		t.Fatalf("restarted head = %d, want %d", got, headNumber)
+	}
+	if got := restarted.ReadDataHash(dataHash); !bytes.Equal(got, dataHash.Bytes()) {
+		t.Fatalf("restarted membership = %x", got)
+	}
+	if got := restarted.ReadSYSHash(headNumber); !bytes.Equal(got, sysHash) {
+		t.Fatalf("restarted SYS pairing = %x", got)
+	}
+}
+
 func TestReplayOlderCanonicalNEVMRejected(t *testing.T) {
 	eth, gspec, engine := newNEVMPairTestEthereum(t, true)
 
@@ -240,6 +363,8 @@ func TestUnpairedTipZeroSysHashRetryRejected(t *testing.T) {
 
 	_, blocks, _ := core.GenerateChainWithGenesis(gspec, engine, 1, nil)
 	e1 := blocks[0]
+	// SYSCOIN: seed an incomplete pairing through the core-only fixture.
+	e1.NevmBlockConnect = makeNEVMConnect(e1, nil)
 	if _, err := eth.blockchain.InsertChain([]*types.Block{e1}); err != nil {
 		t.Fatalf("insert unpaired tip: %v", err)
 	}
@@ -261,7 +386,8 @@ func TestDisconnectZeroSysHashRejected(t *testing.T) {
 
 	_, blocks, _ := core.GenerateChainWithGenesis(gspec, engine, 1, nil)
 	e1 := blocks[0]
-	// Insert without NevmBlockConnect so tip has no SYSHash pairing.
+	// SYSCOIN: seed an incomplete pairing through the core-only fixture.
+	e1.NevmBlockConnect = makeNEVMConnect(e1, nil)
 	if _, err := eth.blockchain.InsertChain([]*types.Block{e1}); err != nil {
 		t.Fatalf("insert unpaired tip: %v", err)
 	}
