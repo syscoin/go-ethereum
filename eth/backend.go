@@ -330,6 +330,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.shutdownTracker.MarkStartup()
 	// SYSCOIN	
 	if eth.blockchain.Config().SyscoinBlock != nil {
+		stack.DeferP2PStart()
 		eth.zmqRep = NewZMQRep(stack, eth, config.NEVMPubEP)
 		// Subscribe before Start can expose the listener; TypeMux does not replay events.
 		sub := eth.eventMux.Subscribe(downloader.StartNetworkEvent{})
@@ -569,12 +570,33 @@ func (eth *Ethereum) networkingLoop(sub *event.TypeMuxSubscription) {
 			case downloader.StartNetworkEvent:
 				log.Info("Received StartNetworkEvent, waiting for block arrival to finish (5 seconds of inactivity)...")
 				if eth.waitForSyncCompletion() {
+					select {
+					case <-eth.closeHandler:
+						return
+					default:
+					}
 					log.Info("5 seconds passed without new blocks. Starting network...")
-					eth.handler.peers.SetOpen()
 					if err := eth.p2pServer.Start(); err != nil {
 						log.Error("Error starting p2pServer", "err", err)
+						eth.Shutdown()
+						return
 					}
+					if err := eth.setupDiscovery(); err != nil {
+						log.Error("Error starting protocol discovery", "err", err)
+						eth.Shutdown()
+						return
+					}
+					// Commit activation against shutdown after discovery initialization.
+					eth.lock.Lock()
+					select {
+					case <-eth.closeHandler:
+						eth.lock.Unlock()
+						return
+					default:
+					}
+					eth.handler.peers.SetOpen()
 					eth.handler.Start(eth.p2pServer.MaxPeers)
+					eth.lock.Unlock()
 					eth.Downloader().DoneEvent()
 					eth.handler.synced.Store(true)
 				}
@@ -664,22 +686,18 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Start implements node.Lifecycle, starting all internal goroutines needed by the
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
-	if err := s.setupDiscovery(); err != nil {
-		return err
+	if s.blockchain.Config().SyscoinBlock == nil {
+		if err := s.setupDiscovery(); err != nil {
+			return err
+		}
 	}
 
 	// Regularly update shutdown marker
 	s.shutdownTracker.Start()
 	if s.blockchain.Config().SyscoinBlock != nil {
-		log.Info("SYSCOIN mode active: skipping Ethereum networking and peers")
-
-		// Explicitly mark peers closed BEFORE calling any handler methods:
+		log.Info("SYSCOIN mode active: deferring Ethereum networking and peers")
+		// The first P2P start and discovery setup happen after NEVM authorization.
 		s.handler.peers.SetClosed()
-		s.p2pServer.Stop()
-
-		// Don't call s.handler.Start(), as it will try to sync peers
-		// instead, manually start minimal required handlers:
-		go s.zmqRep.InitZMQListener()
 
 	} else {
 		// Normal Ethereum networking startup
@@ -690,6 +708,12 @@ func (s *Ethereum) Start() error {
 	// start log indexer
 	s.filterMaps.Start()
 	go s.updateFilterMapsHeads()
+	if s.zmqRep != nil {
+		if err := s.zmqRep.InitZMQListener(); err != nil {
+			s.Stop()
+			return err
+		}
+	}
 	return nil
 }
 
@@ -787,11 +811,17 @@ func (s *Ethereum) setupDiscovery() error {
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
 	// SYSCOIN
+	s.lock.Lock()
 	if s.closeHandler != nil {
 		s.closeHandlerOnce.Do(func() {
 			close(s.closeHandler)
 		})
 	}
+	s.lock.Unlock()
+	// Release pending event posts and join delayed startup before tearing down
+	// discovery, handlers or the chain they use.
+	s.eventMux.Stop()
+	s.wg.Wait()
     // Flush buffered blocks first
     if err := s.flushBufferedBlocks(); err != nil {
         log.Error("Failed to flush buffered blocks on shutdown", "err", err)
@@ -814,9 +844,7 @@ func (s *Ethereum) Stop() error {
 	s.shutdownTracker.Stop()
 
 	s.chainDb.Close()
-	s.eventMux.Stop()
 	// SYSCOIN
-	s.wg.Wait()
 	s.wgNEVM.Wait()
 	if s.zmqRep != nil {
 		s.zmqRep.Close()

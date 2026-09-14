@@ -61,7 +61,7 @@ type adminAPI struct {
 func (api *adminAPI) AddPeer(url string) (bool, error) {
 	// Make sure the server is running, fail otherwise
 	server := api.node.Server()
-	if server == nil {
+	if server == nil || !server.Running() {
 		return false, ErrNodeStopped
 	}
 	// Try to add the url as a static peer and return
@@ -77,7 +77,7 @@ func (api *adminAPI) AddPeer(url string) (bool, error) {
 func (api *adminAPI) RemovePeer(url string) (bool, error) {
 	// Make sure the server is running, fail otherwise
 	server := api.node.Server()
-	if server == nil {
+	if server == nil || !server.Running() {
 		return false, ErrNodeStopped
 	}
 	// Try to remove the url as a static peer and return
@@ -93,7 +93,7 @@ func (api *adminAPI) RemovePeer(url string) (bool, error) {
 func (api *adminAPI) AddTrustedPeer(url string) (bool, error) {
 	// Make sure the server is running, fail otherwise
 	server := api.node.Server()
-	if server == nil {
+	if server == nil || !server.Running() {
 		return false, ErrNodeStopped
 	}
 	node, err := enode.Parse(enode.ValidSchemes, url)
@@ -109,7 +109,7 @@ func (api *adminAPI) AddTrustedPeer(url string) (bool, error) {
 func (api *adminAPI) RemoveTrustedPeer(url string) (bool, error) {
 	// Make sure the server is running, fail otherwise
 	server := api.node.Server()
-	if server == nil {
+	if server == nil || !server.Running() {
 		return false, ErrNodeStopped
 	}
 	node, err := enode.Parse(enode.ValidSchemes, url)
