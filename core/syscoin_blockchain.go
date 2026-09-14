@@ -289,7 +289,6 @@ func (bc *BlockChain) DisconnectSyscoinBlock(disconnect *types.NEVMBlockDisconne
 	}
 
 	removedLogs := bc.collectLogs(current, true)
-	parentLogs := bc.collectLogs(parent, false)
 	if disconnect.Diff != nil && disconnect.HasDiff() {
 		for _, entry := range disconnect.Diff.AddedMNNEVM {
 			bc.StoreNEVMAddress(batch, common.BytesToAddress(entry.Address), entry.CollateralHeight)
@@ -330,9 +329,6 @@ func (bc *BlockChain) DisconnectSyscoinBlock(disconnect *types.NEVMBlockDisconne
 		bc.rmLogsFeed.Send(RemovedLogsEvent{Logs: removedLogs})
 	}
 	bc.chainFeed.Send(ChainEvent{Header: parent.Header()})
-	if len(parentLogs) > 0 {
-		bc.logsFeed.Send(parentLogs)
-	}
 	bc.chainHeadFeed.Send(ChainHeadEvent{Header: parent.Header()})
 	return nil
 }

@@ -86,12 +86,15 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 			}()
 			eth := &Ethereum{blockchain: chain, chainDb: db}
 			var tx *types.Transaction
-			genDB, blocks, _ := core.GenerateChainWithGenesis(genesis, engine, 1, func(_ int, b *core.BlockGen) {
-				tx = types.MustSignNewTx(key, b.Signer(), &types.LegacyTx{To: &contract, Gas: 100_000, GasPrice: big.NewInt(params.InitialBaseFee)})
+			genDB, blocks, _ := core.GenerateChainWithGenesis(genesis, engine, 2, func(i int, b *core.BlockGen) {
+				tx = types.MustSignNewTx(key, b.Signer(), &types.LegacyTx{Nonce: uint64(i), To: &contract, Gas: 100_000, GasPrice: big.NewInt(params.InitialBaseFee)})
 				b.AddTx(tx)
 			})
 			defer genDB.Close()
-			tip := blocks[0]
+			parent, tip := blocks[0], blocks[1]
+			height := tip.NumberU64()
+			parentSYS := bytes.Repeat([]byte{0x43}, common.HashLength)
+			parent.NevmBlockConnect = makeNEVMConnect(parent, parentSYS)
 			data := common.HexToHash("0x1111")
 			btc := common.HexToHash("0x2222")
 			addr := common.HexToAddress("0x3333")
@@ -113,18 +116,22 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 					wantHead = tip.Hash()
 				}
 				if rawdb.ReadHeadBlockHash(db) != wantHead || rawdb.ReadHeadHeaderHash(db) != wantHead || rawdb.ReadHeadFastBlockHash(db) != wantHead ||
-					(rawdb.ReadCanonicalHash(db, 1) == tip.Hash()) != present ||
+					(rawdb.ReadCanonicalHash(db, height) == tip.Hash()) != present ||
 					(len(rawdb.ReadDataHash(db, data)) > 0) != present ||
-					(len(rawdb.ReadSYSHash(db, 1)) > 0) != present ||
+					(len(rawdb.ReadSYSHash(db, height)) > 0) != present ||
 					(rawdb.ReadBTCCheckpointIndexByHash(db, btc) == 1) != present ||
 					(rawdb.ReadBTCCheckpointLastIndex(db) == 1) != present ||
 					(rawdb.ReadTxLookupEntry(db, tx.Hash()) != nil) != present ||
 					(len(rawdb.GetNEVMAddress(db, addr)) > 0) != present {
 					t.Error("durable head and rollback metadata disagree")
 				}
+				if rawdb.ReadCanonicalHash(db, parent.NumberU64()) != parent.Hash() ||
+					!bytes.Equal(rawdb.ReadSYSHash(db, parent.NumberU64()), parentSYS) {
+					t.Error("rollback changed the retained canonical parent")
+				}
 				if caches && (chain.CurrentBlock().Hash() != wantHead ||
 					(len(chain.ReadDataHash(data)) > 0) != present ||
-					(len(chain.ReadSYSHash(1)) > 0) != present ||
+					(len(chain.ReadSYSHash(height)) > 0) != present ||
 					(chain.BTCCheckpointIndex(btc) == 1) != present ||
 					(chain.ReadBTCCheckpointLastIndex() == 1) != present ||
 					(len(chain.GetNEVMAddress(addr)) > 0) != present) {
@@ -144,6 +151,35 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 			removed := make(chan core.RemovedLogsEvent, 2)
 			logSub := chain.SubscribeRemovedLogsEvent(removed)
 			defer logSub.Unsubscribe()
+			added := make(chan []*types.Log, 4)
+			addedSub := chain.SubscribeLogsEvent(added)
+			defer addedSub.Unsubscribe()
+			chainEvents := make(chan core.ChainEvent, 2)
+			chainSub := chain.SubscribeChainEvent(chainEvents)
+			defer chainSub.Unsubscribe()
+			checkNoAddedLogs := func() {
+				select {
+				case logs := <-added:
+					t.Errorf("disconnect published added logs from unchanged parent: %v", logs)
+				default:
+				}
+			}
+			parentReceipts := chain.GetReceiptsByHash(parent.Hash())
+			if len(parentReceipts) != 1 || len(parentReceipts[0].Logs) != 1 {
+				t.Fatal("retained parent must contain a receipt log")
+			}
+			// Cancelling a queued child must not publish persisted-chain events.
+			bufferedBlocks, _ := core.GenerateChain(&config, tip, engine, genDB, 1, nil)
+			bufferedSYS := bytes.Repeat([]byte{0x55}, common.HashLength)
+			eth.blockConnectBuffer = []*types.NEVMBlockConnect{makeNEVMConnect(bufferedBlocks[0], bufferedSYS)}
+			if err := eth.DeleteBlock(makeNEVMDisconnect(bufferedSYS)); err != nil {
+				t.Fatal(err)
+			}
+			check(true, true)
+			checkNoAddedLogs()
+			if len(events) != 0 || len(removed) != 0 || len(chainEvents) != 0 || len(eth.blockConnectBuffer) != 0 {
+				t.Fatal("buffered cancellation changed persisted-chain notifications")
+			}
 			if test.fail {
 				writeErr := errors.New("injected disconnect write failure")
 				db.mu.Lock()
@@ -153,6 +189,10 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 					t.Fatalf("disconnect error: %v", err)
 				}
 				check(true, true)
+				checkNoAddedLogs()
+				if len(chainEvents) != 0 {
+					t.Fatal("failed disconnect published a chain event")
+				}
 				select {
 				case <-events:
 					t.Fatal("failed disconnect published a head event")
@@ -172,6 +212,10 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 			db.afterWrite = func() {
 				writes++
 				check(false, false)
+				checkNoAddedLogs()
+				if len(chainEvents) != 0 {
+					t.Error("chain event published before durable commit returned")
+				}
 				if chain.CurrentBlock().Hash() != tip.Hash() {
 					t.Error("new head published before durable commit returned")
 				}
@@ -197,6 +241,15 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 				t.Errorf("disconnect committed %d batches, want one", writes)
 			}
 			check(false, true)
+			checkNoAddedLogs()
+			select {
+			case event := <-chainEvents:
+				if event.Header.Hash() != parent.Hash() {
+					t.Error("wrong rollback chain event head")
+				}
+			default:
+				t.Error("successful disconnect did not publish chain event")
+			}
 			select {
 			case event := <-events:
 				if event.Header.Hash() != tip.ParentHash() {
@@ -207,7 +260,8 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 			}
 			select {
 			case event := <-removed:
-				if len(event.Logs) != 1 || !event.Logs[0].Removed || event.Logs[0].TxHash != tx.Hash() {
+				if len(event.Logs) != 1 || !event.Logs[0].Removed || event.Logs[0].TxHash != tx.Hash() ||
+					event.Logs[0].BlockHash != tip.Hash() {
 					t.Error("wrong rollback logs")
 				}
 			default:
@@ -219,6 +273,33 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 				t.Fatalf("restart after disconnect: %v", err)
 			}
 			check(false, true)
+			// A genuinely connected replacement still publishes its added logs.
+			replacements, _ := core.GenerateChain(&config, parent, engine, genDB, 1, func(_ int, b *core.BlockGen) {
+				b.SetExtra([]byte("replacement"))
+				b.AddTx(types.MustSignNewTx(key, b.Signer(), &types.LegacyTx{
+					Nonce: 1, To: &contract, Gas: 100_000, GasPrice: big.NewInt(params.InitialBaseFee), Data: []byte{1},
+				}))
+			})
+			replacement := replacements[0]
+			replacement.NevmBlockConnect = makeNEVMConnect(replacement, bytes.Repeat([]byte{0x66}, common.HashLength))
+			replacementLogs := make(chan []*types.Log, 2)
+			replacementSub := chain.SubscribeLogsEvent(replacementLogs)
+			defer replacementSub.Unsubscribe()
+			if _, err := chain.InsertChain(replacements); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case logs := <-replacementLogs:
+				if len(logs) != 1 || logs[0].Removed || logs[0].BlockHash != replacement.Hash() ||
+					logs[0].TxHash != replacement.Transactions()[0].Hash() {
+					t.Fatal("wrong added logs for replacement child")
+				}
+			default:
+				t.Fatal("replacement child did not publish added logs")
+			}
+			if len(replacementLogs) != 0 {
+				t.Fatal("replacement child published extra log events")
+			}
 		})
 	}
 }
