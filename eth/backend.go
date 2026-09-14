@@ -331,8 +331,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	// SYSCOIN	
 	if eth.blockchain.Config().SyscoinBlock != nil {
 		eth.zmqRep = NewZMQRep(stack, eth, config.NEVMPubEP)
+		// Subscribe before Start can expose the listener; TypeMux does not replay events.
+		sub := eth.eventMux.Subscribe(downloader.StartNetworkEvent{})
 		eth.wg.Add(1)
-		go eth.networkingLoop()
+		go eth.networkingLoop(sub)
 	}
 	return eth, nil
 }
@@ -545,10 +547,9 @@ func (eth *Ethereum) DeleteBlock(nevmBlockDisconnect *types.NEVMBlockDisconnect)
 	return eth.blockchain.DisconnectSyscoinBlock(nevmBlockDisconnect)
 }
 // SYSCOIN start networking sync once we start inserting chain meaning we are likely finished with IBD
-func (eth *Ethereum) networkingLoop() {
+func (eth *Ethereum) networkingLoop(sub *event.TypeMuxSubscription) {
 	defer eth.wg.Done()
 
-	sub := eth.eventMux.Subscribe(downloader.StartNetworkEvent{})
 	defer sub.Unsubscribe()
 
 	for {
