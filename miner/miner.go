@@ -142,9 +142,11 @@ func (miner *Miner) BuildPayload(args *BuildPayloadArgs, witness bool) (*Payload
 // getPending retrieves the pending block based on the current head block.
 // The result might be nil if pending generation is failed.
 func (miner *Miner) getPending() *newPayloadResult {
-	header := miner.chain.CurrentHeader()
 	miner.pendingMu.Lock()
 	defer miner.pendingMu.Unlock()
+	// SYSCOIN: bind derived pending state to its metadata before parent selection.
+	checkMetadata := miner.chain.BeginSyscoinMetadataRead()
+	header := miner.chain.CurrentHeader()
 	if cached := miner.pending.resolve(header.Hash()); cached != nil {
 		return cached
 	}
@@ -170,6 +172,10 @@ func (miner *Miner) getPending() *newPayloadResult {
 	if ret.err != nil {
 		return nil
 	}
-	miner.pending.update(header.Hash(), ret)
+	// SYSCOIN: a build spanning a publication must be retried, not cached.
+	if checkMetadata() != nil {
+		return nil
+	}
+	miner.pending.update(header.Hash(), ret, checkMetadata)
 	return ret
 }

@@ -71,6 +71,12 @@ This also covers gas estimation, simulation, access-list creation and tracing;
 streamed traces terminate with an error if their generation changes, and
 invalidated file traces discard their newly created output files.
 
+Cached pending execution retains the generation checked during its construction.
+Reuse requires that generation to remain valid, even if a disconnect/reconnect
+returns to the same NEVM parent hash with different Core metadata. A build that
+spans a publication returns pending state unavailable and can be retried. The
+existing parent-hash check and two-second cache lifetime still apply.
+
 This is a consistency fence, not a historical metadata index. Historical,
 pending and simulated EVM state retain their existing current-tip metadata
 semantics. Long historical traces can therefore require retry after a normal
