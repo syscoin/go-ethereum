@@ -18,6 +18,29 @@ package consensus
 
 import "errors"
 
+// InvalidBlockError identifies a deterministic failure of committed block data.
+// Local availability, storage and transport errors must never use this marker.
+// Unwrap preserves the original consensus error for errors.Is callers.
+type InvalidBlockError struct {
+	Err error
+}
+
+func (e *InvalidBlockError) Error() string { return e.Err.Error() }
+func (e *InvalidBlockError) Unwrap() error { return e.Err }
+
+// MarkInvalidBlock is only for validation origins that have ruled out local
+// failures and, for execution errors, verified the body's header commitments.
+func MarkInvalidBlock(err error) error {
+	if err == nil {
+		return nil
+	}
+	var invalid *InvalidBlockError
+	if errors.As(err, &invalid) {
+		return err
+	}
+	return &InvalidBlockError{Err: err}
+}
+
 var (
 	// ErrUnknownAncestor is returned when validating a block requires an ancestor
 	// that is unknown.

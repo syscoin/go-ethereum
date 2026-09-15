@@ -21,6 +21,8 @@ import (
 	"context"
 	"encoding/hex"
 	"strconv"
+	"strings" // SYSCOIN: exact recovery durability command.
+	"sync"
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -45,37 +47,99 @@ func (zmq *ZMQRep) currentNEVMBlockInfo() (uint64, string, bool) {
 	return count, encodeSyscoinDisplayHash(sysHash), ok
 }
 
+// handleNEVMComms receives Core's serialized string, including its length byte.
+// The generic ack is not proof of a flush. Core must require flushed and then
+// query blockinfo to verify the exact committed pair before completing replay.
+func (zmq *ZMQRep) handleNEVMComms(command string) string {
+	// SYSCOIN: generic legacy ack is never proof of this storage barrier.
+	if len(command) > 1 && strings.HasPrefix(command[1:], nevmDurablePairPrefix) {
+		text, number, hash, err := parseNEVMPairCommand(command, nevmDurablePairPrefix)
+		if err == nil {
+			err = zmq.eth.syncNEVMPair(number, hash)
+		}
+		if err != nil {
+			log.Error("NEVM durability fence failed", "err", err)
+			return "durable-pair-error"
+		}
+		return text
+	}
+	// SYSCOIN: acknowledge only the checked, already-executed Core finality pair.
+	if len(command) > 1 && strings.HasPrefix(command[1:], nevmFinalityPrefix) {
+		text, number, hash, err := parseNEVMPairCommand(command, nevmFinalityPrefix)
+		if err == nil {
+			err = zmq.eth.blockchain.SetSyscoinFinality(number, hash)
+		}
+		if err != nil {
+			log.Debug("NEVM finality update deferred", "err", err)
+			return "finality-error"
+		}
+		return text
+	}
+	switch command {
+	case "\x0aconnect-v1":
+		return "connect-v1"
+	case "\x0apayload-v1":
+		return "payload-v1"
+	case "\x05flush":
+		err := zmq.eth.flushBufferedBlocks()
+		if err != nil {
+			log.Error("NEVM buffer flush failed", "err", err)
+		}
+		return nevmFlushResult(err)
+	case "\fstartnetwork":
+		zmq.eth.Downloader().StartNetworkEvent()
+	}
+	return "ack"
+}
+
 type ZMQRep struct {
 	NEVMPubEP string
 	eth       *Ethereum
 	rep       zmq4.Socket
-	inited    bool
 	ctx       context.Context
 	cancel    context.CancelFunc
+	// SYSCOIN: serialize listener startup/closure and join its dispatcher.
+	mu     sync.Mutex
+	done   chan struct{}
+	closed bool
 }
 
 func (zmq *ZMQRep) Close() {
-	if !zmq.inited {
-		return
+	zmq.mu.Lock()
+	if !zmq.closed {
+		zmq.closed = true
+		zmq.cancel()
+		if err := zmq.rep.Close(); err != nil {
+			log.Error("ZMQ socket close error", "err", err)
+		} else {
+			log.Info("ZMQ socket closed successfully")
+		}
 	}
-	zmq.inited = false
-
-	zmq.cancel()
-
-	if err := zmq.rep.Close(); err != nil {
-		log.Error("ZMQ socket close error", "err", err)
-	} else {
-		log.Info("ZMQ socket closed successfully")
+	done := zmq.done
+	zmq.mu.Unlock()
+	// An active command may need backend locks while finishing after cancellation.
+	if done != nil {
+		<-done
 	}
 }
 
 func (zmq *ZMQRep) InitZMQListener() error {
+	zmq.mu.Lock()
+	defer zmq.mu.Unlock()
+	if err := zmq.ctx.Err(); err != nil {
+		return err
+	}
+	if zmq.done != nil {
+		return nil
+	}
 	err := zmq.rep.Listen(zmq.NEVMPubEP)
 	if err != nil {
 		log.Error("could not listen on NEVM REP point", "endpoint", zmq.NEVMPubEP, "err", err)
 		return err
 	}
+	zmq.done = make(chan struct{})
 	go func(zmq *ZMQRep) {
+		defer close(zmq.done)
 		for {
 			select {
 			case <-zmq.ctx.Done():
@@ -90,6 +154,10 @@ func (zmq *ZMQRep) InitZMQListener() error {
 					}
 					log.Error("ZMQ receive error", "err", err)
 					continue
+				}
+				// Cancellation may race a queued receive; do not dispatch it afterward.
+				if zmq.ctx.Err() != nil {
+					return
 				}
 				if len(msg.Frames) != 2 {
 					log.Error("Invalid number of message frames", "len", len(msg.Frames))
@@ -106,28 +174,20 @@ func (zmq *ZMQRep) InitZMQListener() error {
 						go zmq.eth.Shutdown()
 						return
 					}
-					if string(msg.Frames[1]) == "\fstartnetwork" {
-						zmq.eth.Downloader().StartNetworkEvent()
-					}
-					msgSend := zmq4.NewMsgFrom([]byte("nevmcomms"), []byte("ack"))
+					result := zmq.handleNEVMComms(string(msg.Frames[1]))
+					msgSend := zmq4.NewMsgFrom([]byte("nevmcomms"), []byte(result))
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
 					}
 				} else if strTopic == "nevmconnect" {
-					result := "connected"
-					var nevmBlockConnect types.NEVMBlockConnect
-					err = nevmBlockConnect.Deserialize(msg.Frames[1])
-					if err != nil {
-						log.Error("addBlockSub Deserialize", "err", err)
-						result = err.Error()
-					} else {
-						err = zmq.eth.AddBlock(&nevmBlockConnect)
-						if err != nil {
-							log.Error("addBlockSub AddBlock", "err", err)
-							result = err.Error()
-						}
-					}
+					result := zmq.handleNEVMConnect(msg.Frames[1])
 					msgSend := zmq4.NewMsgFrom([]byte("nevmconnect"), []byte(result))
+					if err := zmq.rep.SendMulti(msgSend); err != nil {
+						log.Error("ZMQ send error", "topic", strTopic, "err", err)
+					}
+				} else if strTopic == "nevmvalidate" {
+					result := zmq.handleNEVMValidate(msg.Frames[1])
+					msgSend := zmq4.NewMsgFrom([]byte("nevmvalidate"), []byte(result))
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
 					}
@@ -197,7 +257,6 @@ func (zmq *ZMQRep) InitZMQListener() error {
 			}
 		}
 	}(zmq)
-	zmq.inited = true
 	return nil
 }
 

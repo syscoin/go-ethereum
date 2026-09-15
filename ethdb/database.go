@@ -40,6 +40,10 @@ type KeyValueWriter interface {
 	Delete(key []byte) error
 }
 
+// SYSCOIN: local backends classify atomic lookup misses with errors.Is, keeping
+// absence distinct from storage failure without a separate Has check.
+var ErrKeyNotFound = errors.New("key not found")
+
 var ErrTooManyKeys = errors.New("too many keys in deleted range")
 
 // KeyValueRangeDeleter wraps the DeleteRange method of a backing data store.

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic" // SYSCOIN
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -75,6 +76,8 @@ type Miner struct {
 	chain       *core.BlockChain
 	pending     *pending
 	pendingMu   sync.Mutex // Lock protects the pending block
+	// SYSCOIN: refuse new pending work while shutdown drains admitted callers.
+	pendingStopped atomic.Bool
 }
 
 // New creates a new miner with provided config.
@@ -93,11 +96,25 @@ func New(eth Backend, config Config, engine consensus.Engine) *Miner {
 // and statedb. The returned values can be nil in case the pending block is
 // not initialized.
 func (miner *Miner) Pending() (*types.Block, types.Receipts, *state.StateDB) {
+	// SYSCOIN: include StateDB.Copy in the lifetime protected by StopPending.
+	miner.pendingMu.Lock()
+	defer miner.pendingMu.Unlock()
+	if miner.pendingStopped.Load() {
+		return nil, nil, nil
+	}
 	pending := miner.getPending()
 	if pending == nil {
 		return nil, nil, nil
 	}
 	return pending.block, pending.receipts, pending.stateDB.Copy()
+}
+
+// SYSCOIN: StopPending refuses new pending work and waits for admitted callers
+// before their execution dependencies are closed. It is safe to call repeatedly.
+func (miner *Miner) StopPending() {
+	miner.pendingStopped.Store(true)
+	miner.pendingMu.Lock()
+	miner.pendingMu.Unlock()
 }
 
 // SetExtra sets the content used to initialize the block extra field.
@@ -141,10 +158,11 @@ func (miner *Miner) BuildPayload(args *BuildPayloadArgs, witness bool) (*Payload
 
 // getPending retrieves the pending block based on the current head block.
 // The result might be nil if pending generation is failed.
+// SYSCOIN: the caller holds pendingMu through copying the returned state.
 func (miner *Miner) getPending() *newPayloadResult {
+	// SYSCOIN: bind derived pending state to its metadata before parent selection.
+	checkMetadata := miner.chain.BeginSyscoinMetadataRead()
 	header := miner.chain.CurrentHeader()
-	miner.pendingMu.Lock()
-	defer miner.pendingMu.Unlock()
 	if cached := miner.pending.resolve(header.Hash()); cached != nil {
 		return cached
 	}
@@ -170,6 +188,10 @@ func (miner *Miner) getPending() *newPayloadResult {
 	if ret.err != nil {
 		return nil
 	}
-	miner.pending.update(header.Hash(), ret)
+	// SYSCOIN: a build spanning a publication must be retried, not cached.
+	if checkMetadata() != nil {
+		return nil
+	}
+	miner.pending.update(header.Hash(), ret, checkMetadata)
 	return ret
 }
