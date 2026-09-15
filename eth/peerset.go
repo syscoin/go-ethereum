@@ -82,6 +82,9 @@ func (ps *peerSet) registerSnapExtension(peer *snap.Peer) error {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
 
+	if ps.closed {
+		return errPeerSetClosed
+	}
 	id := peer.ID()
 	if _, ok := ps.peers[id]; ok {
 		return errPeerAlreadyRegistered // avoid connections with the same id as existing ones
@@ -109,6 +112,10 @@ func (ps *peerSet) waitSnapExtension(peer *eth.Peer) (*snap.Peer, error) {
 	// Ensure nobody can double connect
 	ps.lock.Lock()
 
+	if ps.closed {
+		ps.lock.Unlock()
+		return nil, errPeerSetClosed
+	}
 	id := peer.ID()
 	if _, ok := ps.peers[id]; ok {
 		ps.lock.Unlock()
