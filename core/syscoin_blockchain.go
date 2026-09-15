@@ -20,8 +20,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -290,7 +292,10 @@ func (bc *BlockChain) DisconnectSyscoinBlock(disconnect *types.NEVMBlockDisconne
 		return errors.New("parent state unavailable for Syscoin disconnect")
 	}
 
-	removedLogs := bc.collectLogs(current, true)
+	removedLogs, err := bc.collectSyscoinRemovedLogs(current)
+	if err != nil {
+		return fmt.Errorf("cannot collect Syscoin removed logs at block %d: %w", currentNumber, err)
+	}
 	if disconnect.Diff != nil && disconnect.HasDiff() {
 		for _, entry := range disconnect.Diff.AddedMNNEVM {
 			bc.StoreNEVMAddress(batch, common.BytesToAddress(entry.Address), entry.CollateralHeight)
@@ -335,4 +340,28 @@ func (bc *BlockChain) DisconnectSyscoinBlock(disconnect *types.NEVMBlockDisconne
 	bc.chainFeed.Send(ChainEvent{Header: parent.Header()})
 	bc.chainHeadFeed.Send(ChainHeadEvent{Header: parent.Header()})
 	return nil
+}
+
+// SYSCOIN: acquire all removed logs before committing a managed disconnect.
+// The generic collector can log receipt errors and return an incomplete result.
+func (bc *BlockChain) collectSyscoinRemovedLogs(block *types.Block) ([]*types.Log, error) {
+	receipts, err := rawdb.ReadRawReceiptsFromKVWithError(bc.db, block.Hash(), block.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+	var blobGasPrice *big.Int
+	if block.ExcessBlobGas() != nil {
+		blobGasPrice = eip4844.CalcBlobFee(bc.chainConfig, block.Header())
+	}
+	if err := receipts.DeriveFields(bc.chainConfig, block.Hash(), block.NumberU64(), block.Time(), block.BaseFee(), blobGasPrice, block.Transactions()); err != nil {
+		return nil, err
+	}
+	var logs []*types.Log
+	for _, receipt := range receipts {
+		for _, entry := range receipt.Logs {
+			entry.Removed = true
+			logs = append(logs, entry)
+		}
+	}
+	return logs, nil
 }

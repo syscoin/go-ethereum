@@ -572,6 +572,25 @@ func ReadRawReceipts(db ethdb.Reader, hash common.Hash, number uint64) types.Rec
 	return receipts
 }
 
+// SYSCOIN: ReadRawReceiptsFromKVWithError requires a readable receipt record
+// for managed disconnect, which already refuses frozen blocks. Missing or
+// corrupt receipts must not become a successful rollback without removed logs.
+func ReadRawReceiptsFromKVWithError(db ethdb.KeyValueReader, hash common.Hash, number uint64) (types.Receipts, error) {
+	data, err := db.Get(blockReceiptsKey(number, hash))
+	if err != nil {
+		return nil, err
+	}
+	var stored []*types.ReceiptForStorage
+	if err := rlp.DecodeBytes(data, &stored); err != nil {
+		return nil, err
+	}
+	receipts := make(types.Receipts, len(stored))
+	for i, receipt := range stored {
+		receipts[i] = (*types.Receipt)(receipt)
+	}
+	return receipts, nil
+}
+
 // ReadReceipts retrieves all the transaction receipts belonging to a block, including
 // its corresponding metadata fields. If it is unable to populate these metadata
 // fields then nil is returned.

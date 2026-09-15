@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -26,6 +27,32 @@ type disconnectTestDB struct {
 	mu         sync.Mutex
 	afterWrite func()
 	fail       error
+	readMu     sync.Mutex
+	readKey    []byte
+	readValue  []byte
+	readErr    error
+	readHits   int
+}
+
+func (db *disconnectTestDB) Get(key []byte) ([]byte, error) {
+	db.readMu.Lock()
+	defer db.readMu.Unlock()
+	if db.readKey != nil && bytes.Equal(key, db.readKey) {
+		db.readHits++
+		return bytes.Clone(db.readValue), db.readErr
+	}
+	return db.Database.Get(key)
+}
+
+type disconnectReceiptKeyCapture struct{ key []byte }
+
+func (c *disconnectReceiptKeyCapture) Put(key, _ []byte) error {
+	c.key = bytes.Clone(key)
+	return nil
+}
+
+func (c *disconnectReceiptKeyCapture) Delete([]byte) error {
+	return errors.New("unexpected delete while capturing receipt key")
 }
 
 type disconnectTestBatch struct {
@@ -56,9 +83,16 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 	for _, test := range []struct {
 		name, scheme string
 		fail         bool
+		receiptFault string
+		empty        bool
 	}{
-		{"hash-atomic", rawdb.HashScheme, false}, {"hash-failed-write-retry", rawdb.HashScheme, true},
-		{"path-atomic", rawdb.PathScheme, false}, {"path-failed-write-retry", rawdb.PathScheme, true},
+		{"hash-atomic", rawdb.HashScheme, false, "", false}, {"hash-failed-write-retry", rawdb.HashScheme, true, "", false},
+		{"path-atomic", rawdb.PathScheme, false, "", false}, {"path-failed-write-retry", rawdb.PathScheme, true, "", false},
+		{"hash-receipt-io", rawdb.HashScheme, false, "io", false}, {"path-receipt-io", rawdb.PathScheme, false, "io", false},
+		{"hash-receipt-missing", rawdb.HashScheme, false, "missing", false}, {"path-receipt-missing", rawdb.PathScheme, false, "missing", false},
+		{"hash-receipt-malformed", rawdb.HashScheme, false, "malformed", false}, {"path-receipt-malformed", rawdb.PathScheme, false, "malformed", false},
+		{"hash-receipt-count", rawdb.HashScheme, false, "count", false}, {"path-receipt-count", rawdb.PathScheme, false, "count", false},
+		{"hash-empty-tip", rawdb.HashScheme, false, "", true}, {"path-empty-tip", rawdb.PathScheme, false, "", true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			config := *params.AllEthashProtocolChanges
@@ -87,6 +121,10 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 			eth := &Ethereum{blockchain: chain, chainDb: db}
 			var tx *types.Transaction
 			genDB, blocks, _ := core.GenerateChainWithGenesis(genesis, engine, 2, func(i int, b *core.BlockGen) {
+				if i == 1 && test.empty {
+					tx = nil
+					return
+				}
 				tx = types.MustSignNewTx(key, b.Signer(), &types.LegacyTx{Nonce: uint64(i), To: &contract, Gas: 100_000, GasPrice: big.NewInt(params.InitialBaseFee)})
 				b.AddTx(tx)
 			})
@@ -121,7 +159,7 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 					(len(rawdb.ReadSYSHash(db, height)) > 0) != present ||
 					(rawdb.ReadBTCCheckpointIndexByHash(db, btc) == 1) != present ||
 					(rawdb.ReadBTCCheckpointLastIndex(db) == 1) != present ||
-					(rawdb.ReadTxLookupEntry(db, tx.Hash()) != nil) != present ||
+					(tx != nil && (rawdb.ReadTxLookupEntry(db, tx.Hash()) != nil) != present) ||
 					(len(rawdb.GetNEVMAddress(db, addr)) > 0) != present {
 					t.Error("durable head and rollback metadata disagree")
 				}
@@ -137,7 +175,7 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 					(len(chain.GetNEVMAddress(addr)) > 0) != present) {
 					t.Error("published head and metadata caches disagree")
 				}
-				if caches {
+				if caches && tx != nil {
 					lookup, _, err := chain.GetTransactionLookup(tx.Hash())
 					if err != nil || (lookup != nil) != present {
 						t.Errorf("transaction lookup after rollback: %v, %v", lookup, err)
@@ -179,6 +217,57 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 			checkNoAddedLogs()
 			if len(events) != 0 || len(removed) != 0 || len(chainEvents) != 0 || len(eth.blockConnectBuffer) != 0 {
 				t.Fatal("buffered cancellation changed persisted-chain notifications")
+			}
+			if test.receiptFault != "" {
+				capture := new(disconnectReceiptKeyCapture)
+				rawdb.WriteReceipts(capture, tip.Hash(), height, nil)
+				readErr := errors.New("injected receipt read failure")
+				db.readMu.Lock()
+				db.readKey, db.readHits = capture.key, 0
+				switch test.receiptFault {
+				case "io":
+					db.readErr = readErr
+				case "missing":
+					db.readErr = ethdb.ErrKeyNotFound
+				case "malformed":
+					db.readValue = []byte{0xff}
+				case "count":
+					db.readValue = []byte{0xc0} // Valid RLP empty list for a nonempty block.
+				}
+				db.readMu.Unlock()
+				failedWrites := 0
+				db.mu.Lock()
+				db.afterWrite = func() { failedWrites++ }
+				db.mu.Unlock()
+				checkGeneration := chain.BeginSyscoinMetadataRead()
+				err := eth.DeleteBlock(disconnect)
+				db.mu.Lock()
+				db.afterWrite = nil
+				db.mu.Unlock()
+				db.readMu.Lock()
+				hits := db.readHits
+				db.readKey, db.readValue, db.readErr = nil, nil, nil
+				db.readMu.Unlock()
+				if hits == 0 {
+					t.Fatal("disconnect did not attempt the injected receipt read")
+				}
+				if err == nil {
+					t.Error("receipt read fault was accepted as successful disconnect")
+				}
+				var invalid *consensus.InvalidBlockError
+				if errors.As(err, &invalid) || (test.receiptFault == "io" && !errors.Is(err, readErr)) {
+					t.Errorf("receipt failure was not preserved as a local error: %v", err)
+				}
+				if failedWrites != 0 || len(events) != 0 || len(removed) != 0 || len(chainEvents) != 0 || len(added) != 0 {
+					t.Error("receipt preflight failure committed metadata or published events")
+				}
+				if err := checkGeneration(); err != nil {
+					t.Errorf("receipt preflight failure changed metadata generation: %v", err)
+				}
+				check(true, true)
+				if err == nil {
+					return // Baseline already moved the head; that is not a failed-operation retry.
+				}
 			}
 			if test.fail {
 				writeErr := errors.New("injected disconnect write failure")
@@ -260,12 +349,14 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 			}
 			select {
 			case event := <-removed:
-				if len(event.Logs) != 1 || !event.Logs[0].Removed || event.Logs[0].TxHash != tx.Hash() ||
+				if tx == nil || len(event.Logs) != 1 || !event.Logs[0].Removed || event.Logs[0].TxHash != tx.Hash() ||
 					event.Logs[0].BlockHash != tip.Hash() {
 					t.Error("wrong rollback logs")
 				}
 			default:
-				t.Error("successful disconnect did not publish removed logs")
+				if !test.empty {
+					t.Error("successful disconnect did not publish removed logs")
+				}
 			}
 			chain.Stop()
 			chain, err = core.NewBlockChain(db, core.DefaultCacheConfigWithScheme(test.scheme), genesis, nil, engine, vm.Config{}, nil)
