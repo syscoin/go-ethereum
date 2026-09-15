@@ -49,6 +49,20 @@ func ReadBTCCheckpointIndexWithError(db ethdb.KeyValueReader, hash common.Hash) 
 	return index, nil
 }
 
+// ReadBTCCheckpointIndexByBlockNumberWithError distinguishes a non-carrier
+// block from an unreadable checkpoint mapping during canonical rollback.
+func ReadBTCCheckpointIndexByBlockNumberWithError(db ethdb.KeyValueReader, n uint64) (uint64, error) {
+	data, err := readExecutionValue(db, blockNumToBtcCheckpointIndexKey(n), 8)
+	if err != nil || data == nil {
+		return 0, err
+	}
+	index := binary.BigEndian.Uint64(data)
+	if index == 0 {
+		return 0, errors.New("zero BTC checkpoint carrier index")
+	}
+	return index, nil
+}
+
 func ReadBTCCheckpointHashWithError(db ethdb.KeyValueReader, index uint64) ([]byte, error) {
 	return readExecutionValue(db, btcCheckpointI2HKey(index), common.HashLength)
 }

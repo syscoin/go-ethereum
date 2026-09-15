@@ -197,7 +197,9 @@ func (bc *BlockChain) rewindSyscoinHead(head, timestamp uint64, root common.Hash
 		}
 		rawdb.DeleteDataHashesJournal(batch, n)
 		bc.DeleteSYSHash(batch, n)
-		bc.DeleteBTCCheckpoint(batch, n)
+		if err := bc.DeleteBTCCheckpoint(batch, n); err != nil {
+			return 0, fmt.Errorf("preflight Syscoin checkpoint rewind: %w", err)
+		}
 		for _, tx := range block.Transactions() {
 			rawdb.DeleteTxLookupEntry(batch, tx.Hash())
 		}
@@ -302,7 +304,9 @@ func (bc *BlockChain) DisconnectSyscoinBlock(disconnect *types.NEVMBlockDisconne
 		}
 	}
 	bc.DeleteSYSHash(batch, currentNumber)
-	bc.DeleteBTCCheckpoint(batch, currentNumber)
+	if err := bc.DeleteBTCCheckpoint(batch, currentNumber); err != nil {
+		return fmt.Errorf("cannot disconnect Syscoin checkpoint at block %d: %w", currentNumber, err)
+	}
 	if err := rawdb.DeleteNEVMAddressUndo(batch, currentNumber); err != nil {
 		return err
 	}

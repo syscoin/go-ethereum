@@ -167,7 +167,9 @@ func TestHeaderChainBTCCheckpointTailRollback(t *testing.T) {
 		t.Fatalf("unexpected block->index mapping at tip: got %d want %d", got, 3)
 	}
 
-	hc.DeleteBTCCheckpoint(db, 102)
+	if err := hc.DeleteBTCCheckpoint(db, 102); err != nil {
+		t.Fatal(err)
+	}
 	if got := hc.ReadBTCCheckpointLastIndex(); got != 2 {
 		t.Fatalf("unexpected last index after first tail delete: got %d want %d", got, 2)
 	}
@@ -187,7 +189,9 @@ func TestHeaderChainBTCCheckpointTailRollback(t *testing.T) {
 		t.Fatalf("unexpected hash at index 2 after tail delete: got %x want %x", got, h2)
 	}
 
-	hc.DeleteBTCCheckpoint(db, 101)
+	if err := hc.DeleteBTCCheckpoint(db, 101); err != nil {
+		t.Fatal(err)
+	}
 	if got := hc.ReadBTCCheckpointLastIndex(); got != 1 {
 		t.Fatalf("unexpected last index after second tail delete: got %d want %d", got, 1)
 	}
@@ -195,7 +199,9 @@ func TestHeaderChainBTCCheckpointTailRollback(t *testing.T) {
 		t.Fatalf("unexpected hash at surviving index 1: got %x want %x", got, h1)
 	}
 
-	hc.DeleteBTCCheckpoint(db, 100)
+	if err := hc.DeleteBTCCheckpoint(db, 100); err != nil {
+		t.Fatal(err)
+	}
 	if got := hc.ReadBTCCheckpointLastIndex(); got != 0 {
 		t.Fatalf("unexpected last index after deleting boundary index 1: got %d want %d", got, 0)
 	}
@@ -203,7 +209,9 @@ func TestHeaderChainBTCCheckpointTailRollback(t *testing.T) {
 		t.Fatalf("unexpected persisted last index after deleting boundary index 1: got %d want %d", got, 0)
 	}
 	// Non-existent block deletion should remain a no-op.
-	hc.DeleteBTCCheckpoint(db, 999)
+	if err := hc.DeleteBTCCheckpoint(db, 999); err != nil {
+		t.Fatal(err)
+	}
 	if got := hc.ReadBTCCheckpointLastIndex(); got != 0 {
 		t.Fatalf("unexpected last index after no-op delete: got %d want %d", got, 0)
 	}
@@ -351,8 +359,12 @@ func TestHeaderChainBTCCheckpointReorgSwitch(t *testing.T) {
 	}
 
 	// Reorg disconnect of old tail branch.
-	hc.DeleteBTCCheckpoint(db, 501)
-	hc.DeleteBTCCheckpoint(db, 500)
+	if err := hc.DeleteBTCCheckpoint(db, 501); err != nil {
+		t.Fatal(err)
+	}
+	if err := hc.DeleteBTCCheckpoint(db, 500); err != nil {
+		t.Fatal(err)
+	}
 	if got := hc.ReadBTCCheckpointLastIndex(); got != 0 {
 		t.Fatalf("unexpected last index after old branch tail delete: got %d want %d", got, 0)
 	}
@@ -425,7 +437,9 @@ func TestHeaderChainBTCCheckpointHashRepresentationStable(t *testing.T) {
 		t.Fatalf("unexpected index for byte-reversed hash representation: got %d want %d", got, 0)
 	}
 
-	hc.DeleteBTCCheckpoint(db, 600)
+	if err := hc.DeleteBTCCheckpoint(db, 600); err != nil {
+		t.Fatal(err)
+	}
 	if got := rawdb.ReadBTCCheckpointIndexByHash(db, hash); got != 0 {
 		t.Fatalf("expected hash lookup to clear after delete, got %d", got)
 	}

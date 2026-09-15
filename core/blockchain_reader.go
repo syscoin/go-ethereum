@@ -550,6 +550,6 @@ func (bc *BlockChain) DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
 }
 
 // SYSCOIN
-func (bc *BlockChain) DeleteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64) {
-	bc.hc.DeleteBTCCheckpoint(db, n)
+func (bc *BlockChain) DeleteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64) error {
+	return bc.hc.DeleteBTCCheckpoint(db, n)
 }

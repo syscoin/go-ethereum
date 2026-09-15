@@ -799,11 +799,22 @@ func (hc *HeaderChain) DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
 
 // SYSCOIN
 // DeleteBTCCheckpoint removes checkpoint index mappings for a given block number.
-// If the block carried a checkpoint, it also rolls back the persisted last-index (best effort).
-func (hc *HeaderChain) DeleteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64) {
-	idx := rawdb.ReadBTCCheckpointIndexByBlockNumber(hc.chainDb, n)
+// Required reads must succeed before staging deletes or publishing cache changes.
+func (hc *HeaderChain) DeleteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64) error {
+	idx, err := rawdb.ReadBTCCheckpointIndexByBlockNumberWithError(hc.chainDb, n)
+	if err != nil {
+		return fmt.Errorf("read BTC checkpoint carrier at block %d: %w", n, err)
+	}
 	if idx == 0 {
-		return
+		return nil
+	}
+	hashBytes, err := rawdb.ReadBTCCheckpointHashWithError(hc.chainDb, idx)
+	if err != nil {
+		return fmt.Errorf("read BTC checkpoint hash at index %d: %w", idx, err)
+	}
+	btcHash := common.BytesToHash(hashBytes)
+	if btcHash == (common.Hash{}) {
+		return fmt.Errorf("missing or zero BTC checkpoint hash at index %d", idx)
 	}
 	// SYSCOIN: disconnects publish cache changes only after the DB commit,
 	// just like connects; a failed batch must leave the old checkpoint visible.
@@ -811,18 +822,14 @@ func (hc *HeaderChain) DeleteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64) {
 	// b2i exists only for carrier blocks that wrote checkpoint metadata, so
 	// mapping cleanup below applies only to those blocks.
 	rawdb.DeleteBTCCheckpointIndexByBlockNumber(db, n)
-	hashBytes := rawdb.ReadBTCCheckpointHashByIndex(hc.chainDb, idx)
-	btcHash := common.BytesToHash(hashBytes)
 	rawdb.DeleteBTCCheckpointHashByIndex(db, idx)
-	if btcHash != (common.Hash{}) {
-		// Under our model, a BTC hash is checkpointed at most once, so h2i can be deleted
-		// unconditionally when disconnecting that checkpoint block.
-		rawdb.DeleteBTCCheckpointIndexByHash(db, btcHash)
-		if wrapped {
-			batch.addPostCommit(func() { hc.BTCCheckpointIndexCache.Remove(btcHash) })
-		} else {
-			hc.BTCCheckpointIndexCache.Remove(btcHash)
-		}
+	// Under our model, a BTC hash is checkpointed at most once, so h2i can be deleted
+	// unconditionally when disconnecting that checkpoint block.
+	rawdb.DeleteBTCCheckpointIndexByHash(db, btcHash)
+	if wrapped {
+		batch.addPostCommit(func() { hc.BTCCheckpointIndexCache.Remove(btcHash) })
+	} else {
+		hc.BTCCheckpointIndexCache.Remove(btcHash)
 	}
 	// Only roll back last-index if we're disconnecting in reverse order.
 	lastIdx := hc.BTCCheckpointLastIndex.Load()
@@ -844,6 +851,7 @@ func (hc *HeaderChain) DeleteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64) {
 			"lastIdx", lastIdx,
 		)
 	}
+	return nil
 }
 
 // CurrentHeader retrieves the current head header of the canonical chain. The

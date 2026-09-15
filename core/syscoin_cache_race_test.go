@@ -51,7 +51,9 @@ func TestSyscoinFailedDisconnectBatchPreservesCachesAndRetries(t *testing.T) {
 	disconnect := func(batch ethdb.Batch) {
 		hc.RemoveNEVMAddress(batch, addr)
 		hc.DeleteSYSHash(batch, 1)
-		hc.DeleteBTCCheckpoint(batch, 1)
+		if err := hc.DeleteBTCCheckpoint(batch, 1); err != nil {
+			t.Fatal(err)
+		}
 		hc.DeleteDataHashes(batch, 1)
 	}
 	failErr := errors.New("disconnect write failure")
@@ -132,7 +134,9 @@ func TestSyscoinColdReadCannotOverwriteCommittedCache(t *testing.T) {
 			seed: func(hc *HeaderChain) { hc.WriteBTCCheckpoint(hc.chainDb, 10, btcHash) },
 			read: func(hc *HeaderChain) []byte { return encodeIndex(hc.BTCCheckpointIndex(btcHash)) },
 			mutate: func(hc *HeaderChain, db ethdb.KeyValueWriter) {
-				hc.DeleteBTCCheckpoint(db, 10)
+				if err := hc.DeleteBTCCheckpoint(db, 10); err != nil {
+					t.Fatal(err)
+				}
 			},
 			want: encodeIndex(0),
 		},
