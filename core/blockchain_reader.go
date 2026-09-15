@@ -535,8 +535,8 @@ func (bc *BlockChain) WriteSYSHash(db ethdb.KeyValueWriter, sysBlockhash string,
 }
 
 // SYSCOIN
-func (bc *BlockChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btcHash common.Hash) {
-	bc.hc.WriteBTCCheckpoint(db, n, btcHash)
+func (bc *BlockChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btcHash common.Hash) error {
+	return bc.hc.WriteBTCCheckpoint(db, n, btcHash)
 }
 func (bc *BlockChain) WriteDataHashes(db ethdb.KeyValueWriter, n uint64, dataHashes []*common.Hash) {
 	bc.hc.WriteDataHashes(db, n, dataHashes)

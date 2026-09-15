@@ -733,9 +733,9 @@ func (hc *HeaderChain) WriteSYSHash(db ethdb.KeyValueWriter, sysBlockhash string
 // WriteBTCCheckpoint updates the checkpoint index mappings for a given block number.
 // When btcHash is zero, or when this btcHash was already checkpointed on the canonical chain,
 // it is treated as a noop.
-func (hc *HeaderChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btcHash common.Hash) {
+func (hc *HeaderChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btcHash common.Hash) error {
 	if btcHash == (common.Hash{}) {
-		return
+		return nil
 	}
 	// Under our model, a BTC hash should only ever be checkpointed once. If it appears again
 	// (which should not happen unless it's effectively the same BTC block), do nothing so
@@ -745,11 +745,15 @@ func (hc *HeaderChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btc
 	// Consult the in-memory cache first to get read-your-writes semantics within a batch.
 	if batch, ok := db.(*syscoinCacheBatch); ok {
 		if pendingIdx, ok := batch.pendingIndexByHash[btcHash]; ok && pendingIdx != 0 {
-			return
+			return nil
 		}
-		if existingIdx := rawdb.ReadBTCCheckpointIndexByHash(hc.chainDb, btcHash); existingIdx != 0 {
+		existingIdx, err := rawdb.ReadBTCCheckpointIndexWithError(hc.chainDb, btcHash)
+		if err != nil {
+			return fmt.Errorf("read existing BTC checkpoint at block %d: %w", n, err)
+		}
+		if existingIdx != 0 {
 			batch.pendingIndexByHash[btcHash] = existingIdx
-			return
+			return nil
 		}
 		idx := batch.pendingLastIndex + 1
 		batch.pendingLastIndex = idx
@@ -758,14 +762,18 @@ func (hc *HeaderChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btc
 		rawdb.WriteBTCCheckpointIndexByHash(batch, btcHash, idx)
 		rawdb.WriteBTCCheckpointIndexByBlockNumber(batch, n, idx)
 		batch.pendingIndexByHash[btcHash] = idx
-		return
+		return nil
 	}
 	if cachedIdx, ok := hc.BTCCheckpointIndexCache.Get(btcHash); ok && cachedIdx != 0 {
-		return
+		return nil
 	}
-	if existingIdx := rawdb.ReadBTCCheckpointIndexByHash(hc.chainDb, btcHash); existingIdx != 0 {
+	existingIdx, err := rawdb.ReadBTCCheckpointIndexWithError(hc.chainDb, btcHash)
+	if err != nil {
+		return fmt.Errorf("read existing BTC checkpoint at block %d: %w", n, err)
+	}
+	if existingIdx != 0 {
 		hc.BTCCheckpointIndexCache.Add(btcHash, existingIdx)
-		return
+		return nil
 	}
 	idx := hc.BTCCheckpointLastIndex.Add(1)
 	rawdb.WriteBTCCheckpointLastIndex(db, idx)
@@ -773,6 +781,7 @@ func (hc *HeaderChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btc
 	rawdb.WriteBTCCheckpointIndexByHash(db, btcHash, idx)
 	rawdb.WriteBTCCheckpointIndexByBlockNumber(db, n, idx)
 	hc.BTCCheckpointIndexCache.Add(btcHash, idx)
+	return nil
 }
 func (hc *HeaderChain) WriteDataHashes(db ethdb.KeyValueWriter, n uint64, dataHashes []*common.Hash) {
 	rawdb.WriteDataHashes(db, hc.chainDb, n, dataHashes)

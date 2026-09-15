@@ -29,7 +29,9 @@ func TestSyscoinFailedDisconnectBatchPreservesCachesAndRetries(t *testing.T) {
 	btcHash := common.HexToHash("0x5678")
 	hc.StoreNEVMAddress(hc.chainDb, addr, 10)
 	hc.WriteSYSHash(hc.chainDb, "sys", 1)
-	hc.WriteBTCCheckpoint(hc.chainDb, 1, btcHash)
+	if err := hc.WriteBTCCheckpoint(hc.chainDb, 1, btcHash); err != nil {
+		t.Fatal(err)
+	}
 	hc.WriteDataHashes(hc.chainDb, 1, []*common.Hash{&btcHash})
 	check := func(present bool) {
 		t.Helper()
@@ -131,7 +133,11 @@ func TestSyscoinColdReadCannotOverwriteCommittedCache(t *testing.T) {
 		},
 		{
 			name: "BTC checkpoint removal",
-			seed: func(hc *HeaderChain) { hc.WriteBTCCheckpoint(hc.chainDb, 10, btcHash) },
+			seed: func(hc *HeaderChain) {
+				if err := hc.WriteBTCCheckpoint(hc.chainDb, 10, btcHash); err != nil {
+					t.Fatal(err)
+				}
+			},
 			read: func(hc *HeaderChain) []byte { return encodeIndex(hc.BTCCheckpointIndex(btcHash)) },
 			mutate: func(hc *HeaderChain, db ethdb.KeyValueWriter) {
 				if err := hc.DeleteBTCCheckpoint(db, 10); err != nil {

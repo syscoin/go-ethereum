@@ -1615,7 +1615,9 @@ func (bc *BlockChain) writeNEVMData(blockBatch ethdb.KeyValueWriter, block *type
 		bc.WriteSYSHash(blockBatch, nevmBlockConnect.Sysblockhash, proposedBlockNumber)
 		// BTC checkpoint metadata is only present on checkpoint carrier blocks.
 		if nevmBlockConnect.BTCPrevHash != (common.Hash{}) {
-			bc.WriteBTCCheckpoint(blockBatch, proposedBlockNumber, nevmBlockConnect.BTCPrevHash)
+			if err := bc.WriteBTCCheckpoint(blockBatch, proposedBlockNumber, nevmBlockConnect.BTCPrevHash); err != nil {
+				return err
+			}
 		}
 	} else if bc.Config().SyscoinBlock != nil {
 		// Keep the index head aligned before a nonzero Syscoin activation height.

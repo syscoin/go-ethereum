@@ -153,9 +153,15 @@ func TestHeaderChainBTCCheckpointTailRollback(t *testing.T) {
 	h2 := testBTCCheckpointHash(2)
 	h3 := testBTCCheckpointHash(3)
 
-	hc.WriteBTCCheckpoint(db, 100, h1)
-	hc.WriteBTCCheckpoint(db, 101, h2)
-	hc.WriteBTCCheckpoint(db, 102, h3)
+	if err := hc.WriteBTCCheckpoint(db, 100, h1); err != nil {
+		t.Fatal(err)
+	}
+	if err := hc.WriteBTCCheckpoint(db, 101, h2); err != nil {
+		t.Fatal(err)
+	}
+	if err := hc.WriteBTCCheckpoint(db, 102, h3); err != nil {
+		t.Fatal(err)
+	}
 
 	if got := hc.ReadBTCCheckpointLastIndex(); got != 3 {
 		t.Fatalf("unexpected last index after writes: got %d want %d", got, 3)
@@ -222,7 +228,9 @@ func TestHeaderChainBTCCheckpointDuplicateHashNoop(t *testing.T) {
 	db := hc.chainDb
 
 	h1 := testBTCCheckpointHash(0x11)
-	hc.WriteBTCCheckpoint(db, 200, h1)
+	if err := hc.WriteBTCCheckpoint(db, 200, h1); err != nil {
+		t.Fatal(err)
+	}
 
 	if got := hc.ReadBTCCheckpointLastIndex(); got != 1 {
 		t.Fatalf("unexpected last index after first write: got %d want %d", got, 1)
@@ -232,7 +240,9 @@ func TestHeaderChainBTCCheckpointDuplicateHashNoop(t *testing.T) {
 	}
 
 	// Duplicate hash on a later block should be ignored.
-	hc.WriteBTCCheckpoint(db, 201, h1)
+	if err := hc.WriteBTCCheckpoint(db, 201, h1); err != nil {
+		t.Fatal(err)
+	}
 	if got := hc.ReadBTCCheckpointLastIndex(); got != 1 {
 		t.Fatalf("duplicate hash changed last index: got %d want %d", got, 1)
 	}
@@ -243,8 +253,12 @@ func TestHeaderChainBTCCheckpointDuplicateHashNoop(t *testing.T) {
 	// Same behavior should hold within one batch before writes are flushed to chainDb.
 	h2 := testBTCCheckpointHash(0x22)
 	batch := hc.newSyscoinCacheBatch(db.NewBatch())
-	hc.WriteBTCCheckpoint(batch, 300, h2)
-	hc.WriteBTCCheckpoint(batch, 301, h2)
+	if err := hc.WriteBTCCheckpoint(batch, 300, h2); err != nil {
+		t.Fatal(err)
+	}
+	if err := hc.WriteBTCCheckpoint(batch, 301, h2); err != nil {
+		t.Fatal(err)
+	}
 	if err := batch.Write(); err != nil {
 		t.Fatalf("failed to flush batch: %v", err)
 	}
@@ -259,7 +273,9 @@ func TestHeaderChainBTCCheckpointDuplicateHashNoop(t *testing.T) {
 	}
 
 	// Zero hash should remain a no-op.
-	hc.WriteBTCCheckpoint(db, 400, common.Hash{})
+	if err := hc.WriteBTCCheckpoint(db, 400, common.Hash{}); err != nil {
+		t.Fatal(err)
+	}
 	if got := hc.ReadBTCCheckpointLastIndex(); got != 2 {
 		t.Fatalf("zero hash write changed last index: got %d want %d", got, 2)
 	}
@@ -276,7 +292,9 @@ func TestHeaderChainBTCCheckpointFailedBatchWriteDoesNotPoisonDeduper(t *testing
 	failErr := errors.New("forced batch write failure")
 	failingBatch := hc.newSyscoinCacheBatch(&failingBTCCheckpointBatch{Batch: db.NewBatch(), err: failErr})
 
-	hc.WriteBTCCheckpoint(failingBatch, 700, h1)
+	if err := hc.WriteBTCCheckpoint(failingBatch, 700, h1); err != nil {
+		t.Fatal(err)
+	}
 	if err := failingBatch.Write(); !errors.Is(err, failErr) {
 		t.Fatalf("expected forced batch write failure, got %v", err)
 	}
@@ -288,7 +306,9 @@ func TestHeaderChainBTCCheckpointFailedBatchWriteDoesNotPoisonDeduper(t *testing
 	}
 
 	retryBatch := hc.newSyscoinCacheBatch(db.NewBatch())
-	hc.WriteBTCCheckpoint(retryBatch, 700, h1)
+	if err := hc.WriteBTCCheckpoint(retryBatch, 700, h1); err != nil {
+		t.Fatal(err)
+	}
 	if err := retryBatch.Write(); err != nil {
 		t.Fatalf("retry batch write failed: %v", err)
 	}
@@ -352,8 +372,12 @@ func TestHeaderChainBTCCheckpointReorgSwitch(t *testing.T) {
 
 	old1 := testBTCCheckpointHash(0x31)
 	old2 := testBTCCheckpointHash(0x32)
-	hc.WriteBTCCheckpoint(db, 500, old1)
-	hc.WriteBTCCheckpoint(db, 501, old2)
+	if err := hc.WriteBTCCheckpoint(db, 500, old1); err != nil {
+		t.Fatal(err)
+	}
+	if err := hc.WriteBTCCheckpoint(db, 501, old2); err != nil {
+		t.Fatal(err)
+	}
 	if got := hc.ReadBTCCheckpointLastIndex(); got != 2 {
 		t.Fatalf("unexpected last index after old branch writes: got %d want %d", got, 2)
 	}
@@ -378,8 +402,12 @@ func TestHeaderChainBTCCheckpointReorgSwitch(t *testing.T) {
 	// Reorg connect of new branch over same block numbers.
 	new1 := testBTCCheckpointHash(0x41)
 	new2 := testBTCCheckpointHash(0x42)
-	hc.WriteBTCCheckpoint(db, 500, new1)
-	hc.WriteBTCCheckpoint(db, 501, new2)
+	if err := hc.WriteBTCCheckpoint(db, 500, new1); err != nil {
+		t.Fatal(err)
+	}
+	if err := hc.WriteBTCCheckpoint(db, 501, new2); err != nil {
+		t.Fatal(err)
+	}
 
 	if got := hc.ReadBTCCheckpointLastIndex(); got != 2 {
 		t.Fatalf("unexpected last index after new branch writes: got %d want %d", got, 2)
@@ -422,7 +450,9 @@ func TestHeaderChainBTCCheckpointHashRepresentationStable(t *testing.T) {
 		t.Fatalf("test setup produced symmetric hash pattern, cannot validate byte-order behavior")
 	}
 
-	hc.WriteBTCCheckpoint(db, 600, hash)
+	if err := hc.WriteBTCCheckpoint(db, 600, hash); err != nil {
+		t.Fatal(err)
+	}
 	if got := hc.ReadBTCCheckpointLastIndex(); got != 1 {
 		t.Fatalf("unexpected last index after write: got %d want %d", got, 1)
 	}
