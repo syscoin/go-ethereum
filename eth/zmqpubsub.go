@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"strconv"
 	"strings" // SYSCOIN: exact recovery durability command.
+	"sync"
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
@@ -83,33 +84,50 @@ type ZMQRep struct {
 	NEVMPubEP string
 	eth       *Ethereum
 	rep       zmq4.Socket
-	inited    bool
 	ctx       context.Context
 	cancel    context.CancelFunc
+	// SYSCOIN: serialize listener startup/closure and join its dispatcher.
+	mu     sync.Mutex
+	done   chan struct{}
+	closed bool
 }
 
 func (zmq *ZMQRep) Close() {
-	if !zmq.inited {
-		return
+	zmq.mu.Lock()
+	if !zmq.closed {
+		zmq.closed = true
+		zmq.cancel()
+		if err := zmq.rep.Close(); err != nil {
+			log.Error("ZMQ socket close error", "err", err)
+		} else {
+			log.Info("ZMQ socket closed successfully")
+		}
 	}
-	zmq.inited = false
-
-	zmq.cancel()
-
-	if err := zmq.rep.Close(); err != nil {
-		log.Error("ZMQ socket close error", "err", err)
-	} else {
-		log.Info("ZMQ socket closed successfully")
+	done := zmq.done
+	zmq.mu.Unlock()
+	// An active command may need backend locks while finishing after cancellation.
+	if done != nil {
+		<-done
 	}
 }
 
 func (zmq *ZMQRep) InitZMQListener() error {
+	zmq.mu.Lock()
+	defer zmq.mu.Unlock()
+	if err := zmq.ctx.Err(); err != nil {
+		return err
+	}
+	if zmq.done != nil {
+		return nil
+	}
 	err := zmq.rep.Listen(zmq.NEVMPubEP)
 	if err != nil {
 		log.Error("could not listen on NEVM REP point", "endpoint", zmq.NEVMPubEP, "err", err)
 		return err
 	}
+	zmq.done = make(chan struct{})
 	go func(zmq *ZMQRep) {
+		defer close(zmq.done)
 		for {
 			select {
 			case <-zmq.ctx.Done():
@@ -124,6 +142,10 @@ func (zmq *ZMQRep) InitZMQListener() error {
 					}
 					log.Error("ZMQ receive error", "err", err)
 					continue
+				}
+				// Cancellation may race a queued receive; do not dispatch it afterward.
+				if zmq.ctx.Err() != nil {
+					return
 				}
 				if len(msg.Frames) != 2 {
 					log.Error("Invalid number of message frames", "len", len(msg.Frames))
@@ -223,7 +245,6 @@ func (zmq *ZMQRep) InitZMQListener() error {
 			}
 		}
 	}(zmq)
-	zmq.inited = true
 	return nil
 }
 

@@ -105,7 +105,6 @@ type Ethereum struct {
 
 	shutdownTracker *shutdowncheck.ShutdownTracker // Tracks if and when the node has shutdown ungracefully
 	// SYSCOIN
-	wgNEVM            sync.WaitGroup
 	wg     			  sync.WaitGroup
 	zmqRep            *ZMQRep
 	timeLastBlock     int64
@@ -358,9 +357,6 @@ func makeExtraData(extra []byte) []byte {
 }
 // SYSCOIN
 func (eth *Ethereum) CreateBlock() *types.Block {
-	eth.wgNEVM.Add(1)
-	defer eth.wgNEVM.Done()
-
 	if err := eth.flushBufferedBlocks(); err != nil {
 		log.Crit("Failed flushing buffer before createBlock", "err", err)
 		return nil
@@ -848,6 +844,11 @@ func (s *Ethereum) Stop() error {
 	// discovery, handlers or the chain they use.
 	s.eventMux.Stop()
 	s.wg.Wait()
+    // SYSCOIN: stop admission and join every NEVM command before closing its
+    // execution resources or flushing the final accepted buffer.
+    if s.zmqRep != nil {
+        s.zmqRep.Close()
+    }
     // Flush buffered blocks first
     if err := s.flushBufferedBlocks(); err != nil {
         log.Error("Failed to flush buffered blocks on shutdown", "err", err)
@@ -870,11 +871,6 @@ func (s *Ethereum) Stop() error {
 	s.shutdownTracker.Stop()
 
 	s.chainDb.Close()
-	// SYSCOIN
-	s.wgNEVM.Wait()
-	if s.zmqRep != nil {
-		s.zmqRep.Close()
-	}
 	return nil
 }
 
