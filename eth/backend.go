@@ -849,6 +849,8 @@ func (s *Ethereum) Stop() error {
     if s.zmqRep != nil {
         s.zmqRep.Close()
     }
+    // SYSCOIN: RPC transport shutdown does not join pending construction.
+    s.miner.StopPending()
     // Flush buffered blocks first
     if err := s.flushBufferedBlocks(); err != nil {
         log.Error("Failed to flush buffered blocks on shutdown", "err", err)

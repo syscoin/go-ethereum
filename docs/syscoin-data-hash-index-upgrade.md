@@ -76,6 +76,9 @@ Reuse requires that generation to remain valid, even if a disconnect/reconnect
 returns to the same NEVM parent hash with different Core metadata. A build that
 spans a publication returns pending state unavailable and can be retried. The
 existing parent-hash check and two-second cache lifetime still apply.
+Engine shutdown stops admission to pending construction and waits for admitted
+builders, including their state copies, before closing execution dependencies.
+Closing an RPC transport alone does not retire the miner.
 
 This is a consistency fence, not a historical metadata index. Historical,
 pending and simulated EVM state retain their existing current-tip metadata
