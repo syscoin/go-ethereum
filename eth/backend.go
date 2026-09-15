@@ -442,22 +442,25 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
         return nil
     }
 
-    // Add to buffer
+    // SYSCOIN: admission and its buffering decision share the activation drain lock.
     eth.bufferLock.Lock()
+    defer eth.bufferLock.Unlock()
     eth.blockConnectBuffer = append(eth.blockConnectBuffer, nevmBlockConnectIn)
     bufferLen = len(eth.blockConnectBuffer)
-    eth.bufferLock.Unlock()
 
     // Update timestamp
     eth.lock.Lock()
     eth.timeLastBlock = time.Now().Unix()
     eth.lock.Unlock()
 
-    if eth.handler.peers.closed && bufferLen < batchSize {
+    eth.handler.peers.lock.RLock()
+    buffering := eth.handler.peers.closed
+    eth.handler.peers.lock.RUnlock()
+    if buffering && bufferLen < batchSize {
         return nil
     }
 
-    return eth.flushBufferedBlocks()
+    return eth.flushBufferedBlocksLocked()
 }
 
 
@@ -465,6 +468,11 @@ func (eth *Ethereum) flushBufferedBlocks() error {
     eth.bufferLock.Lock()
     defer eth.bufferLock.Unlock()
 
+    return eth.flushBufferedBlocksLocked()
+}
+
+// SYSCOIN: caller holds bufferLock, including when draining before live admission.
+func (eth *Ethereum) flushBufferedBlocksLocked() error {
     if len(eth.blockConnectBuffer) == 0 {
         return nil
     }
@@ -586,17 +594,35 @@ func (eth *Ethereum) networkingLoop(sub *event.TypeMuxSubscription) {
 						eth.Shutdown()
 						return
 					}
-					// Commit activation against shutdown after discovery initialization.
+					// SYSCOIN: drain acknowledged pairs before leaving buffer mode.
+					// Keep admission locked through activation, but never hold eth.lock
+					// across InsertChain and its event subscribers.
+					eth.bufferLock.Lock()
+					select {
+					case <-eth.closeHandler:
+						eth.bufferLock.Unlock()
+						return
+					default:
+					}
+					if err := eth.flushBufferedBlocksLocked(); err != nil {
+						eth.bufferLock.Unlock()
+						log.Error("Error draining NEVM buffer before networking", "err", err)
+						eth.Shutdown()
+						return
+					}
+					// SYSCOIN: commit activation against shutdown after the drain.
 					eth.lock.Lock()
 					select {
 					case <-eth.closeHandler:
 						eth.lock.Unlock()
+						eth.bufferLock.Unlock()
 						return
 					default:
 					}
 					eth.handler.peers.SetOpen()
 					eth.handler.Start(eth.p2pServer.MaxPeers)
 					eth.lock.Unlock()
+					eth.bufferLock.Unlock()
 					eth.Downloader().DoneEvent()
 					eth.handler.synced.Store(true)
 				}

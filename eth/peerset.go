@@ -82,6 +82,7 @@ func (ps *peerSet) registerSnapExtension(peer *snap.Peer) error {
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
 
+	// SYSCOIN: refuse delivery to a waiter cancelled by peer-set shutdown.
 	if ps.closed {
 		return errPeerSetClosed
 	}
@@ -112,6 +113,7 @@ func (ps *peerSet) waitSnapExtension(peer *eth.Peer) (*snap.Peer, error) {
 	// Ensure nobody can double connect
 	ps.lock.Lock()
 
+	// SYSCOIN: do not consume a pending extension after peer-set closure.
 	if ps.closed {
 		ps.lock.Unlock()
 		return nil, errPeerSetClosed
