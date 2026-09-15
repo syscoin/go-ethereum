@@ -265,7 +265,9 @@ type BlockChain struct {
 	currentSnapBlock  atomic.Pointer[types.Header] // Current head of snap-sync
 	currentFinalBlock atomic.Pointer[types.Header] // Latest (consensus) finalized block
 	currentSafeBlock  atomic.Pointer[types.Header] // Latest (consensus) safe block
-	historyPrunePoint atomic.Pointer[history.PrunePoint]
+	// SYSCOIN: RPC finality is replayed by Core; never restore generic engine markers into it.
+	currentSyscoinFinalBlock atomic.Pointer[types.Header]
+	historyPrunePoint        atomic.Pointer[history.PrunePoint]
 
 	bodyCache     *lru.Cache[common.Hash, *types.Body]
 	bodyRLPCache  *lru.Cache[common.Hash, rlp.RawValue]
@@ -1204,6 +1206,13 @@ func (bc *BlockChain) writeHeadBlockMarkers(batch ethdb.KeyValueWriter, block *t
 // SYSCOIN: publishHeadBlock updates in-memory head markers after their database
 // batch is durable. The caller must hold chainmu.
 func (bc *BlockChain) publishHeadBlock(block *types.Block) {
+	// SYSCOIN: recovery may remove a projected boundary. Await Core replay;
+	// never invent a lower finalized head or constrain Core's rollback here.
+	if final := bc.currentSyscoinFinalBlock.Load(); final != nil &&
+		(final.Number.Uint64() > block.NumberU64() ||
+			(final.Number.Uint64() == block.NumberU64() && final.Hash() != block.Hash())) {
+		bc.currentSyscoinFinalBlock.Store(nil)
+	}
 	bc.hc.SetCurrentHeader(block.Header())
 
 	bc.currentSnapBlock.Store(block.Header())

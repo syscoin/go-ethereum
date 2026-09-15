@@ -79,7 +79,7 @@ func TestNEVMDurablePairWire(t *testing.T) {
 				malformed = append(malformed, string([]byte{byte(len(badText))})+badText)
 			}
 			for _, bad := range malformed {
-				if _, _, _, err := parseNEVMDurablePair(bad); err == nil {
+				if _, _, _, err := parseNEVMPairCommand(bad, nevmDurablePairPrefix); err == nil {
 					t.Fatalf("parser accepted %q", bad)
 				}
 				if reply := comms.handleNEVMComms(bad); reply == text {

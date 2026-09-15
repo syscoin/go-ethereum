@@ -79,19 +79,9 @@ func (bc *BlockChain) CurrentSnapBlock() *types.Header {
 // CurrentFinalBlock retrieves the current finalized block of the canonical
 // chain. The block is retrieved from the blockchain's internal cache.
 func (bc *BlockChain) CurrentFinalBlock() *types.Header {
-	// SYSCOIN
+	// SYSCOIN: only Core's checked, runtime projection establishes finality.
 	if bc.Config().SyscoinBlock != nil {
-		// chainlock
-		header := bc.currentBlock.Load()
-		blockNum := header.Number.Uint64()
-		// safe should be the last chainlock (every 5 blocks)
-		lookback := blockNum - (blockNum % 5) - 5
-		if lookback < 5 {
-			lookback = 5
-		}
-		// finalized should be previous chainlock
-		lookback -= 5
-		return bc.GetHeaderByNumber(lookback)
+		return bc.currentSyscoinFinalBlock.Load()
 	}
 	return bc.currentFinalBlock.Load()
 }
@@ -99,17 +89,9 @@ func (bc *BlockChain) CurrentFinalBlock() *types.Header {
 // CurrentSafeBlock retrieves the current safe block of the canonical
 // chain. The block is retrieved from the blockchain's internal cache.
 func (bc *BlockChain) CurrentSafeBlock() *types.Header {
-	// SYSCOIN
+	// SYSCOIN: an accepted ChainLock supplies the same guarantee for both tags.
 	if bc.Config().SyscoinBlock != nil {
-		// chainlock
-		header := bc.currentBlock.Load()
-		blockNum := header.Number.Uint64()
-		// safe should be the last chainlock (every 5 blocks)
-		lookback := blockNum - (blockNum % 5) - 5
-		if lookback < 5 {
-			lookback = 5
-		}
-		return bc.GetHeaderByNumber(lookback)
+		return bc.currentSyscoinFinalBlock.Load()
 	}
 	return bc.currentSafeBlock.Load()
 }

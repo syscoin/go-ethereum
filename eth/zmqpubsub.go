@@ -53,13 +53,25 @@ func (zmq *ZMQRep) currentNEVMBlockInfo() (uint64, string, bool) {
 func (zmq *ZMQRep) handleNEVMComms(command string) string {
 	// SYSCOIN: generic legacy ack is never proof of this storage barrier.
 	if len(command) > 1 && strings.HasPrefix(command[1:], nevmDurablePairPrefix) {
-		text, number, hash, err := parseNEVMDurablePair(command)
+		text, number, hash, err := parseNEVMPairCommand(command, nevmDurablePairPrefix)
 		if err == nil {
 			err = zmq.eth.syncNEVMPair(number, hash)
 		}
 		if err != nil {
 			log.Error("NEVM durability fence failed", "err", err)
 			return "durable-pair-error"
+		}
+		return text
+	}
+	// SYSCOIN: acknowledge only the checked, already-executed Core finality pair.
+	if len(command) > 1 && strings.HasPrefix(command[1:], nevmFinalityPrefix) {
+		text, number, hash, err := parseNEVMPairCommand(command, nevmFinalityPrefix)
+		if err == nil {
+			err = zmq.eth.blockchain.SetSyscoinFinality(number, hash)
+		}
+		if err != nil {
+			log.Debug("NEVM finality update deferred", "err", err)
+			return "finality-error"
 		}
 		return text
 	}
