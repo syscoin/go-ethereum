@@ -306,6 +306,16 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		return nil, err
 	}
 	triedb := triedb.NewDatabase(db, cacheConfig.triedbConfig(enableVerkle))
+	// SYSCOIN: every failed startup must release the constructor-owned trie
+	// database, including its state-history lock, so startup can be retried.
+	initialized := false
+	defer func() {
+		if !initialized {
+			if err := triedb.Close(); err != nil {
+				log.Error("Failed to close trie database after failed startup", "err", err)
+			}
+		}
+	}()
 
 	// Write the supplied genesis to the database if it has not been initialized
 	// yet. The corresponding chain config will be returned, either from the
@@ -342,11 +352,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	}
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
 	if err != nil {
-		// No chain is returned to close the constructor-owned trie database.
-		// Release its state-history lock so a healthy startup can retry.
-		if closeErr := triedb.Close(); closeErr != nil {
-			log.Error("Failed to close trie database", "err", closeErr)
-		}
 		return nil, err
 	}
 	bc.flushInterval.Store(int64(cacheConfig.TrieTimeLimit))
@@ -476,6 +481,24 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		}
 	}
 
+	// SYSCOIN: finish fallible startup checks before starting snapshot workers,
+	// so a refused rewind can safely close the trie database without workers.
+	// Rewind the chain in case of an incompatible config upgrade.
+	if compatErr != nil {
+		log.Warn("Rewinding chain to upgrade configuration", "err", compatErr)
+		// SYSCOIN: a refused metadata rewind must not install the new config.
+		var rewindErr error
+		if compatErr.RewindToTime > 0 {
+			rewindErr = bc.SetHeadWithTimestamp(compatErr.RewindToTime)
+		} else {
+			rewindErr = bc.SetHead(compatErr.RewindToBlock)
+		}
+		if rewindErr != nil {
+			return nil, rewindErr
+		}
+		rawdb.WriteChainConfig(db, genesisHash, chainConfig)
+	}
+
 	// Load any existing snapshot, regenerating it if loading failed
 	if bc.cacheConfig.SnapshotLimit > 0 {
 		// If the chain was rewound past the snapshot persistent layer (causing
@@ -505,25 +528,11 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		bc.statedb = state.NewDatabase(bc.triedb, bc.snaps)
 	}
 
-	// Rewind the chain in case of an incompatible config upgrade.
-	if compatErr != nil {
-		log.Warn("Rewinding chain to upgrade configuration", "err", compatErr)
-		// SYSCOIN: a refused metadata rewind must not install the new config.
-		var rewindErr error
-		if compatErr.RewindToTime > 0 {
-			rewindErr = bc.SetHeadWithTimestamp(compatErr.RewindToTime)
-		} else {
-			rewindErr = bc.SetHead(compatErr.RewindToBlock)
-		}
-		if rewindErr != nil {
-			return nil, rewindErr
-		}
-		rawdb.WriteChainConfig(db, genesisHash, chainConfig)
-	}
 	// Start tx indexer if it's enabled.
 	if txLookupLimit != nil {
 		bc.txIndexer = newTxIndexer(*txLookupLimit, bc)
 	}
+	initialized = true // SYSCOIN: the returned chain now owns the trie database.
 	return bc, nil
 }
 
