@@ -398,7 +398,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			// disk layer point of snapshot(if it's enabled). Make sure the
 			// rewound point is lower than disk layer.
 			var diskRoot common.Hash
-			if bc.cacheConfig.SnapshotLimit > 0 {
+			// SYSCOIN: retain the highest usable paired trie state. Rebuild an
+			// older snapshot instead of rewinding below a durable checkpoint.
+			if bc.cacheConfig.SnapshotLimit > 0 && chainConfig.SyscoinBlock == nil {
 				diskRoot = rawdb.ReadSnapshotRoot(bc.db)
 			}
 			if diskRoot != (common.Hash{}) {
@@ -481,7 +483,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		var recover bool
 
 		head := bc.CurrentBlock()
-		if layer := rawdb.ReadSnapshotRecoveryNumber(bc.db); layer != nil && *layer >= head.Number.Uint64() {
+		// SYSCOIN: ignore old recovery hints even after a restart interrupted
+		// head repair. A mismatched snapshot must be rebuilt from the paired trie.
+		if layer := rawdb.ReadSnapshotRecoveryNumber(bc.db); chainConfig.SyscoinBlock == nil && layer != nil && *layer >= head.Number.Uint64() {
 			log.Warn("Enabling snapshot recovery", "chainhead", head.Number, "diskbase", *layer)
 			recover = true
 		}
