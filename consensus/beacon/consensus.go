@@ -42,8 +42,8 @@ var (
 	beaconDifficulty = common.Big0          // The default block difficulty in the beacon consensus
 	beaconNonce      = types.EncodeNonce(0) // The default block nonce in the beacon consensus
 	// SYSCOIN
-	SyscoinBlockReward  = uint256.NewInt(10550000000000000000) // 10.55 Block reward for successfully mining a block upward from Syscoin
-	allowedFutureBlockTimeSeconds = int64(150)             // Max seconds from current time allowed for blocks, before they're considered future blocks
+	SyscoinBlockReward            = uint256.NewInt(10550000000000000000) // 10.55 Block reward for successfully mining a block upward from Syscoin
+	allowedFutureBlockTimeSeconds = int64(150)                           // Max seconds from current time allowed for blocks, before they're considered future blocks
 
 )
 
@@ -86,7 +86,7 @@ func isPostMerge(config *params.ChainConfig, blockNum uint64, timestamp uint64) 
 	// SYSCOIN
 	return mergedAtGenesis ||
 		config.MergeNetsplitBlock != nil && blockNum >= config.MergeNetsplitBlock.Uint64() ||
-		config.ShanghaiTime != nil && timestamp >= *config.ShanghaiTime  || config.ShanghaiBlock != nil && blockNum >= config.ShanghaiBlock.Uint64()
+		config.ShanghaiTime != nil && timestamp >= *config.ShanghaiTime || config.ShanghaiBlock != nil && blockNum >= config.ShanghaiBlock.Uint64()
 }
 
 // Author implements consensus.Engine, returning the verified author of the block.
@@ -123,7 +123,7 @@ func (beacon *Beacon) VerifyHeader(chain consensus.ChainHeaderReader, header *ty
 		return consensus.ErrUnknownAncestor
 	}
 	if parent.Difficulty.Sign() == 0 && header.Difficulty.Sign() > 0 {
-		return consensus.ErrInvalidTerminalBlock
+		return consensus.MarkInvalidBlock(consensus.ErrInvalidTerminalBlock)
 	}
 	// SYSCOIN Check >0 TDs with pre-merge, --0 TDs with post-merge rules
 	if chain.Config().SyscoinBlock == nil && header.Difficulty.Sign() > 0 {
@@ -236,14 +236,14 @@ func (beacon *Beacon) VerifyUncles(chain consensus.ChainReader, block *types.Blo
 func (beacon *Beacon) verifyHeader(chain consensus.ChainHeaderReader, header, parent *types.Header, unixNow int64) error {
 	// Ensure that the header's extra-data section is of a reasonable size
 	if len(header.Extra) > int(params.MaximumExtraDataSize) {
-		return fmt.Errorf("extra-data longer than 32 bytes (%d)", len(header.Extra))
+		return consensus.MarkInvalidBlock(fmt.Errorf("extra-data longer than 32 bytes (%d)", len(header.Extra)))
 	}
 	// Verify the seal parts. Ensure the nonce and uncle hash are the expected value.
 	if header.Nonce != beaconNonce {
-		return errInvalidNonce
+		return consensus.MarkInvalidBlock(errInvalidNonce)
 	}
 	if header.UncleHash != types.EmptyUncleHash {
-		return errInvalidUncleHash
+		return consensus.MarkInvalidBlock(errInvalidUncleHash)
 	}
 	// SYSCOIN
 	syscoin := chain.Config().IsSyscoin(header.Number)
@@ -254,64 +254,64 @@ func (beacon *Beacon) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 		// Verify the block's difficulty to ensure it's the default constant
 		if !chain.Config().IsNexus(header.Number) {
 			if header.Difficulty.Cmp(big.NewInt(1)) != 0 {
-				return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, new(big.Int).SetInt64(1))
+				return consensus.MarkInvalidBlock(fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, new(big.Int).SetInt64(1)))
 			}
 		} else {
 			if beaconDifficulty.Cmp(header.Difficulty) != 0 {
-				return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, beaconDifficulty)
+				return consensus.MarkInvalidBlock(fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, beaconDifficulty))
 			}
 		}
 	} else {
 		if beaconDifficulty.Cmp(header.Difficulty) != 0 {
-			return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, beaconDifficulty)
+			return consensus.MarkInvalidBlock(fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, beaconDifficulty))
 		}
 	}
 	// Verify the timestamp
 	if header.Time <= parent.Time {
-		return errInvalidTimestamp
+		return consensus.MarkInvalidBlock(errInvalidTimestamp)
 	}
 
 	// Verify that the gas limit is <= 2^63-1
 	if header.GasLimit > params.MaxGasLimit {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
+		return consensus.MarkInvalidBlock(fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit))
 	}
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {
-		return fmt.Errorf("invalid gasUsed: have %d, gasLimit %d", header.GasUsed, header.GasLimit)
+		return consensus.MarkInvalidBlock(fmt.Errorf("invalid gasUsed: have %d, gasLimit %d", header.GasUsed, header.GasLimit))
 	}
 	// Verify that the block number is parent's +1
 	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(common.Big1) != 0 {
-		return consensus.ErrInvalidNumber
+		return consensus.MarkInvalidBlock(consensus.ErrInvalidNumber)
 	}
 	// Verify the header's EIP-1559 attributes.
 	if err := eip1559.VerifyEIP1559Header(chain.Config(), parent, header); err != nil {
-		return err
+		return consensus.MarkInvalidBlock(err)
 	}
 	// SYSCOIN Verify existence / non-existence of withdrawalsHash.
 	shanghai := chain.Config().IsShanghai(header.Number, header.Time)
 	if (!syscoin && shanghai) && header.WithdrawalsHash == nil {
-		return errors.New("missing withdrawalsHash")
+		return consensus.MarkInvalidBlock(errors.New("missing withdrawalsHash"))
 	}
 	if (syscoin || !shanghai) && header.WithdrawalsHash != nil {
-		return fmt.Errorf("invalid withdrawalsHash: have %x, expected nil", header.WithdrawalsHash)
+		return consensus.MarkInvalidBlock(fmt.Errorf("invalid withdrawalsHash: have %x, expected nil", header.WithdrawalsHash))
 	}
 	// Verify the existence / non-existence of cancun-specific header fields
 	cancun := chain.Config().IsCancun(header.Number, header.Time)
 	if !cancun || syscoin {
 		switch {
 		case header.ExcessBlobGas != nil:
-			return fmt.Errorf("invalid excessBlobGas: have %d, expected nil", header.ExcessBlobGas)
+			return consensus.MarkInvalidBlock(fmt.Errorf("invalid excessBlobGas: have %d, expected nil", header.ExcessBlobGas))
 		case header.BlobGasUsed != nil:
-			return fmt.Errorf("invalid blobGasUsed: have %d, expected nil", header.BlobGasUsed)
+			return consensus.MarkInvalidBlock(fmt.Errorf("invalid blobGasUsed: have %d, expected nil", header.BlobGasUsed))
 		case header.ParentBeaconRoot != nil:
-			return fmt.Errorf("invalid parentBeaconRoot, have %#x, expected nil", header.ParentBeaconRoot)
+			return consensus.MarkInvalidBlock(fmt.Errorf("invalid parentBeaconRoot, have %#x, expected nil", header.ParentBeaconRoot))
 		}
 	} else {
 		if header.ParentBeaconRoot == nil {
-			return errors.New("header is missing beaconRoot")
+			return consensus.MarkInvalidBlock(errors.New("header is missing beaconRoot"))
 		}
 		if err := eip4844.VerifyEIP4844Header(chain.Config(), parent, header); err != nil {
-			return err
+			return consensus.MarkInvalidBlock(err)
 		}
 	}
 	return nil
@@ -391,7 +391,7 @@ func (beacon *Beacon) Finalize(chain consensus.ChainHeaderReader, header *types.
 		state.AddBalance(w.Address, amount, tracing.BalanceIncreaseWithdrawal)
 	}
 	// SYSCOIN Accumulate any block
-	if(chain.Config().IsSyscoin(header.Number)) {
+	if chain.Config().IsSyscoin(header.Number) {
 		accumulateRewards(state, header)
 	}
 }

@@ -115,13 +115,15 @@ var (
 	skeletonHeaderPrefix  = []byte("S") // skeletonHeaderPrefix + num (uint64 big endian) -> header
 
 	// SYSCOIN
-	blockNumToSysKeyPrefix             = []byte("z")           // blockNumToSysKeyPrefix + block number -> SYS block hash
-	btcCheckpointLastKey               = []byte("btcchk-last") // stores last BTC checkpoint index (uint64 big endian)
-	btcCheckpointH2IPrefix             = []byte("btcchk-h2i-") // btcCheckpointH2IPrefix + 32B btc hash -> checkpoint index (uint64 big endian)
-	btcCheckpointI2HPrefix             = []byte("btcchk-i2h-") // btcCheckpointI2HPrefix + decimal index -> 32B btc hash
-	blockNumToBtcCheckpointIndexPrefix = []byte("btcchk-b2i-") // blockNumToBtcCheckpointIndexPrefix + decimal block number -> checkpoint index (uint64 big endian)
-	dataHashesKeyPrefix                = []byte("y")           // dataHashesKeyPrefix + block number -> versioned hashes
-	dataHashKeyPrefix                  = []byte("w")           // dataHashKeyPrefix + versioned hash -> versioned hash
+	blockNumToSysKeyPrefix             = []byte("z")                    // blockNumToSysKeyPrefix + block number -> SYS block hash
+	btcCheckpointLastKey               = []byte("btcchk-last")          // stores last BTC checkpoint index (uint64 big endian)
+	btcCheckpointH2IPrefix             = []byte("btcchk-h2i-")          // btcCheckpointH2IPrefix + 32B btc hash -> checkpoint index (uint64 big endian)
+	btcCheckpointI2HPrefix             = []byte("btcchk-i2h-")          // btcCheckpointI2HPrefix + decimal index -> 32B btc hash
+	blockNumToBtcCheckpointIndexPrefix = []byte("btcchk-b2i-")          // blockNumToBtcCheckpointIndexPrefix + decimal block number -> checkpoint index (uint64 big endian)
+	dataHashesKeyPrefix                = []byte("y")                    // dataHashesKeyPrefix + block number -> versioned hashes
+	dataHashKeyPrefix                  = []byte("w")                    // dataHashKeyPrefix + versioned hash -> versioned hash
+	dataHashIndexStateKey              = []byte("datahash-index-state") // SYSCOIN: version + indexed head + retained-history floor
+	nevmAddressUndoPrefix              = []byte("nevm-address-undo-")   // SYSCOIN: prefix + uint64 block number -> paired address before-images
 
 	// Path-based storage scheme of merkle patricia trie.
 	TrieNodeAccountPrefix = []byte("A") // TrieNodeAccountPrefix + hexPath -> trie node
@@ -364,6 +366,12 @@ func blockNumToBtcCheckpointIndexKey(n uint64) []byte {
 func nevmAddressKey(addr common.Address) []byte {
 	return append([]byte("nevm-address-"), addr.Bytes()...)
 }
+
+// SYSCOIN
+func nevmAddressUndoKey(number uint64) []byte {
+	return append(nevmAddressUndoPrefix, encodeBlockNumber(number)...)
+}
+
 func dataHashesKey(n uint64) []byte {
 	return append(dataHashesKeyPrefix, []byte(new(big.Int).SetUint64(n).String())...)
 }

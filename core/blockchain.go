@@ -256,11 +256,20 @@ type BlockChain struct {
 	// Readers don't need to take it, they can just read the database.
 	chainmu *syncx.ClosableMutex
 
+	// SYSCOIN: fence metadata commits through in-memory head publication. RPCs
+	// validate this generation after execution instead of blocking chain imports.
+	syscoinMetadataMu         sync.RWMutex
+	syscoinMetadataGeneration uint64
+	// SYSCOIN: last successful state/metadata checkpoint, protected by chainmu.
+	syscoinCheckpoint *types.Header
+
 	currentBlock      atomic.Pointer[types.Header] // Current head of the chain
 	currentSnapBlock  atomic.Pointer[types.Header] // Current head of snap-sync
 	currentFinalBlock atomic.Pointer[types.Header] // Latest (consensus) finalized block
 	currentSafeBlock  atomic.Pointer[types.Header] // Latest (consensus) safe block
-	historyPrunePoint atomic.Pointer[history.PrunePoint]
+	// SYSCOIN: RPC finality is replayed by Core; never restore generic engine markers into it.
+	currentSyscoinFinalBlock atomic.Pointer[types.Header]
+	historyPrunePoint        atomic.Pointer[history.PrunePoint]
 
 	bodyCache     *lru.Cache[common.Hash, *types.Body]
 	bodyRLPCache  *lru.Cache[common.Hash, rlp.RawValue]
@@ -297,6 +306,16 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		return nil, err
 	}
 	triedb := triedb.NewDatabase(db, cacheConfig.triedbConfig(enableVerkle))
+	// SYSCOIN: every failed startup must release the constructor-owned trie
+	// database, including its state-history lock, so startup can be retried.
+	initialized := false
+	defer func() {
+		if !initialized {
+			if err := triedb.Close(); err != nil {
+				log.Error("Failed to close trie database after failed startup", "err", err)
+			}
+		}
+	}()
 
 	// Write the supplied genesis to the database if it has not been initialized
 	// yet. The corresponding chain config will be returned, either from the
@@ -365,6 +384,11 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if err := bc.loadLastState(); err != nil {
 		return nil, err
 	}
+	// SYSCOIN: an older partial repair may already have separated these markers.
+	// Its address history cannot be inferred from the lower execution head.
+	if chainConfig.SyscoinBlock != nil && (bc.CurrentHeader().Hash() != bc.CurrentBlock().Hash() || bc.CurrentSnapBlock().Hash() != bc.CurrentBlock().Hash()) {
+		return nil, errors.New("inconsistent Syscoin head markers; rebuild Geth state explicitly")
+	}
 	// Make sure the state associated with the block is available, or log out
 	// if there is no available state, waiting for state sync.
 	head := bc.CurrentBlock()
@@ -381,7 +405,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			// disk layer point of snapshot(if it's enabled). Make sure the
 			// rewound point is lower than disk layer.
 			var diskRoot common.Hash
-			if bc.cacheConfig.SnapshotLimit > 0 {
+			// SYSCOIN: retain the highest usable paired trie state. Rebuild an
+			// older snapshot instead of rewinding below a durable checkpoint.
+			if bc.cacheConfig.SnapshotLimit > 0 && chainConfig.SyscoinBlock == nil {
 				diskRoot = rawdb.ReadSnapshotRoot(bc.db)
 			}
 			if diskRoot != (common.Hash{}) {
@@ -455,6 +481,24 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		}
 	}
 
+	// SYSCOIN: finish fallible startup checks before starting snapshot workers,
+	// so a refused rewind can safely close the trie database without workers.
+	// Rewind the chain in case of an incompatible config upgrade.
+	if compatErr != nil {
+		log.Warn("Rewinding chain to upgrade configuration", "err", compatErr)
+		// SYSCOIN: a refused metadata rewind must not install the new config.
+		var rewindErr error
+		if compatErr.RewindToTime > 0 {
+			rewindErr = bc.SetHeadWithTimestamp(compatErr.RewindToTime)
+		} else {
+			rewindErr = bc.SetHead(compatErr.RewindToBlock)
+		}
+		if rewindErr != nil {
+			return nil, rewindErr
+		}
+		rawdb.WriteChainConfig(db, genesisHash, chainConfig)
+	}
+
 	// Load any existing snapshot, regenerating it if loading failed
 	if bc.cacheConfig.SnapshotLimit > 0 {
 		// If the chain was rewound past the snapshot persistent layer (causing
@@ -464,9 +508,13 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		var recover bool
 
 		head := bc.CurrentBlock()
-		if layer := rawdb.ReadSnapshotRecoveryNumber(bc.db); layer != nil && *layer >= head.Number.Uint64() {
-			log.Warn("Enabling snapshot recovery", "chainhead", head.Number, "diskbase", *layer)
-			recover = true
+		// SYSCOIN: ignore old recovery hints even after a restart interrupted
+		// head repair. A mismatched snapshot must be rebuilt from the paired trie.
+		if chainConfig.SyscoinBlock == nil {
+			if layer := rawdb.ReadSnapshotRecoveryNumber(bc.db); layer != nil && *layer >= head.Number.Uint64() {
+				log.Warn("Enabling snapshot recovery", "chainhead", head.Number, "diskbase", *layer)
+				recover = true
+			}
 		}
 		snapconfig := snapshot.Config{
 			CacheSize:  bc.cacheConfig.SnapshotLimit,
@@ -480,20 +528,11 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		bc.statedb = state.NewDatabase(bc.triedb, bc.snaps)
 	}
 
-	// Rewind the chain in case of an incompatible config upgrade.
-	if compatErr != nil {
-		log.Warn("Rewinding chain to upgrade configuration", "err", compatErr)
-		if compatErr.RewindToTime > 0 {
-			bc.SetHeadWithTimestamp(compatErr.RewindToTime)
-		} else {
-			bc.SetHead(compatErr.RewindToBlock)
-		}
-		rawdb.WriteChainConfig(db, genesisHash, chainConfig)
-	}
 	// Start tx indexer if it's enabled.
 	if txLookupLimit != nil {
 		bc.txIndexer = newTxIndexer(*txLookupLimit, bc)
 	}
+	initialized = true // SYSCOIN: the returned chain now owns the trie database.
 	return bc, nil
 }
 
@@ -801,7 +840,9 @@ func (bc *BlockChain) rewindHashHead(head *types.Header, root common.Hash) (*typ
 }
 
 // rewindPathHead implements the logic of rewindHead in the context of path scheme.
-func (bc *BlockChain) rewindPathHead(head *types.Header, root common.Hash) (*types.Header, uint64) {
+// SYSCOIN: recoverState=false discovers a target without changing trie state,
+// allowing metadata history to be checked before any recovery writes.
+func (bc *BlockChain) rewindPathHead(head *types.Header, root common.Hash, recoverState bool) (*types.Header, uint64) {
 	var (
 		pivot      = rawdb.ReadLastPivotNumber(bc.db) // Associated block number of pivot block
 		rootNumber uint64                             // Associated block number of requested root
@@ -866,7 +907,7 @@ func (bc *BlockChain) rewindPathHead(head *types.Header, root common.Hash) (*typ
 		}
 	}
 	// Recover if the target state if it's not available yet.
-	if !bc.HasState(head.Root) {
+	if recoverState && !bc.HasState(head.Root) {
 		if err := bc.triedb.Recover(head.Root); err != nil {
 			log.Crit("Failed to rollback state", "err", err)
 		}
@@ -885,7 +926,7 @@ func (bc *BlockChain) rewindPathHead(head *types.Header, root common.Hash) (*typ
 // and the whole snapshot should be auto-generated in case of head mismatch.
 func (bc *BlockChain) rewindHead(head *types.Header, root common.Hash) (*types.Header, uint64) {
 	if bc.triedb.Scheme() == rawdb.PathScheme {
-		return bc.rewindPathHead(head, root)
+		return bc.rewindPathHead(head, root, true)
 	}
 	return bc.rewindHashHead(head, root)
 }
@@ -907,6 +948,11 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 		return 0, errChainStopped
 	}
 	defer bc.chainmu.Unlock()
+	// SYSCOIN: generic marker-first repair cannot restore Core-derived state.
+	// Use local, bounded undo and commit metadata with all head markers instead.
+	if bc.chainConfig.SyscoinBlock != nil {
+		return bc.rewindSyscoinHead(head, time, root, repair)
+	}
 
 	var (
 		// Track the block number of the requested root hash
@@ -1150,17 +1196,47 @@ func (bc *BlockChain) ExportN(w io.Writer, first uint64, last uint64) error {
 func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	// Add the block to the canonical chain number scheme and mark as the head
 	batch := bc.db.NewBatch()
-	rawdb.WriteHeadHeaderHash(batch, block.Hash())
-	rawdb.WriteHeadFastBlockHash(batch, block.Hash())
-	rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64())
-	rawdb.WriteTxLookupEntriesByBlock(batch, block)
-	rawdb.WriteHeadBlockHash(batch, block.Hash())
+	bc.writeHeadBlockMarkers(batch, block)
+	// SYSCOIN: also fence the generic genesis-reset head publication.
+	if bc.chainConfig.SyscoinBlock != nil {
+		unlockMetadata := bc.lockSyscoinMetadataPublication()
+		defer unlockMetadata()
+	}
 
 	// Flush the whole batch into the disk, exit the node if failed
 	if err := batch.Write(); err != nil {
 		log.Crit("Failed to update chain indexes and markers", "err", err)
 	}
-	// Update all in-memory chain markers in the last step
+	bc.publishHeadBlock(block)
+}
+
+// SYSCOIN: writeHeadBlockMarkers lets a paired connect/disconnect commit metadata
+// and canonical head markers in one database batch.
+func (bc *BlockChain) writeHeadBlockMarkers(batch ethdb.KeyValueWriter, block *types.Block) {
+	rawdb.WriteHeadHeaderHash(batch, block.Hash())
+	rawdb.WriteHeadFastBlockHash(batch, block.Hash())
+	rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64())
+	rawdb.WriteTxLookupEntriesByBlock(batch, block)
+	rawdb.WriteHeadBlockHash(batch, block.Hash())
+}
+
+// SYSCOIN: publishHeadBlock updates in-memory head markers after their database
+// batch is durable. The caller must hold chainmu.
+func (bc *BlockChain) publishHeadBlock(block *types.Block) {
+	// SYSCOIN: a rewind/replacement invalidates the checkpoint cadence. The next
+	// import must establish a baseline on the selected branch before pruning undo.
+	if bc.chainConfig.SyscoinBlock != nil {
+		if previous := bc.CurrentBlock(); previous == nil || block.ParentHash() != previous.Hash() {
+			bc.syscoinCheckpoint = nil
+		}
+	}
+	// SYSCOIN: recovery may remove a projected boundary. Await Core replay;
+	// never invent a lower finalized head or constrain Core's rollback here.
+	if final := bc.currentSyscoinFinalBlock.Load(); final != nil &&
+		(final.Number.Uint64() > block.NumberU64() ||
+			(final.Number.Uint64() == block.NumberU64() && final.Hash() != block.Hash())) {
+		bc.currentSyscoinFinalBlock.Store(nil)
+	}
 	bc.hc.SetCurrentHeader(block.Header())
 
 	bc.currentSnapBlock.Store(block.Header())
@@ -1491,19 +1567,57 @@ func (bc *BlockChain) writeBlockWithoutState(block *types.Block) (err error) {
 	return nil
 }
 
-// writeKnownBlock updates the head block flag with a known block
-// and introduces chain reorg if necessary.
-func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
+// SYSCOIN: writeCanonicalBlock commits paired metadata with the canonical head.
+// For other chains it retains the standard head update and reorg behavior.
+func (bc *BlockChain) writeCanonicalBlock(block *types.Block) error {
+	if err := bc.validateNEVMData(block); err != nil {
+		return err
+	}
+	// SYSCOIN: known blocks also advance metadata and prune undo without state execution.
+	if err := bc.maybeCheckpointSyscoinHead(); err != nil {
+		return err
+	}
 	current := bc.CurrentBlock()
 	if block.ParentHash() != current.Hash() {
 		if err := bc.reorg(current, block.Header()); err != nil {
 			return err
 		}
 	}
+	if bc.chainConfig.SyscoinBlock != nil {
+		// SYSCOIN: canonical head markers and transient Core metadata must become
+		// durable together. Publishing the in-memory head is deferred until then.
+		batch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
+		if err := bc.writeNEVMAddressUndo(batch, block); err != nil {
+			return err
+		}
+		if err := bc.writeNEVMData(batch, block); err != nil {
+			return err
+		}
+		bc.writeHeadBlockMarkers(batch, block)
+		unlockMetadata := bc.lockSyscoinMetadataPublication()
+		defer unlockMetadata()
+		if err := batch.Write(); err != nil {
+			return fmt.Errorf("write paired Syscoin canonical block: %w", err)
+		}
+		bc.publishHeadBlock(block)
+		return nil
+	}
 	bc.writeHeadBlock(block)
 	return nil
 }
+
+// SYSCOIN: validate transient Core metadata before any canonical-head mutation.
+func (bc *BlockChain) validateNEVMData(block *types.Block) error {
+	if bc.Config().IsSyscoin(block.Number()) && block.NevmBlockConnect == nil {
+		return errors.New("missing NEVM connect metadata for Syscoin block")
+	}
+	return nil
+}
+
 func (bc *BlockChain) writeNEVMData(blockBatch ethdb.KeyValueWriter, block *types.Block) error {
+	if err := bc.validateNEVMData(block); err != nil {
+		return err
+	}
 	nevmBlockConnect := block.NevmBlockConnect
 	if nevmBlockConnect != nil {
 		if nevmBlockConnect.HasDiff() {
@@ -1529,34 +1643,40 @@ func (bc *BlockChain) writeNEVMData(blockBatch ethdb.KeyValueWriter, block *type
 		bc.WriteSYSHash(blockBatch, nevmBlockConnect.Sysblockhash, proposedBlockNumber)
 		// BTC checkpoint metadata is only present on checkpoint carrier blocks.
 		if nevmBlockConnect.BTCPrevHash != (common.Hash{}) {
-			bc.WriteBTCCheckpoint(blockBatch, proposedBlockNumber, nevmBlockConnect.BTCPrevHash)
+			if err := bc.WriteBTCCheckpoint(blockBatch, proposedBlockNumber, nevmBlockConnect.BTCPrevHash); err != nil {
+				return err
+			}
 		}
 	} else if bc.Config().SyscoinBlock != nil {
-		log.Debug("Skipping NEVM data; no connect info for block",
-			"number", block.NumberU64(), "hash", block.Hash())
+		// Keep the index head aligned before a nonzero Syscoin activation height.
+		bc.WriteDataHashes(blockBatch, block.NumberU64(), nil)
 	}
 	return nil
 }
 
-// writeBlockWithState writes block, metadata and corresponding state data to the
-// database.
+// writeBlockWithState writes a block and corresponding state data to the database.
 func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, statedb *state.StateDB) error {
 	if !bc.HasHeader(block.ParentHash(), block.NumberU64()-1) {
 		return consensus.ErrUnknownAncestor
+	}
+	// SYSCOIN: validate transient Core metadata before persisting any portion of
+	// the block. Canonical metadata is committed with the head after state commit.
+	if err := bc.validateNEVMData(block); err != nil {
+		return err
+	}
+	// SYSCOIN: fail a due checkpoint before persisting any part of the next block.
+	if err := bc.maybeCheckpointSyscoinHead(); err != nil {
+		return err
 	}
 	// Irrelevant of the canonical status, write the block itself to the database.
 	//
 	// Note all the components of block(hash->number map, header, body, receipts)
 	// should be written atomically. BlockBatch is used for containing all components.
-	blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
+	blockBatch := bc.db.NewBatch()
 	rawdb.WriteBlock(blockBatch, block)
 	rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
 	rawdb.WritePreimages(blockBatch, statedb.Preimages())
-	err := bc.writeNEVMData(blockBatch, block)
-	if err != nil {
-		log.Crit("Failed to NEVM data into disk", "err", err)
-	}
-	if err = blockBatch.Write(); err != nil {
+	if err := blockBatch.Write(); err != nil {
 		log.Crit("Failed to write block into disk", "err", err)
 	}
 	// Commit all cached state changes into underlying memory database.
@@ -1630,17 +1750,9 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
 	if err := bc.writeBlockWithState(block, receipts, state); err != nil {
 		return NonStatTy, err
 	}
-	currentBlock := bc.CurrentBlock()
-
-	// Reorganise the chain if the parent is not the head block
-	if block.ParentHash() != currentBlock.Hash() {
-		if err := bc.reorg(currentBlock, block.Header()); err != nil {
-			return NonStatTy, err
-		}
+	if err := bc.writeCanonicalBlock(block); err != nil {
+		return NonStatTy, err
 	}
-
-	// Set new head.
-	bc.writeHeadBlock(block)
 
 	bc.chainFeed.Send(ChainEvent{Header: block.Header()})
 	if len(logs) > 0 {
@@ -1704,6 +1816,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 	if bc.insertStopped() {
 		return nil, 0, nil
 	}
+	// SYSCOIN: Core chooses the canonical pairing. Candidate/side execution
+	// cannot publish its height-keyed metadata; reorgs require paired disconnects
+	// followed by contiguous Core connects, including for already-stored blocks.
+	if bc.chainConfig.SyscoinBlock != nil {
+		current := bc.CurrentBlock()
+		if !setHead || chain[0].NumberU64() != current.Number.Uint64()+1 || chain[0].ParentHash() != current.Hash() {
+			return nil, 0, errors.New("Syscoin imports require a paired canonical extension")
+		}
+	}
 
 	if atomic.AddInt32(&bc.blockProcCounter, 1) == 1 {
 		bc.blockProcFeed.Send(true)
@@ -1766,18 +1887,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		// head full block(new pivot point).
 		for block != nil && bc.skipBlock(err, it) {
 			log.Debug("Writing previously known block", "number", block.Number(), "hash", block.Hash())
-			if err := bc.writeKnownBlock(block); err != nil {
-				return nil, it.index, err
-			}
-			// SYSCOIN
-			blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
-			err = bc.writeNEVMData(blockBatch, block)
-			if err != nil {
-				log.Crit("Failed to previously known block into disk", "err", err)
-				return nil, it.index, err
-			}
-			if err = blockBatch.Write(); err != nil {
-				log.Crit("Failed to previously known block into disk", "err", err)
+			if err := bc.writeCanonicalBlock(block); err != nil {
 				return nil, it.index, err
 			}
 			lastCanon = block
@@ -1856,18 +1966,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 				log.Error("Please file an issue, skip known block execution without receipt",
 					"hash", block.Hash(), "number", block.NumberU64())
 			}
-			if err := bc.writeKnownBlock(block); err != nil {
-				return nil, it.index, err
-			}
-			// SYSCOIN
-			blockBatch := bc.hc.newSyscoinCacheBatch(bc.db.NewBatch())
-			err = bc.writeNEVMData(blockBatch, block)
-			if err != nil {
-				log.Crit("Failed to previously known block into disk", "err", err)
-				return nil, it.index, err
-			}
-			if err = blockBatch.Write(); err != nil {
-				log.Crit("Failed to previously known block into disk", "err", err)
+			if err := bc.writeCanonicalBlock(block); err != nil {
 				return nil, it.index, err
 			}
 			stats.processed++
@@ -2495,6 +2594,16 @@ func (bc *BlockChain) SetCanonical(head *types.Block) (common.Hash, error) {
 		return common.Hash{}, errChainStopped
 	}
 	defer bc.chainmu.Unlock()
+	// SYSCOIN: this API does not install Core metadata. Paired canonical
+	// disconnects must use DisconnectSyscoinBlock so head and metadata commit
+	// together; only an idempotent current-head request is valid here.
+	if bc.chainConfig.SyscoinBlock != nil {
+		current := bc.CurrentBlock()
+		if head.Hash() == current.Hash() {
+			return head.Hash(), nil
+		}
+		return common.Hash{}, errors.New("Syscoin canonicalization requires paired Core connect/disconnect")
+	}
 
 	// Re-execute the reorged chain in case the head state is missing.
 	if !bc.HasState(head.Root()) {

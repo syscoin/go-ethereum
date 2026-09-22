@@ -156,7 +156,8 @@ func (dl *diffLayer) update(root common.Hash, id uint64, block uint64, nodes *no
 }
 
 // persist flushes the diff layer and all its parent layers to disk layer.
-func (dl *diffLayer) persist(force bool) (layer, error) {
+// SYSCOIN: carry the selected branch journal through recursive flushes.
+func (dl *diffLayer) persist(force bool, journal *liveJournal) (layer, error) {
 	if parent, ok := dl.parentLayer().(*diffLayer); ok {
 		// Hold the lock to prevent any read operation until the new
 		// parent is linked correctly.
@@ -165,7 +166,7 @@ func (dl *diffLayer) persist(force bool) (layer, error) {
 		// The merging of diff layers starts at the bottom-most layer,
 		// therefore we recurse down here, flattening on the way up
 		// (diffToDisk).
-		result, err := parent.persist(force)
+		result, err := parent.persist(force, journal) // SYSCOIN: keep every intermediate flush restartable.
 		if err != nil {
 			dl.lock.Unlock()
 			return nil, err
@@ -173,7 +174,7 @@ func (dl *diffLayer) persist(force bool) (layer, error) {
 		dl.parent = result
 		dl.lock.Unlock()
 	}
-	return diffToDisk(dl, force)
+	return diffToDisk(dl, force, journal) // SYSCOIN: pair the physical base with its journal.
 }
 
 // size returns the approximate memory size occupied by this diff layer.
@@ -183,10 +184,11 @@ func (dl *diffLayer) size() uint64 {
 
 // diffToDisk merges a bottom-most diff into the persistent disk layer underneath
 // it. The method will panic if called onto a non-bottom-most diff layer.
-func diffToDisk(layer *diffLayer, force bool) (layer, error) {
+// SYSCOIN: propagate the captured live journal to the atomic disk commit.
+func diffToDisk(layer *diffLayer, force bool, journal *liveJournal) (layer, error) {
 	disk, ok := layer.parentLayer().(*diskLayer)
 	if !ok {
 		panic(fmt.Sprintf("unknown layer type: %T", layer.parentLayer()))
 	}
-	return disk.commit(layer, force)
+	return disk.commit(layer, force, journal) // SYSCOIN: propagate journal preservation.
 }
