@@ -101,6 +101,7 @@ func (db *Database) loadLayers() layer {
 	// Load the layers by resolving the journal
 	head, err := db.loadJournal(root)
 	if err == nil {
+		db.journaled = true // SYSCOIN: keep this recovery journal valid after reopen.
 		return head
 	}
 	// journal is not matched(or missing) with the persistent state, discard
@@ -214,6 +215,14 @@ func (dl *diffLayer) journal(w io.Writer) error {
 	if err := dl.parent.journal(w); err != nil {
 		return err
 	}
+	return dl.journalContent(w) // SYSCOIN: reuse immutable encoding during a flush.
+}
+
+// SYSCOIN BEGIN: Rebase live recovery journals atomically with physical state.
+// journalContent writes only immutable diff data, without following parent
+// pointers. A physical flush may already hold the locks that protect those
+// pointers while rebasing a journal onto its new disk layer.
+func (dl *diffLayer) journalContent(w io.Writer) error {
 	// Everything below was journaled, persist this layer too
 	if err := rlp.Encode(w, dl.root); err != nil {
 		return err
@@ -229,9 +238,70 @@ func (dl *diffLayer) journal(w io.Writer) error {
 	if err := dl.states.encode(w); err != nil {
 		return err
 	}
-	log.Debug("Journaled pathdb diff layer", "root", dl.root, "parent", dl.parent.rootHash(), "id", dl.stateID(), "block", dl.block)
+	log.Debug("Journaled pathdb diff layer", "root", dl.root, "id", dl.stateID(), "block", dl.block)
 	return nil
 }
+
+// liveJournal retains the selected branch's immutable diffs before cap starts
+// changing their parent links. It is only encoded if cap actually flushes the
+// physical base. No trie nodes or recent rollback layers are flattened by it.
+type liveJournal struct {
+	layers []*diffLayer // newest first
+}
+
+func newLiveJournal(head *diffLayer) *liveJournal {
+	journal := new(liveJournal)
+	var current layer = head
+	for {
+		diff, ok := current.(*diffLayer)
+		if !ok {
+			if !current.(*diskLayer).db.journaled {
+				return nil
+			}
+			return journal
+		}
+		journal.layers = append(journal.layers, diff)
+		current = diff.parentLayer()
+	}
+}
+
+// write stages a journal matching the physical state in the same batch. A
+// crash can therefore expose either the old base and journal, or the new
+// pair, never a new base that invalidates a previously acknowledged checkpoint.
+func (j *liveJournal) write(batch ethdb.KeyValueWriter, root common.Hash, id uint64) error {
+	if j == nil {
+		return nil
+	}
+	var base int
+	for base = 0; base < len(j.layers); base++ {
+		if j.layers[base].id == id && j.layers[base].root == root {
+			break
+		}
+	}
+	if base == len(j.layers) {
+		return errors.New("journal flush base is outside selected branch")
+	}
+	journal := new(bytes.Buffer)
+	if err := rlp.Encode(journal, journalVersion); err != nil {
+		return err
+	}
+	if err := rlp.Encode(journal, root); err != nil {
+		return err
+	}
+	// The buffer is fully persisted by this batch. Only newer diffs remain.
+	disk := &diskLayer{root: root, id: id, buffer: newBuffer(0, nil, nil, 0)}
+	if err := disk.journal(journal); err != nil {
+		return err
+	}
+	for i := base - 1; i >= 0; i-- {
+		if err := j.layers[i].journalContent(journal); err != nil {
+			return err
+		}
+	}
+	return rawdb.WriteTrieJournalChecked(batch, journal.Bytes())
+}
+
+// SYSCOIN END: Rebase live recovery journals atomically with physical state.
 
 // Journal commits an entire diff hierarchy to disk into a single journal entry.
 // This is meant to be used during shutdown to persist the layer without
@@ -244,8 +314,10 @@ func (db *Database) Journal(root common.Hash) error {
 }
 
 // SYSCOIN: Checkpoint preserves the live diff hierarchy without disabling
-// subsequent imports/rollbacks. The caller must sync the hot database before
-// treating the staged journal and its matching head markers as durable.
+// subsequent imports/rollbacks. Later physical flushes rebase the journal in
+// the same batch as the trie nodes, preserving recovery after further imports.
+// The caller must sync the hot database before treating the staged journal and
+// its matching head markers as durable.
 func (db *Database) Checkpoint(root common.Hash) error {
 	return db.journal(root, false)
 }
@@ -314,6 +386,7 @@ func (db *Database) journal(root common.Hash, readOnly bool) error {
 	if err := rawdb.WriteTrieJournalChecked(db.diskdb, journal.Bytes()); err != nil {
 		return err
 	}
+	db.journaled = true // SYSCOIN: future base flushes must preserve this checkpoint.
 
 	// Set the db in read only mode to reject all following mutations
 	db.readOnly = readOnly // SYSCOIN: only shutdown journaling disables writes.

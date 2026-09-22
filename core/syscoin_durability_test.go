@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"math/big"
 	"sync"
 	"testing"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/ethereum/go-ethereum/triedb/pathdb"
 	"github.com/syscoin/syscoinwire/syscoin/wire"
@@ -417,4 +419,159 @@ func TestSyscoinPairDurabilityPathCheckpointRootReadFailure(t *testing.T) {
 	if db.calls() != beforeRetry+1 {
 		t.Fatal("healthy child reapplication added a hot KV sync")
 	}
+}
+
+// SYSCOIN: A live checkpoint must survive later capacity-triggered flushes,
+// including flushes after reopening its journal. Keep the production 128-layer
+// limit; a zero write buffer only accelerates the ordinary capacity trigger.
+func TestSyscoinPairDurabilityAfterOrdinaryPathFlush(t *testing.T) {
+	for _, snapshots := range []bool{false, true} {
+		name := "without-snapshots"
+		if snapshots {
+			name = "with-snapshots"
+		}
+		t.Run(name, func(t *testing.T) { testSyscoinPairDurabilityAfterOrdinaryPathFlush(t, snapshots) })
+	}
+}
+
+func testSyscoinPairDurabilityAfterOrdinaryPathFlush(t *testing.T, snapshots bool) {
+	config := *params.AllEthashProtocolChanges
+	config.SyscoinBlock = big.NewInt(0)
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := common.HexToAddress("0x7777")
+	genesis := &Genesis{BaseFee: big.NewInt(params.InitialBaseFee), Config: &config, Alloc: types.GenesisAlloc{
+		crypto.PubkeyToAddress(key.PublicKey): {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(24), nil)},
+		contract:                              {Code: common.FromHex("0x60006000a000")},
+	}}
+	engine := ethash.NewFaker()
+	generatedDB, blocks, _ := GenerateChainWithGenesis(genesis, engine, 130, func(i int, block *BlockGen) {
+		block.SetCoinbase(common.BigToAddress(big.NewInt(int64(i + 1))))
+		block.AddTx(types.MustSignNewTx(key, block.Signer(), &types.LegacyTx{
+			Nonce: uint64(i), To: &contract, Gas: 100_000, GasPrice: big.NewInt(params.InitialBaseFee),
+		}))
+	})
+	defer generatedDB.Close()
+	cache := DefaultCacheConfigWithScheme(rawdb.PathScheme)
+	cache.TrieDirtyLimit = 0 // Capacity acceleration; normal 128-layer cap remains.
+	cache.SnapshotLimit = 0
+	if snapshots {
+		cache.SnapshotLimit = 16
+		cache.SnapshotWait = true
+	}
+	db := &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}
+	defer db.Close()
+	chain, err := NewBlockChain(db, cache, genesis, nil, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer chain.Stop()
+	for i, block := range blocks {
+		sys := common.BigToHash(big.NewInt(int64(i + 1)))
+		block.NevmBlockConnect = &types.NEVMBlockConnect{
+			Block: block, Sysblockhash: string(sys.Bytes()), Diff: new(wire.NEVMAddressDiff),
+		}
+	}
+	// P=128: all EVM imports and pairing metadata are real, and each block
+	// changes both the sender nonce and the EVM state root.
+	for _, block := range blocks[:128] {
+		if _, err := chain.InsertChain(types.Blocks{block}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	acknowledged := blocks[127]
+	baseBefore := crypto.Keccak256Hash(rawdb.ReadAccountTrieNode(db, nil))
+	if baseBefore == acknowledged.Root() {
+		t.Fatal("fixture already flushed P")
+	}
+	if err := chain.SyncSyscoinPair(128, []byte(acknowledged.NevmBlockConnect.Sysblockhash)); err != nil {
+		t.Fatal(err)
+	}
+	fencedJournal := bytes.Clone(rawdb.ReadTrieJournal(db))
+	// A control proves that the successful fence is initially restartable.
+	fencedImage := db.crashImage(t)
+	fencedChain, err := NewBlockChain(fencedImage, cache, genesis, nil, ethash.NewFaker(), vm.Config{}, nil)
+	if err != nil {
+		t.Fatalf("initial fence restart: %v", err)
+	}
+	initialNumber, initialSYS, initialOK := fencedChain.CurrentSyscoinPair()
+	if !initialOK || initialNumber != 128 || !bytes.Equal(initialSYS, []byte(acknowledged.NevmBlockConnect.Sysblockhash)) || !fencedChain.HasState(acknowledged.Root()) {
+		t.Fatalf("initial fence not durable: pair=%d/%x/%t", initialNumber, initialSYS, initialOK)
+	}
+	fencedChain.Stop()
+	// No checkpoint, manual Commit, or force-flush here: just the next normal
+	// InsertChain. Its built-in cap flushes the oldest layer at capacity.
+	if _, err := chain.InsertChain(types.Blocks{blocks[128]}); err != nil {
+		t.Fatal(err)
+	}
+	baseAfter := crypto.Keccak256Hash(rawdb.ReadAccountTrieNode(db, nil))
+	if baseBefore == baseAfter || baseAfter != blocks[0].Root() {
+		t.Fatalf("expected ordinary physical flush to block 1, got %x", baseAfter)
+	}
+	if bytes.Equal(fencedJournal, rawdb.ReadTrieJournal(db)) {
+		t.Fatal("ordinary import failed to refresh the journal")
+	}
+	// Retain ALL current KV writes, not merely the earlier Sync image. This
+	// models a process crash whose completed normal writes survive; no clean
+	// Stop of the live source is allowed before copying.
+	checkPair := func(chain *BlockChain, want *types.Block) {
+		t.Helper()
+		number, sys, ok := chain.CurrentSyscoinPair()
+		if !ok || number != want.NumberU64() || !bytes.Equal(sys, []byte(want.NevmBlockConnect.Sysblockhash)) {
+			t.Fatalf("unexpected restart endpoint %d/%x/%t; want block %d", number, sys, ok, want.NumberU64())
+		}
+		if !chain.HasState(acknowledged.Root()) {
+			t.Fatal("acknowledged block 128 state lost")
+		}
+		state, err := chain.StateAt(want.Root())
+		if err != nil {
+			t.Fatalf("read restarted state: %v", err)
+		}
+		if nonce := state.GetNonce(crypto.PubkeyToAddress(key.PublicKey)); nonce != want.NumberU64() {
+			t.Fatalf("restarted sender nonce %d, want %d", nonce, want.NumberU64())
+		}
+		if err := state.Error(); err != nil {
+			t.Fatalf("read restarted sender: %v", err)
+		}
+	}
+	coldReopen := func(source ethdb.Database, want *types.Block) (*BlockChain, *syscoinDurabilityDB) {
+		t.Helper()
+		image := &syscoinDurabilityDB{Database: copySyscoinRecoveryDB(t, source)}
+		restarted, err := NewBlockChain(image, cache, genesis, nil, ethash.NewFaker(), vm.Config{}, nil)
+		if err != nil {
+			t.Fatalf("restart after ordinary flush failed: %v", err)
+		}
+		t.Cleanup(restarted.Stop)
+		checkPair(restarted, want)
+		return restarted, image
+	}
+	restarted, restartedDB := coldReopen(db, blocks[128])
+
+	// A valid loaded journal must also be maintained by the next live flush.
+	if _, err := restarted.InsertChain(types.Blocks{blocks[129]}); err != nil {
+		t.Fatalf("import after cold restart: %v", err)
+	}
+	if root := crypto.Keccak256Hash(rawdb.ReadAccountTrieNode(restartedDB, nil)); root != blocks[1].Root() {
+		t.Fatalf("expected next ordinary physical flush to block 2, got %x", root)
+	}
+	reopened, reopenedDB := coldReopen(restartedDB, blocks[129])
+
+	// Retaining the journal must preserve recent parent layers for the paired
+	// disconnect/reconnect protocol, even after repeated flushes and restarts.
+	if err := reopened.DisconnectSyscoinBlock(&types.NEVMBlockDisconnect{
+		Sysblockhash: blocks[129].NevmBlockConnect.Sysblockhash, Diff: new(wire.NEVMAddressDiff),
+	}); err != nil {
+		t.Fatalf("disconnect after cold restart: %v", err)
+	}
+	checkPair(reopened, blocks[128])
+	if err := reopened.SyncSyscoinPair(129, []byte(blocks[128].NevmBlockConnect.Sysblockhash)); err != nil {
+		t.Fatalf("checkpoint disconnected parent: %v", err)
+	}
+	coldReopen(reopenedDB, blocks[128])
+	if _, err := reopened.InsertChain(types.Blocks{blocks[129]}); err != nil {
+		t.Fatalf("reconnect after parent checkpoint: %v", err)
+	}
+	checkPair(reopened, blocks[129])
 }
