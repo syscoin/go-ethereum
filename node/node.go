@@ -796,6 +796,11 @@ type closeTrackingDB struct {
 	n *Node
 }
 
+// SYSCOIN: preserve the optional hot-storage barrier through the node wrapper.
+func (db *closeTrackingDB) SyncKeyValue() error {
+	return ethdb.SyncKeyValue(db.Database)
+}
+
 func (db *closeTrackingDB) Close() error {
 	db.n.lock.Lock()
 	delete(db.n.databases, db)
