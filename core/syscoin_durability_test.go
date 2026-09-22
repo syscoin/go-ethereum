@@ -114,7 +114,7 @@ func (db *syscoinDurabilityDB) crashImage(t *testing.T) ethdb.Database {
 	if db.durable == nil {
 		t.Fatal("fixture has no durable database image")
 	}
-	copy := rawdb.NewMemoryDatabase()
+	copy := &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}
 	t.Cleanup(func() { copy.Close() })
 	for key, value := range db.durable {
 		if err := copy.Put([]byte(key), value); err != nil {
@@ -218,7 +218,7 @@ func TestSyscoinPairDurabilityAcrossPowerLoss(t *testing.T) {
 			if err := f.chain.SyncSyscoinPair(3, childPair); err != nil {
 				t.Fatal(err)
 			}
-			if db.calls() != 1 {
+			if db.calls() != 2 {
 				t.Fatal("initial child fence did not reach hot KV storage")
 			}
 			disconnectSyscoinDurabilityChild(t, f)
@@ -246,7 +246,7 @@ func TestSyscoinPairDurabilityAcrossPowerLoss(t *testing.T) {
 			if err := f.chain.SyncSyscoinPair(2, parentPair); err != nil {
 				t.Fatal(err)
 			}
-			if db.calls() != 3 {
+			if db.calls() != 4 {
 				t.Fatal("already-parent retry skipped the storage fence")
 			}
 			successImage := db.crashImage(t)
@@ -288,7 +288,7 @@ func TestSyscoinPairDurabilityRequiresExactEndpoint(t *testing.T) {
 					if err := f.chain.SyncSyscoinPair(wrong.number, wrong.hash); err == nil {
 						t.Fatal("wrong endpoint obtained a durability acknowledgement")
 					}
-					if db.calls() != 0 {
+					if db.calls() != 1 {
 						t.Fatal("wrong endpoint reached storage sync")
 					}
 					f.check(t, f.chain, db, 3)
@@ -312,7 +312,7 @@ func TestSyscoinPairDurabilityPathCheckpointFailure(t *testing.T) {
 	if err := f.chain.SyncSyscoinPair(2, []byte(f.blocks[1].NevmBlockConnect.Sysblockhash)); !errors.Is(err, failure) {
 		t.Fatalf("failed parent trie checkpoint = %v", err)
 	}
-	if db.calls() != 1 {
+	if db.calls() != 2 {
 		t.Fatal("failed trie checkpoint proceeded to a hot KV durability fence")
 	}
 	checkSyscoinDurabilityParent(t, f, f.chain, db)
@@ -344,14 +344,14 @@ func TestSyscoinPairDurabilityPathCheckpointRootReadFailure(t *testing.T) {
 	if diffs == 0 {
 		t.Fatal("fixture endpoint has no recent diff state")
 	}
-	if db.calls() != 0 {
-		t.Fatal("healthy forward imports added a hot KV sync")
+	if db.calls() != 1 {
+		t.Fatal("healthy forward imports added more than the initial baseline sync")
 	}
 	if err := f.chain.SyncSyscoinPair(3, []byte(child.NevmBlockConnect.Sysblockhash)); err != nil {
 		t.Fatal(err)
 	}
 	priorJournal := rawdb.ReadTrieJournal(db)
-	if len(priorJournal) == 0 || db.calls() != 1 {
+	if len(priorJournal) == 0 || db.calls() != 2 {
 		t.Fatal("initial child fence did not establish a usable durable checkpoint")
 	}
 	priorImage := db.crashImage(t)
@@ -361,7 +361,7 @@ func TestSyscoinPairDurabilityPathCheckpointRootReadFailure(t *testing.T) {
 	if !bytes.Equal(rawdb.ReadAccountTrieNode(db, nil), physical) {
 		t.Fatal("ordinary child disconnect changed the physical base B")
 	}
-	if db.calls() != 1 {
+	if db.calls() != 2 {
 		t.Fatal("ordinary disconnect added a hot KV sync")
 	}
 	failure := errors.New("injected physical account-root read failure")
@@ -381,8 +381,8 @@ func TestSyscoinPairDurabilityPathCheckpointRootReadFailure(t *testing.T) {
 	if got := db.setRootError(nil); got != reads+1 {
 		t.Errorf("physical root reads during checkpoint = %d, want 1", got-reads)
 	}
-	if db.calls() != 1 {
-		t.Errorf("failed physical-root read reached hot KV sync: calls=%d, want 1", db.calls())
+	if db.calls() != 2 {
+		t.Errorf("failed physical-root read reached hot KV sync: calls=%d, want 2", db.calls())
 	}
 	if !bytes.Equal(rawdb.ReadTrieJournal(db), priorJournal) {
 		t.Error("failed checkpoint replaced the prior usable trie journal")

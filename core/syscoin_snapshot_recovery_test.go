@@ -56,6 +56,7 @@ func TestSyscoinSnapshotRecoveryPreservesCheckpoint(t *testing.T) {
 				if err := f.chain.SyncSyscoinPair(parent.NumberU64(), []byte(parent.NevmBlockConnect.Sysblockhash)); err != nil {
 					t.Fatalf("fence parent: %v", err)
 				}
+				fences := db.calls()
 				journal := bytes.Clone(rawdb.ReadTrieJournal(db))
 				physicalID := rawdb.ReadPersistentStateID(db)
 				if !test.alreadyParent {
@@ -66,7 +67,7 @@ func TestSyscoinSnapshotRecoveryPreservesCheckpoint(t *testing.T) {
 					}
 					f.check(t, f.chain, db, child.NumberU64())
 				}
-				if db.calls() != 1 || !bytes.Equal(journal, rawdb.ReadTrieJournal(db)) || rawdb.ReadPersistentStateID(db) != physicalID {
+				if db.calls() != fences || !bytes.Equal(journal, rawdb.ReadTrieJournal(db)) || rawdb.ReadPersistentStateID(db) != physicalID {
 					t.Fatal("ordinary import unexpectedly fenced or flushed the checkpoint")
 				}
 				// Copy every current KV row before any Stop. In the already-parent
@@ -114,8 +115,8 @@ func TestSyscoinSnapshotRecoveryPreservesCheckpoint(t *testing.T) {
 				if err := restarted.SyncSyscoinPair(child.NumberU64(), []byte(child.NevmBlockConnect.Sysblockhash)); err != nil {
 					t.Fatalf("fence reapplied child: %v", err)
 				}
-				if restartedDB.calls() != 1 {
-					t.Fatal("reapplied child did not reach the durability barrier")
+				if restartedDB.calls() != 2 {
+					t.Fatal("replay baseline and explicit child fence did not reach the durability barrier")
 				}
 				final, finalDB := reopen(restartedDB.crashImage(t))
 				f.check(t, final, finalDB, child.NumberU64())

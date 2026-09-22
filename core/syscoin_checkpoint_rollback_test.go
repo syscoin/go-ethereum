@@ -30,6 +30,9 @@ type checkpointRollbackDB struct {
 	staged      atomic.Int32
 }
 
+// SYSCOIN: retain the simulated hot-storage barrier under the read fault wrapper.
+func (db *checkpointRollbackDB) SyncKeyValue() error { return ethdb.SyncKeyValue(db.Database) }
+
 func (db *checkpointRollbackDB) Get(key []byte) ([]byte, error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
@@ -117,7 +120,7 @@ func TestSyscoinCheckpointRollbackReadFailure(t *testing.T) {
 				if mode == "disconnect-path" {
 					scheme = rawdb.PathScheme
 				}
-				db := &checkpointRollbackDB{Database: rawdb.NewMemoryDatabase(), stagedKey: checkpointCarrierKey(3)}
+				db := &checkpointRollbackDB{Database: &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}, stagedKey: checkpointCarrierKey(3)}
 				t.Cleanup(func() { db.Close() })
 				f := newSyscoinRecoveryFixture(t, scheme, false, db)
 				f.check(t, f.chain, db, 3) // Warm all metadata and transaction caches.

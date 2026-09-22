@@ -25,7 +25,8 @@ import (
 func newNEVMNetworkBufferEthereum(t *testing.T, gate *nevmDiscoveryStartupGate) (*Ethereum, *node.Node, *event.TypeMuxSubscription, []*types.NEVMBlockConnect) {
 	t.Helper()
 	p2pConfig := p2p.Config{ListenAddr: "127.0.0.1:0", DiscAddr: "127.0.0.1:0", DiscoveryV5: true, MaxPeers: 4}
-	stack, err := node.New(&node.Config{P2P: p2pConfig})
+	// SYSCOIN: imports establish a durable baseline, including in this fixture.
+	stack, err := node.New(&node.Config{DataDir: t.TempDir(), P2P: p2pConfig})
 	if err != nil {
 		t.Fatal(err)
 	}

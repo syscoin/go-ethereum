@@ -39,7 +39,7 @@ func TestSyscoinPendingShutdownDrainsAndRejects(t *testing.T) {
 		t.Run(phase, func(t *testing.T) {
 			config := *params.AllEthashProtocolChanges
 			config.SyscoinBlock, config.NexusBlock = big.NewInt(0), big.NewInt(0)
-			db, engine := rawdb.NewMemoryDatabase(), ethash.NewFaker()
+			db, engine := &syscoinPendingTestDB{Database: rawdb.NewMemoryDatabase()}, ethash.NewFaker()
 			backend := newTestWorkerBackend(t, &config, engine, db, 0)
 			t.Cleanup(func() { backend.txPool.Close(); backend.chain.Stop(); db.Close() })
 			miner := New(backend, testConfig, engine)

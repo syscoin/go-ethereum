@@ -58,7 +58,7 @@ func pairClassificationBlock(block *types.Block) {
 func TestNEVMImportErrorClassification(t *testing.T) {
 	for _, name := range []string{"valid", "header", "state", "mutable-body", "future", "unknown-parent"} {
 		t.Run(name, func(t *testing.T) {
-			db := rawdb.NewMemoryDatabase()
+			db := &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}
 			t.Cleanup(func() { db.Close() })
 			chain, genesis, engine := classificationChain(t, db)
 			genDB, blocks, _ := GenerateChainWithGenesis(genesis, engine, 1, nil)
@@ -103,6 +103,9 @@ type classificationFaultDB struct {
 	captureKey bool
 }
 
+// SYSCOIN: preserve the simulated import baseline through read fault injection.
+func (db *classificationFaultDB) SyncKeyValue() error { return ethdb.SyncKeyValue(db.Database) }
+
 func (db *classificationFaultDB) Get(key []byte) ([]byte, error) {
 	if db.fault != nil && (db.faultKey == nil || bytes.Equal(key, db.faultKey)) {
 		return nil, db.fault
@@ -118,7 +121,7 @@ func (db *classificationFaultDB) Put(key, value []byte) error {
 }
 
 func TestNEVMProcessorChainReadErrorOverridesInvalidity(t *testing.T) {
-	db := &classificationFaultDB{Database: rawdb.NewMemoryDatabase()}
+	db := &classificationFaultDB{Database: &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}}
 	t.Cleanup(func() { db.Close() })
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	if err != nil {
@@ -194,7 +197,7 @@ func TestNEVMProcessorChainReadErrorOverridesInvalidity(t *testing.T) {
 }
 
 func TestNEVMExecutionChainReadClassification(t *testing.T) {
-	db := &classificationFaultDB{Database: rawdb.NewMemoryDatabase()}
+	db := &classificationFaultDB{Database: &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}}
 	t.Cleanup(func() { db.Close() })
 	chain, _, _ := classificationChain(t, db)
 	address, hash := common.HexToAddress("0x1234"), common.HexToHash("0x2345")
@@ -319,7 +322,7 @@ func TestNEVMStateLocalErrorsOverrideInvalidity(t *testing.T) {
 }
 
 func TestNEVMTransactionErrorRequiresCommittedBody(t *testing.T) {
-	db := rawdb.NewMemoryDatabase()
+	db := &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}
 	t.Cleanup(func() { db.Close() })
 	chain, genesis, engine := classificationChain(t, db)
 	genDB, blocks, _ := GenerateChainWithGenesis(genesis, engine, 1, nil)

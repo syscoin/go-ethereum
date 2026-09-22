@@ -58,6 +58,11 @@ type nevmListenerDatabase struct {
 	closed chan struct{}
 }
 
+// SYSCOIN: preserve the wrapped store's optional durability capability.
+func (db *nevmListenerDatabase) SyncKeyValue() error {
+	return ethdb.SyncKeyValue(db.Database)
+}
+
 func (db *nevmListenerDatabase) Close() error {
 	close(db.closed)
 	return db.Database.Close()

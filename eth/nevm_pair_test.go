@@ -17,12 +17,28 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/syscoin/syscoinwire/syscoin/wire"
 )
 
 func newNEVMPairTestEthereum(t *testing.T, flushEveryBlock bool) (*Ethereum, *core.Genesis, *ethash.Ethash) {
+	t.Helper()
+	return newNEVMPairTestEthereumWithDB(t, flushEveryBlock, newNEVMTestMemoryDatabase())
+}
+
+// SYSCOIN: ordinary protocol fixtures explicitly simulate the hot-store barrier.
+// Durability/unsupported-storage tests select real or raw memory stores instead.
+type nevmTestMemoryDatabase struct{ ethdb.Database }
+
+func (*nevmTestMemoryDatabase) SyncKeyValue() error { return nil }
+
+func newNEVMTestMemoryDatabase() ethdb.Database {
+	return &nevmTestMemoryDatabase{Database: rawdb.NewMemoryDatabase()}
+}
+
+func newNEVMPairTestEthereumWithDB(t *testing.T, flushEveryBlock bool, db ethdb.Database) (*Ethereum, *core.Genesis, *ethash.Ethash) {
 	t.Helper()
 	// SYSCOIN: exercise the same paired-import/rollback guards as production.
 	config := *params.AllEthashProtocolChanges
@@ -32,7 +48,7 @@ func newNEVMPairTestEthereum(t *testing.T, flushEveryBlock bool) (*Ethereum, *co
 		Config:  &config,
 	}
 	engine := ethash.NewFaker()
-	db := rawdb.NewMemoryDatabase()
+	t.Cleanup(func() { db.Close() })
 	chain, err := core.NewBlockChain(db, core.DefaultCacheConfigWithScheme(rawdb.HashScheme), gspec, nil, engine, vm.Config{}, nil)
 	if err != nil {
 		t.Fatalf("new chain: %v", err)
@@ -435,7 +451,7 @@ func TestKnownNEVMBlockReassociatedAfterRollbackRejectsStaleSYSDependentState(t 
 	}
 
 	engine := ethash.NewFaker()
-	db := rawdb.NewMemoryDatabase()
+	db := newNEVMTestMemoryDatabase()
 	chain, err := core.NewBlockChain(db, core.DefaultCacheConfigWithScheme(rawdb.HashScheme), gspec, nil, engine, vm.Config{}, nil)
 	if err != nil {
 		t.Fatalf("new chain: %v", err)

@@ -112,7 +112,7 @@ func TestNEVMDurablePairWire(t *testing.T) {
 }
 
 func TestNEVMDurablePairUnsupportedStorage(t *testing.T) {
-	eth, _, _ := newNEVMPairTestEthereum(t, false)
+	eth, _, _ := newNEVMPairTestEthereumWithDB(t, false, rawdb.NewMemoryDatabase())
 	command, text := durablePairCommand(0, nil)
 	if reply := (&ZMQRep{eth: eth}).handleNEVMComms(command); reply == text {
 		t.Fatal("memory-only backend acknowledged durability")

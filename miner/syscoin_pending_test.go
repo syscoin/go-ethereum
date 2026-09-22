@@ -17,9 +17,16 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/syscoin/syscoinwire/syscoin/wire"
 )
+
+// SYSCOIN: pending-work fixtures simulate the storage barrier explicitly;
+// they do not assert persistence across a storage restart.
+type syscoinPendingTestDB struct{ ethdb.Database }
+
+func (*syscoinPendingTestDB) SyncKeyValue() error { return nil }
 
 // Pause only the miner's engine after assembly. Canonical import uses the
 // underlying engine and must be able to publish while pending work is paused.
@@ -42,7 +49,7 @@ func (engine *syscoinPendingEngine) FinalizeAndAssemble(chain consensus.ChainHea
 func TestSyscoinPendingBuildAcrossMetadataPublication(t *testing.T) {
 	config := *params.AllEthashProtocolChanges
 	config.SyscoinBlock, config.NexusBlock = big.NewInt(0), big.NewInt(0)
-	db, engine := rawdb.NewMemoryDatabase(), ethash.NewFaker()
+	db, engine := &syscoinPendingTestDB{Database: rawdb.NewMemoryDatabase()}, ethash.NewFaker()
 	backend := newTestWorkerBackend(t, &config, engine, db, 0)
 	t.Cleanup(func() { backend.txPool.Close(); backend.chain.Stop(); db.Close() })
 	genDB, blocks, _ := core.GenerateChainWithGenesis(backend.genesis, engine, 1, nil)

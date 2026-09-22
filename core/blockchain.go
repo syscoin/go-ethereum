@@ -260,6 +260,8 @@ type BlockChain struct {
 	// validate this generation after execution instead of blocking chain imports.
 	syscoinMetadataMu         sync.RWMutex
 	syscoinMetadataGeneration uint64
+	// SYSCOIN: last successful state/metadata checkpoint, protected by chainmu.
+	syscoinCheckpoint *types.Header
 
 	currentBlock      atomic.Pointer[types.Header] // Current head of the chain
 	currentSnapBlock  atomic.Pointer[types.Header] // Current head of snap-sync
@@ -1212,6 +1214,13 @@ func (bc *BlockChain) writeHeadBlockMarkers(batch ethdb.KeyValueWriter, block *t
 // SYSCOIN: publishHeadBlock updates in-memory head markers after their database
 // batch is durable. The caller must hold chainmu.
 func (bc *BlockChain) publishHeadBlock(block *types.Block) {
+	// SYSCOIN: a rewind/replacement invalidates the checkpoint cadence. The next
+	// import must establish a baseline on the selected branch before pruning undo.
+	if bc.chainConfig.SyscoinBlock != nil {
+		if previous := bc.CurrentBlock(); previous == nil || block.ParentHash() != previous.Hash() {
+			bc.syscoinCheckpoint = nil
+		}
+	}
 	// SYSCOIN: recovery may remove a projected boundary. Await Core replay;
 	// never invent a lower finalized head or constrain Core's rollback here.
 	if final := bc.currentSyscoinFinalBlock.Load(); final != nil &&
@@ -1555,6 +1564,10 @@ func (bc *BlockChain) writeCanonicalBlock(block *types.Block) error {
 	if err := bc.validateNEVMData(block); err != nil {
 		return err
 	}
+	// SYSCOIN: known blocks also advance metadata and prune undo without state execution.
+	if err := bc.maybeCheckpointSyscoinHead(); err != nil {
+		return err
+	}
 	current := bc.CurrentBlock()
 	if block.ParentHash() != current.Hash() {
 		if err := bc.reorg(current, block.Header()); err != nil {
@@ -1640,6 +1653,10 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	// SYSCOIN: validate transient Core metadata before persisting any portion of
 	// the block. Canonical metadata is committed with the head after state commit.
 	if err := bc.validateNEVMData(block); err != nil {
+		return err
+	}
+	// SYSCOIN: fail a due checkpoint before persisting any part of the next block.
+	if err := bc.maybeCheckpointSyscoinHead(); err != nil {
 		return err
 	}
 	// Irrelevant of the canonical status, write the block itself to the database.

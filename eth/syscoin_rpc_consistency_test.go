@@ -77,12 +77,17 @@ func newSyscoinRPCFixture(t *testing.T, scheme, operation string) *syscoinRPCFix
 	config.SyscoinBlock, config.NexusBlock = big.NewInt(0), big.NewInt(0)
 	genesis := &core.Genesis{Config: &config, BaseFee: big.NewInt(params.InitialBaseFee), GasLimit: 5_000_000}
 	engine := ethash.NewFaker()
-	db := &disconnectTestDB{Database: rawdb.NewMemoryDatabase()}
+	db := &disconnectTestDB{Database: newNEVMTestMemoryDatabase()}
 	chain, err := core.NewBlockChain(db, core.DefaultCacheConfigWithScheme(scheme), genesis, nil, engine, vm.Config{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { chain.Stop(); db.Close() })
+	// SYSCOIN: publication gates and write faults observe canonical mutations,
+	// after the one-time storage baseline has completed.
+	if err := chain.SyncSyscoinPair(0, common.Hash{}.Bytes()); err != nil {
+		t.Fatal(err)
+	}
 	genDB, blocks, _ := core.GenerateChainWithGenesis(genesis, engine, 1, nil)
 	t.Cleanup(func() { genDB.Close() })
 	f := &syscoinRPCFixture{

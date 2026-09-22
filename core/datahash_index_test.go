@@ -33,7 +33,7 @@ func TestDataHashIndexBlockCommitAndRestart(t *testing.T) {
 		VersionHashes: []*common.Hash{&dataHash},
 		Diff:          new(wire.NEVMAddressDiff),
 	}
-	chain, err := NewBlockChain(db, DefaultCacheConfigWithScheme(rawdb.HashScheme), genesis, nil, engine, vm.Config{}, nil)
+	chain, err := NewBlockChain(&syscoinDurabilityDB{Database: db}, DefaultCacheConfigWithScheme(rawdb.HashScheme), genesis, nil, engine, vm.Config{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestDataHashIndexBlockCommitAndRestart(t *testing.T) {
 	}
 	chain.Stop()
 
-	restarted, err := NewBlockChain(db, DefaultCacheConfigWithScheme(rawdb.HashScheme), genesis, nil, engine, vm.Config{}, nil)
+	restarted, err := NewBlockChain(&syscoinDurabilityDB{Database: db}, DefaultCacheConfigWithScheme(rawdb.HashScheme), genesis, nil, engine, vm.Config{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestSyscoinBlockRejectsMissingNEVMConnectMetadata(t *testing.T) {
 	engine := ethash.NewFaker()
 	db, blocks, _ := GenerateChainWithGenesis(genesis, engine, 1, nil)
 	t.Cleanup(func() { db.Close() })
-	chain, err := NewBlockChain(db, DefaultCacheConfigWithScheme(rawdb.HashScheme), genesis, nil, engine, vm.Config{}, nil)
+	chain, err := NewBlockChain(&syscoinDurabilityDB{Database: db}, DefaultCacheConfigWithScheme(rawdb.HashScheme), genesis, nil, engine, vm.Config{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestSyscoinSideImportDoesNotChangeCanonicalMetadata(t *testing.T) {
 			engine := ethash.NewFaker()
 			db, blocks, _ := GenerateChainWithGenesis(genesis, engine, 2, nil)
 			t.Cleanup(func() { db.Close() })
-			chain, err := NewBlockChain(db, DefaultCacheConfigWithScheme(rawdb.HashScheme), genesis, nil, engine, vm.Config{}, nil)
+			chain, err := NewBlockChain(&syscoinDurabilityDB{Database: db}, DefaultCacheConfigWithScheme(rawdb.HashScheme), genesis, nil, engine, vm.Config{}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

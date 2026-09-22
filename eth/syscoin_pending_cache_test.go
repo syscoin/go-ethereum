@@ -49,7 +49,7 @@ func TestSyscoinPendingCacheFollowsCorePair(t *testing.T) {
 				},
 			}
 			engine := ethash.NewFaker()
-			db := rawdb.NewMemoryDatabase()
+			db := newNEVMTestMemoryDatabase()
 			chain, err := core.NewBlockChain(db, core.DefaultCacheConfigWithScheme(scheme), genesis, nil, engine, vm.Config{}, nil)
 			if err != nil {
 				t.Fatal(err)

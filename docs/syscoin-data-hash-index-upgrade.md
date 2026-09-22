@@ -37,6 +37,15 @@ coverage only as new blocks are committed: no historical address values are
 invented at upgrade. Normal Core disconnects still use Core's inverse diff and
 remove the corresponding local undo record in the same batch.
 
+Syscoin imports establish a durable state and metadata checkpoint before the
+first block after startup or a rewind, then refresh it every 25,000 blocks.
+This bounds recovery even when repeated writes to the same trie paths keep the
+dirty buffer below its physical flush threshold. The check runs for each block,
+including blocks in a batch and known-block replay. A checkpoint or storage-sync
+failure stops the import before publishing its head or pruning undo. Path-mode
+checkpoints retain the diff hierarchy; later physical flushes preserve that
+journal. Ethereum imports do not use this additional checkpoint schedule.
+
 Recovery selects the actual state/snapshot target and preflights DA and address
 history before any recovery writes. It commits the reconstructed DA window,
 reverse address changes, SYS/BTC indexes and head markers together. Block

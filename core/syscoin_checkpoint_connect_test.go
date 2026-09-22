@@ -28,7 +28,7 @@ func TestSyscoinCheckpointConnectReadFailure(t *testing.T) {
 			{"zero", make([]byte, 8), nil},
 		} {
 			t.Run(scheme+"/"+fault.name, func(t *testing.T) {
-				db := &checkpointRollbackDB{Database: rawdb.NewMemoryDatabase()}
+				db := &checkpointRollbackDB{Database: &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}}
 				t.Cleanup(func() { db.Close() })
 				f := newSyscoinRecoveryFixture(t, scheme, false, db)
 				if err := f.chain.SetHead(1); err != nil {

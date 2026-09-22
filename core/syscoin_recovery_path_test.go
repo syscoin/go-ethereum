@@ -96,6 +96,9 @@ type syscoinPathHeadFailDB struct {
 	err error
 }
 
+// SYSCOIN: forward real hot-storage sync through the batch fault wrapper.
+func (db *syscoinPathHeadFailDB) SyncKeyValue() error { return ethdb.SyncKeyValue(db.Database) }
+
 func (db *syscoinPathHeadFailDB) NewBatch() ethdb.Batch {
 	return &syscoinPathHeadFailBatch{Batch: db.Database.NewBatch(), db: db}
 }

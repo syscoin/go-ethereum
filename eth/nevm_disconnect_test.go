@@ -34,6 +34,11 @@ type disconnectTestDB struct {
 	readHits   int
 }
 
+// SYSCOIN: embedding Database must not hide the fixture's optional barrier.
+func (db *disconnectTestDB) SyncKeyValue() error {
+	return ethdb.SyncKeyValue(db.Database)
+}
+
 func (db *disconnectTestDB) Get(key []byte) ([]byte, error) {
 	db.readMu.Lock()
 	defer db.readMu.Unlock()
@@ -107,7 +112,7 @@ func TestNEVMDisconnectAtomicPublication(t *testing.T) {
 				contract:                              {Code: common.FromHex("0x60006000a000")}, // LOG0, then STOP.
 			}}
 			engine := ethash.NewFaker()
-			db := &disconnectTestDB{Database: rawdb.NewMemoryDatabase()}
+			db := &disconnectTestDB{Database: newNEVMTestMemoryDatabase()}
 			defer db.Close()
 			chain, err := core.NewBlockChain(db, core.DefaultCacheConfigWithScheme(test.scheme), genesis, nil, engine, vm.Config{}, nil)
 			if err != nil {
@@ -410,7 +415,7 @@ func TestNEVMConnectAtomicMetadata(t *testing.T) {
 			config.SyscoinBlock = big.NewInt(0)
 			genesis := &core.Genesis{BaseFee: big.NewInt(params.InitialBaseFee), Config: &config}
 			engine := ethash.NewFaker()
-			db := &disconnectTestDB{Database: rawdb.NewMemoryDatabase()}
+			db := &disconnectTestDB{Database: newNEVMTestMemoryDatabase()}
 			defer db.Close()
 			chain, err := core.NewBlockChain(db, core.DefaultCacheConfigWithScheme(rawdb.HashScheme), genesis, nil, engine, vm.Config{}, nil)
 			if err != nil {
@@ -421,6 +426,11 @@ func TestNEVMConnectAtomicMetadata(t *testing.T) {
 					chain.Stop()
 				}
 			}()
+			// SYSCOIN: arm the canonical batch fault only after baseline storage
+			// maintenance, so it still targets metadata publication.
+			if err := chain.SyncSyscoinPair(0, common.Hash{}.Bytes()); err != nil {
+				t.Fatal(err)
+			}
 			genDB, blocks, _ := core.GenerateChainWithGenesis(genesis, engine, 1, nil)
 			defer genDB.Close()
 			block := blocks[0]

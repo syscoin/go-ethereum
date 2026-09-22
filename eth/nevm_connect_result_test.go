@@ -258,13 +258,17 @@ func TestNEVMConnectStorageFailureWireRetry(t *testing.T) {
 	config.SyscoinBlock = big.NewInt(0)
 	genesis := &core.Genesis{BaseFee: big.NewInt(params.InitialBaseFee), Config: &config}
 	engine := ethash.NewFaker()
-	db := &disconnectTestDB{Database: rawdb.NewMemoryDatabase()}
+	db := &disconnectTestDB{Database: newNEVMTestMemoryDatabase()}
 	t.Cleanup(func() { db.Close() })
 	chain, err := core.NewBlockChain(db, core.DefaultCacheConfigWithScheme(rawdb.HashScheme), genesis, nil, engine, vm.Config{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(chain.Stop)
+	// SYSCOIN: isolate the canonical write failure from baseline maintenance.
+	if err := chain.SyncSyscoinPair(0, common.Hash{}.Bytes()); err != nil {
+		t.Fatal(err)
+	}
 	eth := &Ethereum{blockchain: chain, chainDb: db, engine: engine, handler: &handler{peers: &peerSet{}}}
 	genDB, blocks, _ := core.GenerateChainWithGenesis(genesis, engine, 1, nil)
 	defer genDB.Close()
@@ -281,7 +285,11 @@ func TestNEVMConnectStorageFailureWireRetry(t *testing.T) {
 	db.mu.Lock()
 	db.fail, db.afterWrite = nil, nil
 	db.mu.Unlock()
-	if chain.CurrentBlock().Number.Uint64() != 0 || rawdb.ReadHeadBlockHash(db) != blocks[0].ParentHash() || len(chain.ReadSYSHash(1)) != 0 || len(eth.blockConnectBuffer) != 0 {
+	// SYSCOIN: synchronize fixture reads with the listener's buffer mutations.
+	eth.bufferLock.Lock()
+	buffered := len(eth.blockConnectBuffer)
+	eth.bufferLock.Unlock()
+	if chain.CurrentBlock().Number.Uint64() != 0 || rawdb.ReadHeadBlockHash(db) != blocks[0].ParentHash() || len(chain.ReadSYSHash(1)) != 0 || buffered != 0 {
 		t.Fatal("failed connect published a pair or retained its failed candidate")
 	}
 	if got := reply("nevmconnect", payload); got != "connected" {

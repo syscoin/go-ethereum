@@ -124,7 +124,7 @@ func newSyscoinRecoveryFixture(t *testing.T, scheme string, snapshots bool, db e
 // entries survive the simulated crash, not the generating chain's trie cache.
 func copySyscoinRecoveryDB(t *testing.T, db ethdb.Database) ethdb.Database {
 	t.Helper()
-	copy := rawdb.NewMemoryDatabase()
+	copy := &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}
 	t.Cleanup(func() { copy.Close() })
 	it := db.NewIterator(nil, nil)
 	defer it.Release()
@@ -219,7 +219,7 @@ func TestSyscoinCrashRecoveryAndReplay(t *testing.T) {
 				name = scheme + "/snapshots"
 			}
 			t.Run(name, func(t *testing.T) {
-				db := rawdb.NewMemoryDatabase()
+				db := &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}
 				t.Cleanup(func() { db.Close() })
 				f := newSyscoinRecoveryFixture(t, scheme, snapshots, db)
 				f.check(t, f.chain, db, 3)
@@ -240,7 +240,7 @@ func TestSyscoinCrashRecoveryAndReplay(t *testing.T) {
 func TestSyscoinSetHeadLocalRecovery(t *testing.T) {
 	for _, scheme := range []string{rawdb.HashScheme, rawdb.PathScheme} {
 		t.Run(scheme, func(t *testing.T) {
-			db := rawdb.NewMemoryDatabase()
+			db := &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}
 			t.Cleanup(func() { db.Close() })
 			f := newSyscoinRecoveryFixture(t, scheme, false, db)
 			f.check(t, f.chain, db, 3) // Populate metadata/transaction caches first.
@@ -254,7 +254,7 @@ func TestSyscoinSetHeadLocalRecovery(t *testing.T) {
 }
 
 func TestSyscoinRecoveryMissingUndoDoesNotMutate(t *testing.T) {
-	db := rawdb.NewMemoryDatabase()
+	db := &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}
 	t.Cleanup(func() { db.Close() })
 	f := newSyscoinRecoveryFixture(t, rawdb.HashScheme, false, db)
 	if err := rawdb.DeleteNEVMAddressUndo(db, 2); err != nil {
@@ -279,7 +279,7 @@ func TestSyscoinRecoveryMissingUndoDoesNotMutate(t *testing.T) {
 }
 
 func TestSyscoinRecoveryWrongPairUndoDoesNotMutate(t *testing.T) {
-	db := rawdb.NewMemoryDatabase()
+	db := &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}
 	t.Cleanup(func() { db.Close() })
 	f := newSyscoinRecoveryFixture(t, rawdb.HashScheme, false, db)
 	if err := rawdb.DeleteNEVMAddressUndo(db, 2); err != nil {
@@ -295,7 +295,7 @@ func TestSyscoinRecoveryWrongPairUndoDoesNotMutate(t *testing.T) {
 }
 
 func TestSyscoinHeaderOnlyRewindDoesNotMutate(t *testing.T) {
-	db := rawdb.NewMemoryDatabase()
+	db := &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}
 	t.Cleanup(func() { db.Close() })
 	f := newSyscoinRecoveryFixture(t, rawdb.HashScheme, false, db)
 	update := func(ethdb.KeyValueWriter, *types.Header) (*types.Header, bool) {
@@ -315,7 +315,7 @@ func TestSyscoinHeaderOnlyRewindDoesNotMutate(t *testing.T) {
 }
 
 func TestSyscoinRecoveryDAHistoryPreflight(t *testing.T) {
-	db := rawdb.NewMemoryDatabase()
+	db := &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}
 	t.Cleanup(func() { db.Close() })
 	f := newSyscoinRecoveryFixture(t, rawdb.HashScheme, false, db)
 	// Restore the complete fixture chain before Stop's recent-state flush, which
@@ -369,10 +369,13 @@ type syscoinRecoveryAncientDB struct {
 	frozen uint64
 }
 
+// SYSCOIN: preserve the fixture's simulated storage barrier through fault wrappers.
+func (db *syscoinRecoveryAncientDB) SyncKeyValue() error { return ethdb.SyncKeyValue(db.Database) }
+
 func (db *syscoinRecoveryAncientDB) Ancients() (uint64, error) { return db.frozen, nil }
 
 func TestSyscoinRecoveryFrozenBoundaryDoesNotMutate(t *testing.T) {
-	db := &syscoinRecoveryAncientDB{Database: rawdb.NewMemoryDatabase()}
+	db := &syscoinRecoveryAncientDB{Database: &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}}
 	t.Cleanup(func() { db.Close() })
 	f := newSyscoinRecoveryFixture(t, rawdb.HashScheme, false, db)
 	db.frozen = 3 // Rewinding to 1 would cross immutable height 2.
@@ -390,6 +393,9 @@ type syscoinRecoveryFailDB struct {
 	err  error
 }
 
+// SYSCOIN: preserve the fixture's simulated storage barrier through fault wrappers.
+func (db *syscoinRecoveryFailDB) SyncKeyValue() error { return ethdb.SyncKeyValue(db.Database) }
+
 func (db *syscoinRecoveryFailDB) NewBatch() ethdb.Batch {
 	batch := db.Database.NewBatch()
 	if db.fail.Load() {
@@ -399,7 +405,7 @@ func (db *syscoinRecoveryFailDB) NewBatch() ethdb.Batch {
 }
 
 func TestSyscoinRecoveryFailedWriteDoesNotPublish(t *testing.T) {
-	db := &syscoinRecoveryFailDB{Database: rawdb.NewMemoryDatabase(), err: errors.New("injected recovery batch failure")}
+	db := &syscoinRecoveryFailDB{Database: &syscoinDurabilityDB{Database: rawdb.NewMemoryDatabase()}, err: errors.New("injected recovery batch failure")}
 	t.Cleanup(func() { db.Close() })
 	f := newSyscoinRecoveryFixture(t, rawdb.HashScheme, false, db)
 	f.check(t, f.chain, db, 3)
