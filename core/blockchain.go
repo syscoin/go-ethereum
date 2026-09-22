@@ -485,9 +485,11 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		head := bc.CurrentBlock()
 		// SYSCOIN: ignore old recovery hints even after a restart interrupted
 		// head repair. A mismatched snapshot must be rebuilt from the paired trie.
-		if layer := rawdb.ReadSnapshotRecoveryNumber(bc.db); chainConfig.SyscoinBlock == nil && layer != nil && *layer >= head.Number.Uint64() {
-			log.Warn("Enabling snapshot recovery", "chainhead", head.Number, "diskbase", *layer)
-			recover = true
+		if chainConfig.SyscoinBlock == nil {
+			if layer := rawdb.ReadSnapshotRecoveryNumber(bc.db); layer != nil && *layer >= head.Number.Uint64() {
+				log.Warn("Enabling snapshot recovery", "chainhead", head.Number, "diskbase", *layer)
+				recover = true
+			}
 		}
 		snapconfig := snapshot.Config{
 			CacheSize:  bc.cacheConfig.SnapshotLimit,
