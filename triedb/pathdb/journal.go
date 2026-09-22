@@ -347,8 +347,9 @@ func (db *Database) journal(root common.Hash, readOnly bool) error {
 	}
 	start := time.Now()
 
-	// SYSCOIN: journaled layers may rely on already-written state histories.
-	if !readOnly && db.freezer != nil {
+	// SYSCOIN: sync histories before replacing either a live or shutdown journal.
+	// Waiting for Close leaves an interrupted shutdown with an unusable journal.
+	if db.freezer != nil {
 		if err := db.freezer.Sync(); err != nil {
 			return err
 		}
