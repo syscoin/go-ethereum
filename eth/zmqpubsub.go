@@ -210,29 +210,10 @@ func (zmq *ZMQRep) InitZMQListener() error {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
 					}
 				} else if strTopic == "nevmblock" {
-					var nevmBlockConnectBytes []byte
-
-					block := zmq.eth.CreateBlock()
-					if block == nil {
-						log.Error("createBlockSub", "err", "block is nil")
-						nevmBlockConnectBytes = []byte{} // Explicitly empty to signal error clearly
-					} else {
-						var nevmBlockConnect types.NEVMBlockConnect
-						var err error
-						nevmBlockConnectBytes, err = nevmBlockConnect.Serialize(block)
-						if err != nil {
-							log.Error("createBlockSub Serialize failed", "err", err)
-							nevmBlockConnectBytes = []byte{} // explicitly empty if serialization fails
-						}
-					}
-
-					msgSend := zmq4.NewMsgFrom([]byte("nevmblock"), nevmBlockConnectBytes)
+					msgSend := zmq.handleNEVMBlock()
 					if err := zmq.rep.SendMulti(msgSend); err != nil {
 						log.Error("ZMQ send error", "topic", strTopic, "err", err)
 					}
-
-					// explicitly clear bytes after send (optional, helps GC)
-					nevmBlockConnectBytes = nil
 				} else if strTopic == "nevmblockinfo" {
 					current, lastSysHash, ok := zmq.currentNEVMBlockInfo()
 					count := strconv.FormatUint(current, 10)

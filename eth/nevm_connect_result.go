@@ -68,7 +68,7 @@ func nevmFlushResult(err error) string {
 	return nevmBlockResult(err, "flushed", "flush-failed: ")
 }
 
-// nevmBlockResult preserves the rejected pair through both import boundaries.
+// nevmBlockResult preserves the rejected pair through every import boundary.
 // Error text alone never establishes a classified validation rejection.
 func nevmBlockResult(err error, success, errorPrefix string) string {
 	if err == nil {

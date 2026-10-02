@@ -356,16 +356,20 @@ func makeExtraData(extra []byte) []byte {
 	return extra
 }
 // SYSCOIN
-func (eth *Ethereum) CreateBlock() *types.Block {
+func (eth *Ethereum) CreateBlock() (*types.Block, error) {
 	if err := eth.flushBufferedBlocks(); err != nil {
-		log.Crit("Failed flushing buffer before createBlock", "err", err)
-		return nil
+		// Preserve the rejected pair (or operational error) for Core reconciliation.
+		return nil, err
 	}
 
-	return eth.miner.GenerateWorkSyscoin(
+	block := eth.miner.GenerateWorkSyscoin(
 		eth.config.Miner.Etherbase,
 		crypto.Keccak256Hash([]byte{123}),
 	)
+	if block == nil {
+		return nil, errors.New("template assembly returned no block")
+	}
+	return block, nil
 }
 
 func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error {
