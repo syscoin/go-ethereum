@@ -192,6 +192,9 @@ type Database struct {
 	waitSync bool       // Flag if database is deactivated due to initial state sync
 	isVerkle bool       // Flag if database is used for verkle tree
 	hasher   nodeHasher // Trie node hasher
+	// SYSCOIN: journaled is restored from a valid on-disk journal at startup. Once a
+	// checkpoint exists, physical flushes must keep that recovery path usable.
+	journaled bool
 
 	config  *Config                      // Configuration for database
 	diskdb  ethdb.Database               // Persistent storage for matured trie nodes
@@ -394,6 +397,7 @@ func (db *Database) Enable(root common.Hash) error {
 	if err := batch.Write(); err != nil {
 		return err
 	}
+	db.journaled = false // SYSCOIN: initial sync replaces the checkpoint namespace.
 	// Clean up all state histories in freezer. Theoretically
 	// all root->id mappings should be removed as well. Since
 	// mappings can be huge and might take a while to clear
@@ -454,6 +458,7 @@ func (db *Database) Recover(root common.Hash) error {
 		db.tree.reset(dl)
 	}
 	rawdb.DeleteTrieJournal(db.diskdb)
+	db.journaled = false // SYSCOIN: explicit history recovery retired the journal.
 	_, err := truncateFromHead(db.diskdb, db.freezer, dl.stateID())
 	if err != nil {
 		return err

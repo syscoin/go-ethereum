@@ -118,12 +118,13 @@ func (tree *layerTree) cap(root common.Hash, layers int) error {
 	if !ok {
 		return fmt.Errorf("triedb layer [%#x] is disk layer", root)
 	}
+	journal := newLiveJournal(diff) // SYSCOIN: capture diffs before changing parent links.
 	tree.lock.Lock()
 	defer tree.lock.Unlock()
 
 	// If full commit was requested, flatten the diffs and merge onto disk
 	if layers == 0 {
-		base, err := diff.persist(true)
+		base, err := diff.persist(true, journal) // SYSCOIN: preserve checkpoints during full commits too.
 		if err != nil {
 			return err
 		}
@@ -152,7 +153,7 @@ func (tree *layerTree) cap(root common.Hash, layers int) error {
 		// parent is linked correctly.
 		diff.lock.Lock()
 
-		base, err := parent.persist(false)
+		base, err := parent.persist(false, journal) // SYSCOIN: rebase the journal in the physical batch.
 		if err != nil {
 			diff.lock.Unlock()
 			return err

@@ -809,7 +809,14 @@ func applyMessageWithEVM(ctx context.Context, evm *vm.EVM, msg *core.Message, ti
 	return result, nil
 }
 
-func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *override.StateOverride, blockOverrides *override.BlockOverrides, timeout time.Duration, globalGasCap uint64) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *override.StateOverride, blockOverrides *override.BlockOverrides, timeout time.Duration, globalGasCap uint64) (result *core.ExecutionResult, err error) {
+	// SYSCOIN: validate the complete header/state selection and execution window.
+	checkMetadata := BeginSyscoinMetadataRead(b)
+	defer func() {
+		if changed := checkMetadata(); changed != nil {
+			result, err = nil, changed
+		}
+	}()
 	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
 	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
@@ -847,7 +854,14 @@ func (api *BlockChainAPI) Call(ctx context.Context, args TransactionArgs, blockN
 //
 // Note, this function doesn't make any changes in the state/blockchain and is
 // useful to execute and retrieve values.
-func (api *BlockChainAPI) SimulateV1(ctx context.Context, opts simOpts, blockNrOrHash *rpc.BlockNumberOrHash) ([]*simBlockResult, error) {
+func (api *BlockChainAPI) SimulateV1(ctx context.Context, opts simOpts, blockNrOrHash *rpc.BlockNumberOrHash) (result []*simBlockResult, err error) {
+	// SYSCOIN: all simulated blocks must observe one metadata generation.
+	checkMetadata := BeginSyscoinMetadataRead(api.b)
+	defer func() {
+		if changed := checkMetadata(); changed != nil {
+			result, err = nil, changed
+		}
+	}()
 	if len(opts.BlockStateCalls) == 0 {
 		return nil, &invalidParamsError{message: "empty input"}
 	} else if len(opts.BlockStateCalls) > maxSimulateBlocks {
@@ -883,7 +897,14 @@ func (api *BlockChainAPI) SimulateV1(ctx context.Context, opts simOpts, blockNrO
 // successfully at block `blockNrOrHash`. It returns error if the transaction would revert, or if
 // there are unexpected failures. The gas limit is capped by both `args.Gas` (if non-nil &
 // non-zero) and `gasCap` (if non-zero).
-func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *override.StateOverride, blockOverrides *override.BlockOverrides, gasCap uint64) (hexutil.Uint64, error) {
+func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *override.StateOverride, blockOverrides *override.BlockOverrides, gasCap uint64) (result hexutil.Uint64, err error) {
+	// SYSCOIN: gas estimation may execute repeatedly; validate the whole search.
+	checkMetadata := BeginSyscoinMetadataRead(b)
+	defer func() {
+		if changed := checkMetadata(); changed != nil {
+			result, err = 0, changed
+		}
+	}()
 	// Retrieve the base state and mutate it with any overrides
 	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
 	if state == nil || err != nil {
@@ -1209,6 +1230,13 @@ func (api *BlockChainAPI) CreateAccessList(ctx context.Context, args Transaction
 // If the accesslist creation fails an error is returned.
 // If the transaction itself fails, an vmErr is returned.
 func AccessList(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrHash, args TransactionArgs, stateOverrides *override.StateOverride) (acl types.AccessList, gasUsed uint64, vmErr error, err error) {
+	// SYSCOIN: include state selection and every access-list execution iteration.
+	checkMetadata := BeginSyscoinMetadataRead(b)
+	defer func() {
+		if changed := checkMetadata(); changed != nil {
+			acl, gasUsed, vmErr, err = nil, 0, nil, changed
+		}
+	}()
 	// Retrieve the execution context
 	db, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
 	if db == nil || err != nil {
@@ -1894,8 +1922,9 @@ func (api *DebugAPI) ChaindbCompact() error {
 }
 
 // SetHead rewinds the head of the blockchain to a previous block.
-func (api *DebugAPI) SetHead(number hexutil.Uint64) {
-	api.b.SetHead(uint64(number))
+// SYSCOIN: a rejected recovery must be returned as an RPC error.
+func (api *DebugAPI) SetHead(number hexutil.Uint64) error {
+	return api.b.SetHead(uint64(number))
 }
 
 // NetAPI offers network related RPC methods

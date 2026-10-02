@@ -53,6 +53,7 @@ type Node struct {
 	dirLock       *flock.Flock  // prevents concurrent use of instance directory
 	stop          chan struct{} // Channel to wait for termination notifications
 	server        *p2p.Server   // Currently running P2P networking layer
+	deferP2PStart bool          // A registered service will start P2P when ready
 	startStopLock sync.Mutex    // Start/Stop are protected by an additional lock
 	state         int           // Tracks state of node lifecycle
 
@@ -268,8 +269,10 @@ func (n *Node) doClose(errs []error) error {
 func (n *Node) openEndpoints() error {
 	// start networking endpoints
 	n.log.Info("Starting peer-to-peer node", "instance", n.server.Name)
-	if err := n.server.Start(); err != nil {
-		return convertFileLockError(err)
+	if !n.deferP2PStart {
+		if err := n.server.Start(); err != nil {
+			return convertFileLockError(err)
+		}
 	}
 	// start RPC endpoints
 	err := n.startRPC()
@@ -557,6 +560,17 @@ func (n *Node) RegisterLifecycle(lifecycle Lifecycle) {
 	n.lifecycles = append(n.lifecycles, lifecycle)
 }
 
+// DeferP2PStart leaves P2P startup to a registered service while RPC starts normally.
+// It must be called during construction, before Start.
+func (n *Node) DeferP2PStart() {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+	if n.state != initializingState {
+		panic("can't defer P2P startup on running/stopped node")
+	}
+	n.deferP2PStart = true
+}
+
 // RegisterProtocols adds backend's protocols to the node's p2p server.
 func (n *Node) RegisterProtocols(protocols []p2p.Protocol) {
 	n.lock.Lock()
@@ -780,6 +794,11 @@ func (n *Node) ResolveAncient(name string, ancient string) string {
 type closeTrackingDB struct {
 	ethdb.Database
 	n *Node
+}
+
+// SYSCOIN: preserve the optional hot-storage barrier through the node wrapper.
+func (db *closeTrackingDB) SyncKeyValue() error {
+	return ethdb.SyncKeyValue(db.Database)
 }
 
 func (db *closeTrackingDB) Close() error {

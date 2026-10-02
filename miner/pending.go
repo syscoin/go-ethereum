@@ -34,6 +34,8 @@ type pending struct {
 	parentHash common.Hash
 	result     *newPayloadResult
 	lock       sync.Mutex
+	// SYSCOIN: retain the generation that produced the executed state.
+	checkMetadata func() error
 }
 
 // resolve retrieves the cached pending result if it's available. Nothing will be
@@ -53,15 +55,20 @@ func (p *pending) resolve(parentHash common.Hash) *newPayloadResult {
 	if time.Since(p.created) > pendingTTL {
 		return nil
 	}
+	// SYSCOIN: an unchanged NEVM parent can be reconnected to different Core metadata.
+	if p.checkMetadata != nil && p.checkMetadata() != nil {
+		return nil
+	}
 	return p.result
 }
 
 // update refreshes the cached pending block with newly created one.
-func (p *pending) update(parent common.Hash, result *newPayloadResult) {
+func (p *pending) update(parent common.Hash, result *newPayloadResult, checkMetadata func() error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
 	p.parentHash = parent
 	p.result = result
 	p.created = time.Now()
+	p.checkMetadata = checkMetadata // SYSCOIN
 }

@@ -211,8 +211,17 @@ func (c *conn) set(f connFlag, val bool) {
 	}
 }
 
+// Running reports whether the server has completed startup and is accepting peers.
+func (srv *Server) Running() bool {
+	srv.lock.Lock()
+	defer srv.lock.Unlock()
+	return srv.running
+}
+
 // LocalNode returns the local node record.
 func (srv *Server) LocalNode() *enode.LocalNode {
+	srv.lock.Lock()
+	defer srv.lock.Unlock()
 	return srv.localnode
 }
 
@@ -309,11 +318,15 @@ func (srv *Server) Self() *enode.Node {
 
 // DiscoveryV4 returns the discovery v4 instance, if configured.
 func (srv *Server) DiscoveryV4() *discover.UDPv4 {
+	srv.lock.Lock()
+	defer srv.lock.Unlock()
 	return srv.discv4
 }
 
 // DiscoveryV5 returns the discovery v5 instance, if configured.
 func (srv *Server) DiscoveryV5() *discover.UDPv5 {
+	srv.lock.Lock()
+	defer srv.lock.Unlock()
 	return srv.discv5
 }
 
@@ -365,11 +378,37 @@ func (s *sharedUDPConn) Close() error {
 // Servers can not be re-used after stopping.
 func (srv *Server) Start() (err error) {
 	srv.lock.Lock()
-	defer srv.lock.Unlock()
 	if srv.running {
+		srv.lock.Unlock()
 		return errors.New("server already running")
 	}
-	srv.running = true
+	defer func() {
+		if err != nil {
+			if srv.listener != nil {
+				srv.listener.Close()
+			}
+			if srv.quit != nil {
+				close(srv.quit)
+			}
+		}
+		srv.lock.Unlock()
+		if err != nil {
+			// Release the lock before waiting for connections or discovery sources.
+			if srv.discv4 != nil {
+				srv.discv4.Close()
+			}
+			if srv.discv5 != nil {
+				srv.discv5.Close()
+			}
+			if srv.discmix != nil {
+				srv.discmix.Close()
+			}
+			srv.loopWG.Wait()
+			if srv.nodedb != nil {
+				srv.nodedb.Close()
+			}
+		}
+	}()
 	srv.log = srv.Logger
 	if srv.log == nil {
 		srv.log = log.Root()
@@ -415,6 +454,7 @@ func (srv *Server) Start() (err error) {
 	}
 	srv.setupDialScheduler()
 
+	srv.running = true
 	srv.loopWG.Add(1)
 	go srv.run()
 	return nil
@@ -446,7 +486,7 @@ func (srv *Server) setupLocalNode() error {
 	return nil
 }
 
-func (srv *Server) setupDiscovery() error {
+func (srv *Server) setupDiscovery() (err error) {
 	srv.discmix = enode.NewFairMix(discmixTimeout)
 
 	// Don't listen on UDP endpoint if DHT is disabled.
@@ -457,6 +497,11 @@ func (srv *Server) setupDiscovery() error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err != nil {
+			conn.Close()
+		}
+	}()
 
 	var (
 		sconn     discover.UDPConn = conn
@@ -609,6 +654,9 @@ func (srv *Server) setupUDPListening() (*net.UDPConn, error) {
 
 // doPeerOp runs fn on the main loop.
 func (srv *Server) doPeerOp(fn peerOpFunc) {
+	if !srv.Running() {
+		return
+	}
 	select {
 	case srv.peerOp <- fn:
 		<-srv.peerOpDone
@@ -1011,12 +1059,15 @@ type NodeInfo struct {
 func (srv *Server) NodeInfo() *NodeInfo {
 	// Gather and assemble the generic node infos
 	node := srv.Self()
+	srv.lock.Lock()
+	listenAddr := srv.ListenAddr
+	srv.lock.Unlock()
 	info := &NodeInfo{
 		Name:       srv.Name,
 		Enode:      node.URLv4(),
 		ID:         node.ID().String(),
 		IP:         node.IPAddr().String(),
-		ListenAddr: srv.ListenAddr,
+		ListenAddr: listenAddr,
 		Protocols:  make(map[string]interface{}),
 	}
 	info.Ports.Discovery = node.UDP()
