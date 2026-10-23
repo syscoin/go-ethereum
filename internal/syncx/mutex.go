@@ -17,6 +17,8 @@
 // Package syncx contains exotic synchronization primitives.
 package syncx
 
+import "context"
+
 // ClosableMutex is a mutex that can also be closed.
 // Once closed, it can never be taken again.
 type ClosableMutex struct {
@@ -34,6 +36,17 @@ func NewClosableMutex() *ClosableMutex {
 func (cm *ClosableMutex) TryLock() bool {
 	_, ok := <-cm.ch
 	return ok
+}
+
+// TryLockContext permits read-only RPC work to leave the wait queue when its
+// request ends. The existing writer locking behavior remains unchanged.
+func (cm *ClosableMutex) TryLockContext(ctx context.Context) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case _, ok := <-cm.ch:
+		return ok, nil
+	}
 }
 
 // MustLock locks cm.
