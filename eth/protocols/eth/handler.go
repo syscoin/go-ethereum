@@ -49,6 +49,10 @@ const (
 	// containing 200+ transactions nowadays, the practical limit will always
 	// be softResponseLimit.
 	maxReceiptsServe = 1024
+
+	// maxPooledTxServe bounds pool lookups, including unknown hashes which do
+	// not contribute to the response size.
+	maxPooledTxServe = 4096
 )
 
 // Handler is a callback to invoke from an outside runner after the boilerplate

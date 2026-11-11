@@ -275,7 +275,7 @@ type list struct {
 
 	costcap   *uint256.Int // Price of the highest costing transaction (reset only if exceeds balance)
 	gascap    uint64       // Gas limit of the highest spending transaction (reset only if exceeds block limit)
-	totalcost *uint256.Int // Total cost of all transactions in the list
+	totalcost *big.Int     // Exact sum of transaction costs, including totals above uint256
 }
 
 // newList creates a new transaction list for maintaining nonce-indexable fast,
@@ -285,7 +285,7 @@ func newList(strict bool) *list {
 		strict:    strict,
 		txs:       NewSortedMap(),
 		costcap:   new(uint256.Int),
-		totalcost: new(uint256.Int),
+		totalcost: new(big.Int),
 	}
 }
 
@@ -301,6 +301,11 @@ func (l *list) Contains(nonce uint64) bool {
 // If the new transaction is accepted into the list, the lists' cost and gas
 // thresholds are also potentially updated.
 func (l *list) Add(tx *types.Transaction, priceBump uint64) (bool, *types.Transaction) {
+	costBig := tx.Cost()
+	cost, overflow := uint256.FromBig(costBig)
+	if overflow {
+		return false, nil
+	}
 	// If there's an older better transaction, abort
 	old := l.txs.Get(tx.Nonce())
 	if old != nil {
@@ -326,12 +331,8 @@ func (l *list) Add(tx *types.Transaction, priceBump uint64) (bool, *types.Transa
 		// Old is being replaced, subtract old cost
 		l.subTotalCost([]*types.Transaction{old})
 	}
-	// Add new tx cost to totalcost
-	cost, overflow := uint256.FromBig(tx.Cost())
-	if overflow {
-		return false, nil
-	}
-	l.totalcost.Add(l.totalcost, cost)
+	// Add new tx cost to the exact total.
+	l.totalcost.Add(l.totalcost, costBig)
 
 	// Otherwise overwrite the old transaction with the current one
 	l.txs.Put(tx)
@@ -463,8 +464,8 @@ func (l *list) LastElement() *types.Transaction {
 // total cost of all transactions.
 func (l *list) subTotalCost(txs []*types.Transaction) {
 	for _, tx := range txs {
-		_, underflow := l.totalcost.SubOverflow(l.totalcost, uint256.MustFromBig(tx.Cost()))
-		if underflow {
+		l.totalcost.Sub(l.totalcost, tx.Cost())
+		if l.totalcost.Sign() < 0 {
 			panic("totalcost underflow")
 		}
 	}

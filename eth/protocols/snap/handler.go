@@ -29,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
+	"github.com/ethereum/go-ethereum/p2p/tracker"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 )
@@ -164,7 +165,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	case msg.Code == AccountRangeMsg:
 		// A range of accounts arrived to one of our previous requests
 		res := new(AccountRangePacket)
-		if err := msg.Decode(res); err != nil {
+		if err := msg.Decode(&tracker.ResponseDecoder{Tracker: peer.responses, Code: AccountRangeMsg, ID: &res.ID, Values: []interface{}{&res.Accounts, &res.Proof}}); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		// Ensure the range is monotonically increasing
@@ -196,7 +197,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	case msg.Code == StorageRangesMsg:
 		// A range of storage slots arrived to one of our previous requests
 		res := new(StorageRangesPacket)
-		if err := msg.Decode(res); err != nil {
+		if err := msg.Decode(&tracker.ResponseDecoder{Tracker: peer.responses, Code: StorageRangesMsg, ID: &res.ID, Values: []interface{}{&res.Slots, &res.Proof}}); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		// Ensure the ranges are monotonically increasing
@@ -229,7 +230,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	case msg.Code == ByteCodesMsg:
 		// A batch of byte codes arrived to one of our previous requests
 		res := new(ByteCodesPacket)
-		if err := msg.Decode(res); err != nil {
+		if err := msg.Decode(&tracker.ResponseDecoder{Tracker: peer.responses, Code: ByteCodesMsg, ID: &res.ID, Values: []interface{}{&res.Codes}}); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		requestTracker.Fulfil(peer.id, peer.version, ByteCodesMsg, res.ID)
@@ -256,7 +257,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	case msg.Code == TrieNodesMsg:
 		// A batch of trie nodes arrived to one of our previous requests
 		res := new(TrieNodesPacket)
-		if err := msg.Decode(res); err != nil {
+		if err := msg.Decode(&tracker.ResponseDecoder{Tracker: peer.responses, Code: TrieNodesMsg, ID: &res.ID, Values: []interface{}{&res.Nodes}}); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		requestTracker.Fulfil(peer.id, peer.version, TrieNodesMsg, res.ID)
@@ -496,7 +497,7 @@ func ServiceGetTrieNodesQuery(chain *core.BlockChain, req *GetTrieNodesPacket, s
 		case 1:
 			// If we're only retrieving an account trie node, fetch it directly
 			blob, resolved, err := accTrie.GetNode(pathset[0])
-			loads += resolved // always account database reads, even for failures
+			loads += max(resolved, 1) // charge per request regardless of the cache
 			if err != nil {
 				break
 			}
@@ -531,7 +532,7 @@ func ServiceGetTrieNodesQuery(chain *core.BlockChain, req *GetTrieNodesPacket, s
 			}
 			for _, path := range pathset[1:] {
 				blob, resolved, err := stTrie.GetNode(path)
-				loads += resolved // always account database reads, even for failures
+				loads += max(resolved, 1) // charge per request regardless of the cache
 				if err != nil {
 					break
 				}

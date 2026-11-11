@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/p2p/tracker"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 )
@@ -110,8 +110,9 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 				next    = current + query.Skip + 1
 			)
 			if next <= current {
-				infos, _ := json.MarshalIndent(peer.Peer.Info(), "", "  ")
-				peer.Log().Warn("GetBlockHeaders skip overflow attack", "current", current, "skip", query.Skip, "next", next, "attacker", infos)
+				peer.skipWarning.Do(func() {
+					peer.Log().Warn("GetBlockHeaders skip overflow", "current", current, "skip", query.Skip, "next", next)
+				})
 				unknown = true
 			} else {
 				if header := chain.GetHeaderByNumber(next); header != nil {
@@ -295,7 +296,9 @@ func handleNewBlock(backend Backend, msg Decoder, peer *Peer) error {
 func handleBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
 	// A batch of headers arrived to one of our previous requests
 	res := new(BlockHeadersPacket)
-	if err := msg.Decode(res); err != nil {
+	if cancelled, err := decodeResponse(msg, peer, BlockHeadersMsg, &res.RequestId, &res.BlockHeadersRequest); cancelled {
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
 	metadata := func() interface{} {
@@ -315,7 +318,9 @@ func handleBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
 func handleBlockBodies(backend Backend, msg Decoder, peer *Peer) error {
 	// A batch of block bodies arrived to one of our previous requests
 	res := new(BlockBodiesPacket)
-	if err := msg.Decode(res); err != nil {
+	if cancelled, err := decodeResponse(msg, peer, BlockBodiesMsg, &res.RequestId, &res.BlockBodiesResponse); cancelled {
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
 	metadata := func() interface{} {
@@ -344,7 +349,9 @@ func handleBlockBodies(backend Backend, msg Decoder, peer *Peer) error {
 func handleReceipts(backend Backend, msg Decoder, peer *Peer) error {
 	// A batch of receipts arrived to one of our previous requests
 	res := new(ReceiptsPacket)
-	if err := msg.Decode(res); err != nil {
+	if cancelled, err := decodeResponse(msg, peer, ReceiptsMsg, &res.RequestId, &res.ReceiptsResponse); cancelled {
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
 	metadata := func() interface{} {
@@ -399,8 +406,8 @@ func answerGetPooledTransactions(backend Backend, query GetPooledTransactionsReq
 		hashes []common.Hash
 		txs    []rlp.RawValue
 	)
-	for _, hash := range query {
-		if bytes >= softResponseLimit {
+	for i, hash := range query {
+		if bytes >= softResponseLimit || i >= maxPooledTxServe {
 			break
 		}
 		// Retrieve the requested transaction, skipping if unknown to us
@@ -442,7 +449,9 @@ func handlePooledTransactions(backend Backend, msg Decoder, peer *Peer) error {
 	}
 	// Transactions can be processed, parse all of them and deliver to the pool
 	var txs PooledTransactionsPacket
-	if err := msg.Decode(&txs); err != nil {
+	if cancelled, err := decodeResponse(msg, peer, PooledTransactionsMsg, &txs.RequestId, &txs.PooledTransactionsResponse); cancelled {
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
 	for i, tx := range txs.PooledTransactionsResponse {
@@ -455,4 +464,10 @@ func handlePooledTransactions(backend Backend, msg Decoder, peer *Peer) error {
 	requestTracker.Fulfil(peer.id, peer.version, PooledTransactionsMsg, txs.RequestId)
 
 	return backend.Handle(peer, &txs.PooledTransactionsResponse)
+}
+
+func decodeResponse(msg Decoder, peer *Peer, code uint64, id *uint64, values ...interface{}) (bool, error) {
+	decoder := tracker.ResponseDecoder{Tracker: peer.responses, Code: code, ID: id, Values: values}
+	err := msg.Decode(&decoder)
+	return decoder.Cancelled, err
 }

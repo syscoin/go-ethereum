@@ -580,21 +580,38 @@ func (pool *LegacyPool) ValidateTxBasics(tx *types.Transaction) error {
 // validateTx checks whether a transaction is valid according to the consensus
 // rules and adheres to some heuristic limits of the local node (price and size).
 func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
+	// Charge the queued prefix through the candidate nonce. Higher-nonce
+	// transactions can be pruned after a successful insertion, allowing a
+	// lower nonce to fill a gap without trusting a prior batch boundary.
 	opts := &txpool.ValidationOptionsWithState{
 		State: pool.currentState,
 
 		FirstNonceGap:    nil, // Pool allows arbitrary arrival order, don't invalidate nonce gaps
 		UsedAndLeftSlots: nil, // Pool has own mechanism to limit the number of transactions
 		ExistingExpenditure: func(addr common.Address) *big.Int {
+			spent := new(big.Int)
 			if list := pool.pending[addr]; list != nil {
-				return list.totalcost.ToBig()
+				spent.Add(spent, list.totalcost)
 			}
-			return new(big.Int)
+			if list := pool.queue[addr]; list != nil {
+				for _, existing := range list.Flatten() {
+					if existing.Nonce() > tx.Nonce() {
+						break
+					}
+					spent.Add(spent, existing.Cost())
+				}
+			}
+			return spent
 		},
 		ExistingCost: func(addr common.Address, nonce uint64) *big.Int {
 			if list := pool.pending[addr]; list != nil {
 				if tx := list.txs.Get(nonce); tx != nil {
 					return tx.Cost()
+				}
+			}
+			if list := pool.queue[addr]; list != nil {
+				if existing := list.txs.Get(nonce); existing != nil {
+					return existing.Cost()
 				}
 			}
 			return nil
@@ -670,6 +687,44 @@ func (pool *LegacyPool) validateAuth(tx *types.Transaction) error {
 	return nil
 }
 
+// unaffordableQueueAfter identifies existing future transactions that would no
+// longer fit after inserting tx. Lower nonces have priority, but a costly
+// future transaction cannot reserve the balance ahead of a cheaper one after
+// it. This lets gap fills retain useful later transactions.
+func (pool *LegacyPool) unaffordableQueueAfter(addr common.Address, tx *types.Transaction) types.Transactions {
+	remaining := pool.currentState.GetBalance(addr).ToBig()
+	pendingReplacement := false
+	if pending := pool.pending[addr]; pending != nil {
+		remaining.Sub(remaining, pending.totalcost)
+		if old := pending.txs.Get(tx.Nonce()); old != nil {
+			remaining.Add(remaining, old.Cost())
+			remaining.Sub(remaining, tx.Cost())
+			pendingReplacement = true
+		}
+	}
+	var drops types.Transactions
+	inserted := pendingReplacement
+	if queue := pool.queue[addr]; queue != nil {
+		for _, existing := range queue.Flatten() {
+			if !inserted && tx.Nonce() < existing.Nonce() {
+				remaining.Sub(remaining, tx.Cost())
+				inserted = true
+			}
+			if !inserted && tx.Nonce() == existing.Nonce() {
+				remaining.Sub(remaining, tx.Cost())
+				inserted = true
+				continue // The old transaction will be replaced.
+			}
+			if remaining.Cmp(existing.Cost()) < 0 {
+				drops = append(drops, existing)
+			} else {
+				remaining.Sub(remaining, existing.Cost())
+			}
+		}
+	}
+	return drops
+}
+
 // add validates a transaction and inserts it into the non-executable queue for later
 // pending promotion and execution. If the transaction is a replacement for an already
 // pending or queued one, it overwrites the previous transaction if its price is higher.
@@ -690,6 +745,11 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 	}
 	// already validated by this point
 	from, _ := types.Sender(pool.signer, tx)
+	queueDrops := pool.unaffordableQueueAfter(from, tx)
+	var dropSlots int
+	for _, old := range queueDrops {
+		dropSlots += numSlots(old)
+	}
 
 	// If the address is not yet known, request exclusivity to track the account
 	// only by this subpool until all transactions are evicted
@@ -714,7 +774,30 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 		}()
 	}
 	// If the transaction pool is full, discard underpriced transactions
-	if uint64(pool.all.Slots()+numSlots(tx)) > pool.config.GlobalSlots+pool.config.GlobalQueue {
+	projectedSlots := pool.all.Slots() + numSlots(tx) - dropSlots
+	if len(queueDrops) != 0 {
+		// Self-pruning is applied only after insertion succeeds. A replacement
+		// also removes its old transaction then, so credit that slot without
+		// evicting a different account ahead of the price-bump check.
+		var old *types.Transaction
+		if pending := pool.pending[from]; pending != nil {
+			old = pending.txs.Get(tx.Nonce())
+		}
+		if old == nil {
+			if queue := pool.queue[from]; queue != nil {
+				old = queue.txs.Get(tx.Nonce())
+			}
+		}
+		if old != nil {
+			projectedSlots -= numSlots(old)
+		}
+	}
+	if uint64(projectedSlots) > pool.config.GlobalSlots+pool.config.GlobalQueue {
+		if len(queueDrops) != 0 {
+			// A transaction that needs self-pruning must not evict another
+			// account's priced transactions before its own suffix is removed.
+			return false, ErrTxPoolOverflow
+		}
 		// If the new transaction is underpriced, don't accept it
 		if pool.priced.Underpriced(tx) {
 			log.Trace("Discarding underpriced transaction", "hash", hash, "gasTipCap", tx.GasTipCap(), "gasFeeCap", tx.GasFeeCap())
@@ -733,7 +816,7 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 
 		// New transaction is better than our worse ones, make room for it.
 		// If we can't make enough room for new one, abort the operation.
-		drop, success := pool.priced.Discard(pool.all.Slots() - int(pool.config.GlobalSlots+pool.config.GlobalQueue) + numSlots(tx))
+		drop, success := pool.priced.Discard(projectedSlots - int(pool.config.GlobalSlots+pool.config.GlobalQueue))
 
 		// Special case, we still can't make the room for the new remote one.
 		if !success {
@@ -795,12 +878,20 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 
 		// Successful promotion, bump the heartbeat
 		pool.beats[from] = time.Now()
+		for _, old := range queueDrops {
+			pool.removeTx(old.Hash(), true, false)
+			queuedNofundsMeter.Mark(1)
+		}
 		return old != nil, nil
 	}
 	// New transaction isn't replacing a pending one, push into queue
 	replaced, err = pool.enqueueTx(hash, tx, true)
 	if err != nil {
 		return false, err
+	}
+	for _, old := range queueDrops {
+		pool.removeTx(old.Hash(), true, false)
+		queuedNofundsMeter.Mark(1)
 	}
 
 	log.Trace("Pooled new future transaction", "hash", hash, "from", from, "to", tx.To())
@@ -991,7 +1082,8 @@ func (pool *LegacyPool) Add(txs []*types.Transaction, sync bool) []error {
 func (pool *LegacyPool) addTxsLocked(txs []*types.Transaction) ([]error, *accountSet) {
 	dirty := newAccountSet(pool.signer)
 	errs := make([]error, len(txs))
-	for i, tx := range txs {
+	for _, i := range pool.nonceOrder(txs) {
+		tx := txs[i]
 		replaced, err := pool.add(tx)
 		errs[i] = err
 		if err == nil && !replaced {
@@ -1000,6 +1092,39 @@ func (pool *LegacyPool) addTxsLocked(txs []*types.Transaction) ([]error, *accoun
 	}
 	validTxMeter.Mark(int64(len(dirty.accounts)))
 	return errs, dirty
+}
+
+// nonceOrder preserves each sender's replacement order while admitting lower
+// nonces first. Results remain indexed to the original input order.
+func (pool *LegacyPool) nonceOrder(txs []*types.Transaction) []int {
+	order := make([]int, len(txs))
+	senders := make([]common.Address, len(txs))
+	valid := make([]bool, len(txs))
+	indices := make(map[common.Address][]int)
+	for i, tx := range txs {
+		order[i] = i
+		if from, err := types.Sender(pool.signer, tx); err == nil {
+			senders[i] = from
+			valid[i] = true
+			indices[from] = append(indices[from], i)
+		}
+	}
+	for _, group := range indices {
+		sort.SliceStable(group, func(i, j int) bool {
+			return txs[group[i]].Nonce() < txs[group[j]].Nonce()
+		})
+	}
+	next := make(map[common.Address]int)
+	for i, from := range senders {
+		if !valid[i] {
+			continue
+		}
+		if group := indices[from]; next[from] < len(group) {
+			order[i] = group[next[from]]
+			next[from]++
+		}
+	}
+	return order
 }
 
 // Status returns the status (unknown/pending/queued) of a batch of transactions
@@ -1454,11 +1579,42 @@ func (pool *LegacyPool) promoteExecutables(accounts []common.Address) []*types.T
 		log.Trace("Removed unpayable queued transactions", "count", len(drops))
 		queuedNofundsMeter.Mark(int64(len(drops)))
 
-		// Gather all executable transactions and promote them
-		readies := list.Ready(pool.pendingNonces.get(addr))
-		for _, tx := range readies {
+		remaining := pool.currentState.GetBalance(addr).ToBig()
+		pendingValid := true
+		if pending := pool.pending[addr]; pending != nil {
+			for _, tx := range pending.Flatten() {
+				if tx.Nonce() < pool.currentState.GetNonce(addr) {
+					continue // Already included in the new head; demotion follows promotion during reset.
+				}
+				if tx.Gas() > gasLimit || remaining.Cmp(tx.Cost()) < 0 {
+					pendingValid = false
+					break
+				}
+				remaining.Sub(remaining, tx.Cost())
+			}
+		}
+		// If reset must first demote the old pending prefix, retain its future
+		// queue for the next promotion instead of charging against stale costs.
+		var readies types.Transactions
+		if pendingValid {
+			readies = list.Ready(max(pool.pendingNonces.get(addr), pool.currentState.GetNonce(addr)))
+		}
+		for i, tx := range readies {
 			hash := tx.Hash()
+			cost := tx.Cost()
+			if remaining.Cmp(cost) < 0 {
+				// Preserve the affordable prefix when filling an old nonce gap.
+				// Later transactions remain queued behind the unpayable nonce.
+				pool.all.Remove(hash)
+				pool.priced.Removed(1)
+				queuedNofundsMeter.Mark(1)
+				for _, future := range readies[i+1:] {
+					pool.enqueueTx(future.Hash(), future, false)
+				}
+				break
+			}
 			if pool.promoteTx(addr, hash, tx) {
+				remaining.Sub(remaining, cost)
 				promoted = append(promoted, tx)
 			}
 		}
@@ -1636,6 +1792,19 @@ func (pool *LegacyPool) demoteUnexecutables() {
 		}
 		// Drop all transactions that are too costly (low balance or out of gas), and queue any invalids back for later
 		drops, invalids := list.Filter(pool.currentState.GetBalance(addr), gasLimit)
+		// A balance change can make a sequence unaffordable even when each
+		// transaction still fits individually. Keep only its affordable prefix.
+		spent := new(big.Int)
+		balance := pool.currentState.GetBalance(addr).ToBig()
+		for _, tx := range list.Flatten() {
+			spent.Add(spent, tx.Cost())
+			if spent.Cmp(balance) > 0 {
+				_, suffix := list.Remove(tx)
+				drops = append(drops, tx)
+				invalids = append(invalids, suffix...)
+				break
+			}
+		}
 		for _, tx := range drops {
 			hash := tx.Hash()
 			pool.all.Remove(hash)

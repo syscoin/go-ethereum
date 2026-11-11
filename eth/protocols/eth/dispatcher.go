@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/p2p"
+	"github.com/ethereum/go-ethereum/p2p/tracker"
 )
 
 var (
@@ -196,8 +197,25 @@ func (p *Peer) dispatcher() {
 			req := reqOp.req
 			req.Sent = time.Now()
 
+			limits := tracker.ResponseLimits{Bytes: maxMessageSize}
+			switch data := req.data.(type) {
+			case *GetBlockHeadersPacket:
+				limits.Items = int(min(data.Amount, uint64(maxHeadersServe)))
+			case *GetBlockBodiesPacket:
+				limits.Items = len(data.GetBlockBodiesRequest)
+			case *GetReceiptsPacket:
+				limits.Items = len(data.GetReceiptsRequest)
+			}
+			err := p.responses.Track(req.id, req.want, limits)
+			if err != nil {
+				reqOp.fail <- err
+				continue
+			}
 			requestTracker.Track(p.id, p.version, req.code, req.want, req.id)
-			err := p2p.Send(p.rw, req.code, req.data)
+			err = p2p.Send(p.rw, req.code, req.data)
+			if err != nil {
+				p.responses.Forget(req.id)
+			}
 			reqOp.fail <- err
 
 			if err == nil {
@@ -214,6 +232,7 @@ func (p *Peer) dispatcher() {
 			}
 			// Stop tracking the request
 			delete(pending, cancelOp.id)
+			p.responses.Cancel(cancelOp.id)
 			cancelOp.fail <- nil
 
 		case resOp := <-p.resDispatch:
