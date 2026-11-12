@@ -76,7 +76,7 @@ jobs:
       - name: Native tests with cgo precompiles
         run: go test -short -count=1 -tags=ckzg ./...
       - name: Race checks
-        run: go test -race -count=1 ./p2p/tracker ./eth/protocols/eth ./eth/protocols/snap ./eth/downloader ./core/txpool/legacypool
+        run: go test -race -count=1 ./rpc ./eth ./p2p/tracker ./eth/protocols/eth ./eth/protocols/snap ./eth/downloader ./core/txpool/legacypool
       - name: Production binaries
         run: |
           go run build/ci.go install -dlgo

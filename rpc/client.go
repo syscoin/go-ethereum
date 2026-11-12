@@ -631,12 +631,24 @@ func (c *Client) dispatch(codec ServerCodec) {
 		reqInitLock = c.reqInit // nil while the send lock is held
 		conn        = c.newClientConn(codec)
 		reading     = true
+		readErr     error // SYSCOIN: Remember why the current connection stopped reading.
 	)
+	// SYSCOIN: A disconnected handler exempts the write in progress from
+	// cancellation because it may reconnect. Resolve it once no retry is possible.
+	closeLastOp := func(err error) {
+		if lastOp != nil && lastOp.resp != nil && !lastOp.hadResponse {
+			lastOp.err = err
+			close(lastOp.resp)
+		}
+	}
 	defer func() {
 		close(c.closing)
 		if reading {
 			conn.close(ErrClientQuit, nil)
 			c.drainRead()
+		} else {
+			// SYSCOIN: The disconnected handler no longer tracks this request.
+			closeLastOp(ErrClientQuit)
 		}
 		close(c.didClose)
 	}()
@@ -661,6 +673,7 @@ func (c *Client) dispatch(codec ServerCodec) {
 			conn.handler.log.Debug("RPC connection read error", "err", err)
 			conn.close(err, lastOp)
 			reading = false
+			readErr = err // SYSCOIN: Used if the concurrent write already succeeded.
 
 		// Reconnect:
 		case newcodec := <-c.reconnected:
@@ -676,6 +689,7 @@ func (c *Client) dispatch(codec ServerCodec) {
 			}
 			go c.read(newcodec)
 			reading = true
+			readErr = nil // SYSCOIN: The transferred request now belongs to this connection.
 			conn = c.newClientConn(newcodec)
 			// Re-register the in-flight request on the new handler
 			// because that's where it will be sent.
@@ -693,6 +707,10 @@ func (c *Client) dispatch(codec ServerCodec) {
 				// Remove response handlers for the last send. When the read loop
 				// goes down, it will signal all other current operations.
 				conn.handler.removeRequestOp(lastOp)
+			} else if !reading {
+				// SYSCOIN: A successful write will not retry. If its read error
+				// arrived first, complete the request the old handler exempted.
+				closeLastOp(readErr)
 			}
 			// Let the next request in.
 			reqInitLock = c.reqInit
