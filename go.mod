@@ -2,6 +2,7 @@ module github.com/ethereum/go-ethereum
 
 go 1.23.0
 
+// SYSCOIN: Pin the patched compiler independently of the module language version.
 toolchain go1.26.11
 
 require (

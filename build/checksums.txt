@@ -5,6 +5,7 @@
 # https://github.com/ethereum/execution-spec-tests/releases/download/pectra-devnet-6%40v1.0.0/
 5ed3bec40a02776a4096c17b84b59fb20fd99fbabba8101fdac3d35a001cf82a  fixtures_pectra-devnet-6.tar.gz
 
+# SYSCOIN BEGIN: Pin official Go 1.26.11 release archives for patched builds.
 # version:golang 1.26.11
 # https://go.dev/dl/
 d44101b0ff27ed2a4c75ad46c17b9c74359209e2eb2ca7c9df6cb4fdb68e1969  go1.26.11.src.tar.gz
@@ -52,6 +53,7 @@ c0252772181b4c193ae980175f3e42b666c0079d0b0dd7c24775d280968802c0  go1.26.11.wind
 47ac1290b561f78be0fc94e2c4df39f3836c65e5b86b1ad49502efd467661587  go1.26.11.windows-amd64.msi
 a4c7e96d431ad186392a25e00db525839c6ee3840e80385e3c187e41e4f1f8d2  go1.26.11.windows-arm64.zip
 c4dd9b7e0da7ffc508554c17d5ac2522a4a57b03d70d9fd4be26aed64182e535  go1.26.11.windows-arm64.msi
+# SYSCOIN END: Pin official Go 1.26.11 release archives for patched builds.
 
 # version:golangci 2.0.2
 # https://github.com/golangci/golangci-lint/releases/
@@ -125,9 +127,11 @@ d7f0013f82e6d7f862cc6cb5c8cdb48eef5f2e239b35baa97e2f1a7466043767  go1.19.6.src.t
 # https://go.dev/dl/
 039c5b04e65279daceee8a6f71e70bd05cf5b801782b6f77c6e19e2ed0511222  go1.23.6.src.tar.gz
 
+# SYSCOIN BEGIN: Pin the extra bootstrap source required for Go 1.26 builds.
 # version:ppa-builder-1.24 1.24.13
 # https://go.dev/dl/
 639a6204c2486b137df1eb6e78ee3ed038f9877d0e4b5a465e796a2153f858d7  go1.24.13.src.tar.gz
+# SYSCOIN END: Pin the extra bootstrap source required for Go 1.26 builds.
 
 # version:protoc 27.1
 # https://github.com/protocolbuffers/protobuf/releases/
