@@ -139,7 +139,7 @@ func (p *Peer) dispatchRequest(req *Request) error {
 
 // dispatchResponse fulfils a pending request and delivers it to the requested
 // sink.
-func (p *Peer) dispatchResponse(res *Response, metadata func() interface{}) error {
+func (p *Peer) dispatchResponse(res *Response, metadata func() (interface{}, error)) error {
 	resOp := &response{
 		res:  res,
 		fail: make(chan error),
@@ -153,10 +153,18 @@ func (p *Peer) dispatchResponse(res *Response, metadata func() interface{}) erro
 		if err := <-resOp.fail; err != nil {
 			return nil
 		}
+		select {
+		case <-res.Req.cancel:
+			return nil
+		default:
+		}
 		// Request was accepted, run any postprocessing step to generate metadata
 		// on the receiver thread, not the sink thread
 		if metadata != nil {
-			res.Meta = metadata()
+			var err error
+			if res.Meta, err = metadata(); err != nil {
+				return err
+			}
 		}
 		// Deliver the filled out response and wait until it's handled. This
 		// path is a bit funky as Go's select has no order, so if a response

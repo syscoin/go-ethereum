@@ -31,9 +31,11 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
+	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 const (
@@ -561,8 +563,30 @@ func (q *queue) DeliverBodies(id string, txLists [][]*types.Transaction, txListH
 	uncleLists [][]*types.Header, uncleListHashes []common.Hash,
 	withdrawalLists [][]*types.Withdrawal, withdrawalListHashes []common.Hash,
 ) (int, error) {
+	return q.deliverBodies(id, len(txLists), txListHashes, uncleListHashes, withdrawalListHashes,
+		func(i int) bool { return withdrawalLists != nil && withdrawalLists[i] != nil },
+		func(i int) (*eth.BlockBody, error) {
+			var withdrawals []*types.Withdrawal
+			if withdrawalLists != nil {
+				withdrawals = withdrawalLists[i]
+			}
+			return &eth.BlockBody{Transactions: txLists[i], Uncles: uncleLists[i], Withdrawals: withdrawals}, nil
+		})
+}
+
+// DeliverBodiesRLP authenticates all body roots before decoding nested items.
+func (q *queue) DeliverBodiesRLP(id string, bodies eth.BlockBodiesRawResponse, hashes [][]common.Hash) (int, error) {
+	return q.deliverBodies(id, len(bodies), hashes[0], hashes[1], hashes[2],
+		func(i int) bool { return bodies[i].Withdrawals != nil },
+		func(i int) (*eth.BlockBody, error) { return bodies[i].Decode() })
+}
+
+func (q *queue) deliverBodies(id string, count int, txListHashes, uncleListHashes, withdrawalListHashes []common.Hash,
+	hasWithdrawals func(int) bool, decode func(int) (*eth.BlockBody, error),
+) (int, error) {
 	q.lock.Lock()
 	defer q.lock.Unlock()
+	bodies := make([]*eth.BlockBody, count)
 
 	validate := func(index int, header *types.Header) error {
 		if txListHashes[index] != header.TxHash {
@@ -573,21 +597,26 @@ func (q *queue) DeliverBodies(id string, txLists [][]*types.Transaction, txListH
 		}
 		if header.WithdrawalsHash == nil {
 			// nil hash means that withdrawals should not be present in body
-			if withdrawalLists[index] != nil {
+			if hasWithdrawals(index) {
 				return errInvalidBody
 			}
 		} else { // non-nil hash: body must have withdrawals
-			if withdrawalLists[index] == nil {
+			if !hasWithdrawals(index) {
 				return errInvalidBody
 			}
 			if withdrawalListHashes[index] != *header.WithdrawalsHash {
 				return errInvalidBody
 			}
 		}
+		body, err := decode(index)
+		if err != nil {
+			return errInvalidBody
+		}
+		bodies[index] = body
 		// Blocks must have a number of blobs corresponding to the header gas usage,
 		// and zero before the Cancun hardfork.
 		var blobs int
-		for _, tx := range txLists[index] {
+		for _, tx := range body.Transactions {
 			// Count the number of blobs to validate against the header's blobGasUsed
 			blobs += len(tx.BlobHashes())
 
@@ -619,26 +648,46 @@ func (q *queue) DeliverBodies(id string, txLists [][]*types.Transaction, txListH
 	}
 
 	reconstruct := func(index int, result *fetchResult) {
-		result.Transactions = txLists[index]
-		result.Uncles = uncleLists[index]
-		result.Withdrawals = withdrawalLists[index]
+		result.Transactions = bodies[index].Transactions
+		result.Uncles = bodies[index].Uncles
+		result.Withdrawals = bodies[index].Withdrawals
 		result.SetBodyDone()
 	}
 	return q.deliver(id, q.blockTaskPool, q.blockTaskQueue, q.blockPendPool,
-		bodyReqTimer, bodyInMeter, bodyDropMeter, len(txLists), validate, reconstruct)
+		bodyReqTimer, bodyInMeter, bodyDropMeter, count, validate, reconstruct)
 }
 
 // DeliverReceipts injects a receipt retrieval response into the results queue.
 // The method returns the number of transaction receipts accepted from the delivery
 // and also wakes any threads waiting for data delivery.
 func (q *queue) DeliverReceipts(id string, receiptList [][]*types.Receipt, receiptListHashes []common.Hash) (int, error) {
+	return q.deliverReceipts(id, len(receiptList), receiptListHashes,
+		func(i int) ([]*types.Receipt, error) { return receiptList[i], nil })
+}
+
+// DeliverReceiptsRLP authenticates a receipt root before decoding its logs.
+func (q *queue) DeliverReceiptsRLP(id string, receipts eth.ReceiptsRLPResponse, hashes []common.Hash) (int, error) {
+	return q.deliverReceipts(id, len(receipts), hashes, func(i int) ([]*types.Receipt, error) {
+		var decoded []*types.Receipt
+		err := rlp.DecodeBytes(receipts[i], &decoded)
+		return decoded, err
+	})
+}
+
+func (q *queue) deliverReceipts(id string, count int, receiptListHashes []common.Hash, decode func(int) ([]*types.Receipt, error)) (int, error) {
 	q.lock.Lock()
 	defer q.lock.Unlock()
+	receiptList := make([][]*types.Receipt, count)
 
 	validate := func(index int, header *types.Header) error {
 		if receiptListHashes[index] != header.ReceiptHash {
 			return errInvalidReceipt
 		}
+		receipts, err := decode(index)
+		if err != nil {
+			return errInvalidReceipt
+		}
+		receiptList[index] = receipts
 		return nil
 	}
 	reconstruct := func(index int, result *fetchResult) {
@@ -646,7 +695,7 @@ func (q *queue) DeliverReceipts(id string, receiptList [][]*types.Receipt, recei
 		result.SetReceiptsDone()
 	}
 	return q.deliver(id, q.receiptTaskPool, q.receiptTaskQueue, q.receiptPendPool,
-		receiptReqTimer, receiptInMeter, receiptDropMeter, len(receiptList), validate, reconstruct)
+		receiptReqTimer, receiptInMeter, receiptDropMeter, count, validate, reconstruct)
 }
 
 // deliver injects a data retrieval response into the results queue.

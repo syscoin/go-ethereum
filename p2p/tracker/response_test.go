@@ -125,3 +125,22 @@ func TestResponseProofLimit(t *testing.T) {
 		t.Fatal("oversized proof decoded")
 	}
 }
+
+func TestListDecoderChecksBeforeDecoding(t *testing.T) {
+	for _, count := range []int{2, 100000} {
+		encoded, err := rlp.EncodeToBytes(make([]uint64, count))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded []uint64
+		err = rlp.DecodeBytes(encoded, &ListDecoder{Items: 1, Bytes: uint64(len(encoded)), Value: &decoded})
+		if !errors.Is(err, ErrResponseLimit) || decoded != nil {
+			t.Fatalf("count %d: got error %v, decoded %d items", count, err, len(decoded))
+		}
+	}
+	encoded, _ := rlp.EncodeToBytes([]uint64{1})
+	var decoded []uint64
+	if err := rlp.DecodeBytes(encoded, &ListDecoder{Items: 1, Bytes: uint64(len(encoded)), Value: &decoded}); err != nil || len(decoded) != 1 || decoded[0] != 1 {
+		t.Fatalf("valid list: %v, %v", decoded, err)
+	}
+}

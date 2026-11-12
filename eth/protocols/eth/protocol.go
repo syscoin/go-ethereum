@@ -48,6 +48,10 @@ var protocolLengths = map[uint]uint64{ETH68: 17}
 // maxMessageSize is the maximum cap on the size of a protocol message.
 const maxMessageSize = 10 * 1024 * 1024
 
+// maxTransactionAnnouncements bounds unsolicited transaction batches before
+// decoding. This is independent of the size of a transaction in a block.
+const maxTransactionAnnouncements = 5000
+
 const (
 	StatusMsg                     = 0x00
 	NewBlockHashesMsg             = 0x01

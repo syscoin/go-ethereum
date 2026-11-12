@@ -147,6 +147,40 @@ type ResponseDecoder struct {
 	Cancelled bool
 }
 
+// ListDecoder bounds a list before allocating any of its decoded elements.
+// It is also used for unsolicited messages, which have no request envelope.
+type ListDecoder struct {
+	Items int
+	Bytes uint64
+	Value interface{}
+}
+
+func (d *ListDecoder) DecodeRLP(s *rlp.Stream) error {
+	_, size, err := s.Kind()
+	if err != nil {
+		return err
+	}
+	if size > d.Bytes {
+		return ErrResponseLimit
+	}
+	raw, err := s.Raw()
+	if err != nil {
+		return err
+	}
+	content, rest, err := rlp.SplitList(raw)
+	if err != nil || len(rest) != 0 {
+		return fmt.Errorf("invalid message list: %v", err)
+	}
+	count, err := rlp.CountValues(content)
+	if err != nil {
+		return err
+	}
+	if d.Items >= 0 && count > d.Items {
+		return ErrResponseLimit
+	}
+	return rlp.DecodeBytes(raw, d.Value)
+}
+
 func (d *ResponseDecoder) DecodeRLP(s *rlp.Stream) error {
 	if d.Tracker == nil {
 		return ErrUnrequestedResponse

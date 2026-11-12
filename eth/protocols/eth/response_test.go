@@ -2,6 +2,7 @@ package eth
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"log/slog"
 	"math"
@@ -170,5 +171,45 @@ func TestHeaderSkipWarningBound(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "attacker=") || strings.Contains(output.String(), "caps=") {
 		t.Fatal("warning contains peer information dump")
+	}
+}
+
+func TestResponseMetadataGate(t *testing.T) {
+	for _, state := range []string{"rejected", "cancelled", "invalid-metadata"} {
+		t.Run(state, func(t *testing.T) {
+			peer := &Peer{resDispatch: make(chan *response), term: make(chan struct{})}
+			sink := make(chan *Response, 1)
+			req := &Request{cancel: make(chan struct{}), sink: sink}
+			if state == "cancelled" {
+				close(req.cancel)
+			}
+			go func() {
+				op := <-peer.resDispatch
+				op.res.Req = req
+				if state == "rejected" {
+					op.fail <- errDanglingResponse
+				} else {
+					op.fail <- nil
+				}
+			}()
+			called := false
+			invalid := errors.New("invalid raw metadata")
+			err := peer.dispatchResponse(new(Response), func() (interface{}, error) {
+				called = true
+				return nil, invalid
+			})
+			if state == "invalid-metadata" {
+				if !called || !errors.Is(err, invalid) {
+					t.Fatalf("metadata error lost: called %v, error %v", called, err)
+				}
+			} else if called || err != nil {
+				t.Fatalf("metadata called for %s response: called %v, error %v", state, called, err)
+			}
+			select {
+			case <-sink:
+				t.Fatal("invalid response delivered")
+			default:
+			}
+		})
 	}
 }

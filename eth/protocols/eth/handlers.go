@@ -26,7 +26,6 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/tracker"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/trie"
 )
 
 func handleGetBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
@@ -301,12 +300,12 @@ func handleBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
 	} else if err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	metadata := func() interface{} {
+	metadata := func() (interface{}, error) {
 		hashes := make([]common.Hash, len(res.BlockHeadersRequest))
 		for i, header := range res.BlockHeadersRequest {
 			hashes[i] = header.Hash()
 		}
-		return hashes
+		return hashes, nil
 	}
 	return peer.dispatchResponse(&Response{
 		id:   res.RequestId,
@@ -317,56 +316,60 @@ func handleBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
 
 func handleBlockBodies(backend Backend, msg Decoder, peer *Peer) error {
 	// A batch of block bodies arrived to one of our previous requests
-	res := new(BlockBodiesPacket)
-	if cancelled, err := decodeResponse(msg, peer, BlockBodiesMsg, &res.RequestId, &res.BlockBodiesResponse); cancelled {
+	var id uint64
+	var encoded BlockBodiesRLPResponse
+	if cancelled, err := decodeResponse(msg, peer, BlockBodiesMsg, &id, &encoded); cancelled {
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	metadata := func() interface{} {
-		var (
-			txsHashes        = make([]common.Hash, len(res.BlockBodiesResponse))
-			uncleHashes      = make([]common.Hash, len(res.BlockBodiesResponse))
-			withdrawalHashes = make([]common.Hash, len(res.BlockBodiesResponse))
-		)
-		hasher := trie.NewStackTrie(nil)
-		for i, body := range res.BlockBodiesResponse {
-			txsHashes[i] = types.DeriveSha(types.Transactions(body.Transactions), hasher)
-			uncleHashes[i] = types.CalcUncleHash(body.Uncles)
-			if body.Withdrawals != nil {
-				withdrawalHashes[i] = types.DeriveSha(types.Withdrawals(body.Withdrawals), hasher)
-			}
+	bodies := make(BlockBodiesRawResponse, len(encoded))
+	for i, raw := range encoded {
+		if err := rlp.DecodeBytes(raw, &bodies[i]); err != nil {
+			return fmt.Errorf("%w: body %d: %v", errDecode, i, err)
 		}
-		return [][]common.Hash{txsHashes, uncleHashes, withdrawalHashes}
+		if err := bodies[i].validate(); err != nil {
+			return fmt.Errorf("%w: body %d: %v", errDecode, i, err)
+		}
 	}
 	return peer.dispatchResponse(&Response{
-		id:   res.RequestId,
+		id:   id,
 		code: BlockBodiesMsg,
-		Res:  &res.BlockBodiesResponse,
-	}, metadata)
+		Res:  &bodies,
+	}, func() (interface{}, error) {
+		hashes, err := bodies.hashes()
+		if err != nil {
+			return nil, fmt.Errorf("%w: body roots: %v", errDecode, err)
+		}
+		return hashes, nil
+	})
 }
 
 func handleReceipts(backend Backend, msg Decoder, peer *Peer) error {
 	// A batch of receipts arrived to one of our previous requests
-	res := new(ReceiptsPacket)
-	if cancelled, err := decodeResponse(msg, peer, ReceiptsMsg, &res.RequestId, &res.ReceiptsResponse); cancelled {
+	var id uint64
+	var receipts ReceiptsRLPResponse
+	if cancelled, err := decodeResponse(msg, peer, ReceiptsMsg, &id, &receipts); cancelled {
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	metadata := func() interface{} {
-		hasher := trie.NewStackTrie(nil)
-		hashes := make([]common.Hash, len(res.ReceiptsResponse))
-		for i, receipt := range res.ReceiptsResponse {
-			hashes[i] = types.DeriveSha(types.Receipts(receipt), hasher)
+	for i, raw := range receipts {
+		if _, err := newRawDerivableList(raw, minReceiptEncodedSize, true); err != nil {
+			return fmt.Errorf("%w: receipts %d: %v", errDecode, i, err)
 		}
-		return hashes
 	}
 	return peer.dispatchResponse(&Response{
-		id:   res.RequestId,
+		id:   id,
 		code: ReceiptsMsg,
-		Res:  &res.ReceiptsResponse,
-	}, metadata)
+		Res:  &receipts,
+	}, func() (interface{}, error) {
+		hashes, err := receipts.hashes()
+		if err != nil {
+			return nil, fmt.Errorf("%w: receipt roots: %v", errDecode, err)
+		}
+		return hashes, nil
+	})
 }
 
 func handleNewPooledTransactionHashes(backend Backend, msg Decoder, peer *Peer) error {
@@ -376,7 +379,7 @@ func handleNewPooledTransactionHashes(backend Backend, msg Decoder, peer *Peer) 
 		return nil
 	}
 	ann := new(NewPooledTransactionHashesPacket)
-	if err := msg.Decode(ann); err != nil {
+	if err := msg.Decode(&transactionAnnouncementsDecoder{ann}); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
 	if len(ann.Hashes) != len(ann.Types) || len(ann.Hashes) != len(ann.Sizes) {
@@ -429,7 +432,7 @@ func handleTransactions(backend Backend, msg Decoder, peer *Peer) error {
 	}
 	// Transactions can be processed, parse all of them and deliver to the pool
 	var txs TransactionsPacket
-	if err := msg.Decode(&txs); err != nil {
+	if err := msg.Decode(&tracker.ListDecoder{Items: maxTransactionAnnouncements, Bytes: maxMessageSize, Value: &txs}); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
 	for i, tx := range txs {
