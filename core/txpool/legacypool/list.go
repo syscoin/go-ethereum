@@ -295,6 +295,26 @@ func (l *list) Contains(nonce uint64) bool {
 	return l.txs.Get(nonce) != nil
 }
 
+// isPriceBumped reports whether tx satisfies the price bump for replacing old.
+func isPriceBumped(old, tx *types.Transaction, priceBump uint64) bool {
+	if old.GasFeeCapCmp(tx) >= 0 || old.GasTipCapCmp(tx) >= 0 {
+		return false
+	}
+	// thresholdFeeCap = oldFC * (100 + priceBump) / 100
+	a := big.NewInt(100 + int64(priceBump))
+	aFeeCap := new(big.Int).Mul(a, old.GasFeeCap())
+	aTip := a.Mul(a, old.GasTipCap())
+
+	// thresholdTip = oldTip * (100 + priceBump) / 100
+	b := big.NewInt(100)
+	thresholdFeeCap := aFeeCap.Div(aFeeCap, b)
+	thresholdTip := aTip.Div(aTip, b)
+
+	// Both caps must increase and meet the percentage threshold, including
+	// for low (Wei-level) gas price replacements.
+	return tx.GasFeeCapIntCmp(thresholdFeeCap) >= 0 && tx.GasTipCapIntCmp(thresholdTip) >= 0
+}
+
 // Add tries to insert a new transaction into the list, returning whether the
 // transaction was accepted, and if yes, any previous transaction it replaced.
 //
@@ -309,23 +329,7 @@ func (l *list) Add(tx *types.Transaction, priceBump uint64) (bool, *types.Transa
 	// If there's an older better transaction, abort
 	old := l.txs.Get(tx.Nonce())
 	if old != nil {
-		if old.GasFeeCapCmp(tx) >= 0 || old.GasTipCapCmp(tx) >= 0 {
-			return false, nil
-		}
-		// thresholdFeeCap = oldFC  * (100 + priceBump) / 100
-		a := big.NewInt(100 + int64(priceBump))
-		aFeeCap := new(big.Int).Mul(a, old.GasFeeCap())
-		aTip := a.Mul(a, old.GasTipCap())
-
-		// thresholdTip    = oldTip * (100 + priceBump) / 100
-		b := big.NewInt(100)
-		thresholdFeeCap := aFeeCap.Div(aFeeCap, b)
-		thresholdTip := aTip.Div(aTip, b)
-
-		// We have to ensure that both the new fee cap and tip are higher than the
-		// old ones as well as checking the percentage threshold to ensure that
-		// this is accurate for low (Wei-level) gas price replacements.
-		if tx.GasFeeCapIntCmp(thresholdFeeCap) < 0 || tx.GasTipCapIntCmp(thresholdTip) < 0 {
+		if !isPriceBumped(old, tx, priceBump) {
 			return false, nil
 		}
 		// Old is being replaced, subtract old cost
@@ -609,8 +613,14 @@ func (l *pricedList) underpricedFor(h *priceHeap, tx *types.Transaction) bool {
 
 // Discard finds a number of most underpriced transactions, removes them from the
 // priced list and returns them for further removal from the entire pool.
-// If noPending is set to true, we will only consider the floating list
-func (l *pricedList) Discard(slots int) (types.Transactions, bool) {
+// The excluded transaction is already credited as a replacement.
+func (l *pricedList) Discard(slots int, exclude *types.Transaction) (types.Transactions, bool) {
+	var skipped *types.Transaction
+	defer func() {
+		if skipped != nil {
+			l.Put(skipped)
+		}
+	}()
 	drop := make(types.Transactions, 0, slots) // Remote underpriced transactions to drop
 	for slots > 0 {
 		if len(l.urgent.list)*floatingRatio > len(l.floating.list)*urgentRatio {
@@ -631,6 +641,10 @@ func (l *pricedList) Discard(slots int) (types.Transactions, bool) {
 			tx := heap.Pop(&l.floating).(*types.Transaction)
 			if l.all.Get(tx.Hash()) == nil { // Removed or migrated
 				l.stales.Add(-1)
+				continue
+			}
+			if tx == exclude {
+				skipped = tx
 				continue
 			}
 			// Non stale transaction found, discard it

@@ -745,6 +745,25 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 	}
 	// already validated by this point
 	from, _ := types.Sender(pool.signer, tx)
+	// Check replacement pricing before making room for the transaction. A
+	// rejected replacement must not evict transactions from other accounts.
+	var old *types.Transaction
+	if pending := pool.pending[from]; pending != nil {
+		old = pending.txs.Get(tx.Nonce())
+		if old != nil && !isPriceBumped(old, tx, pool.config.PriceBump) {
+			pendingDiscardMeter.Mark(1)
+			return false, txpool.ErrReplaceUnderpriced
+		}
+	}
+	if old == nil {
+		if queue := pool.queue[from]; queue != nil {
+			old = queue.txs.Get(tx.Nonce())
+			if old != nil && !isPriceBumped(old, tx, pool.config.PriceBump) {
+				queuedDiscardMeter.Mark(1)
+				return false, txpool.ErrReplaceUnderpriced
+			}
+		}
+	}
 	queueDrops := pool.unaffordableQueueAfter(from, tx)
 	var dropSlots int
 	for _, old := range queueDrops {
@@ -775,22 +794,10 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 	}
 	// If the transaction pool is full, discard underpriced transactions
 	projectedSlots := pool.all.Slots() + numSlots(tx) - dropSlots
-	if len(queueDrops) != 0 {
-		// Self-pruning is applied only after insertion succeeds. A replacement
-		// also removes its old transaction then, so credit that slot without
-		// evicting a different account ahead of the price-bump check.
-		var old *types.Transaction
-		if pending := pool.pending[from]; pending != nil {
-			old = pending.txs.Get(tx.Nonce())
-		}
-		if old == nil {
-			if queue := pool.queue[from]; queue != nil {
-				old = queue.txs.Get(tx.Nonce())
-			}
-		}
-		if old != nil {
-			projectedSlots -= numSlots(old)
-		}
+	if old != nil {
+		// A successful replacement removes its predecessor, so only its net
+		// slot growth needs to evict another transaction.
+		projectedSlots -= numSlots(old)
 	}
 	if uint64(projectedSlots) > pool.config.GlobalSlots+pool.config.GlobalQueue {
 		if len(queueDrops) != 0 {
@@ -816,7 +823,7 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 
 		// New transaction is better than our worse ones, make room for it.
 		// If we can't make enough room for new one, abort the operation.
-		drop, success := pool.priced.Discard(projectedSlots - int(pool.config.GlobalSlots+pool.config.GlobalQueue))
+		drop, success := pool.priced.Discard(projectedSlots-int(pool.config.GlobalSlots+pool.config.GlobalQueue), old)
 
 		// Special case, we still can't make the room for the new remote one.
 		if !success {
