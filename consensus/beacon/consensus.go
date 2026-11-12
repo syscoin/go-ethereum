@@ -297,11 +297,12 @@ func (beacon *Beacon) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	// Verify the existence / non-existence of cancun-specific header fields
 	cancun := chain.Config().IsCancun(header.Number, header.Time)
 	if !cancun || syscoin {
+		// SYSCOIN: Print guarded blob gas values in validation errors.
 		switch {
 		case header.ExcessBlobGas != nil:
-			return consensus.MarkInvalidBlock(fmt.Errorf("invalid excessBlobGas: have %d, expected nil", header.ExcessBlobGas))
+			return consensus.MarkInvalidBlock(fmt.Errorf("invalid excessBlobGas: have %d, expected nil", *header.ExcessBlobGas))
 		case header.BlobGasUsed != nil:
-			return consensus.MarkInvalidBlock(fmt.Errorf("invalid blobGasUsed: have %d, expected nil", header.BlobGasUsed))
+			return consensus.MarkInvalidBlock(fmt.Errorf("invalid blobGasUsed: have %d, expected nil", *header.BlobGasUsed))
 		case header.ParentBeaconRoot != nil:
 			return consensus.MarkInvalidBlock(fmt.Errorf("invalid parentBeaconRoot, have %#x, expected nil", header.ParentBeaconRoot))
 		}
