@@ -5,7 +5,7 @@ ARG BUILDNUM=""
 
 # Build Geth in a stock Go builder container
 # SYSCOIN: Build release binaries with the same patched compiler used by CI.
-FROM golang:1.26.11-alpine AS builder
+FROM golang:1.27.4-alpine AS builder
 
 RUN apk add --no-cache gcc musl-dev linux-headers git
 

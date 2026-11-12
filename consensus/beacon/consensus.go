@@ -20,8 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	// SYSCOIN
-	"time"
+	"time" // SYSCOIN
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"

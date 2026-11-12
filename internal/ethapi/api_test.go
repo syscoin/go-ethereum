@@ -3733,14 +3733,7 @@ func TestRPCGetBlockReceipts(t *testing.T) {
 	}
 }
 
-type precompileContract struct{}
-
-func (p *precompileContract) RequiredGas(input []byte) uint64 { return 0 }
-
-// SYSCOIN
-func (p *precompileContract) Run(input []byte, interpreter *vm.EVMInterpreter) ([]byte, error) {
-	return nil, nil
-}
+// SYSCOIN: The unused precompile stub is removed; override tests exercise their own mock.
 
 func testRPCResponseWithFile(t *testing.T, testid int, result interface{}, rpc string, file string) {
 	data, err := json.MarshalIndent(result, "", "  ")

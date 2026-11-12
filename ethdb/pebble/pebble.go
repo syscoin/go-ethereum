@@ -185,9 +185,9 @@ func New(file string, cache int, handles int, namespace string, readonly bool, e
 		memTableSize = maxMemTableSize - 1
 	}
 	db := &Database{
-		fn:           file,
-		log:          logger,
-		quitChan:     make(chan chan error),
+		fn:       file,
+		log:      logger,
+		quitChan: make(chan chan error),
 		// SYSCOIN
 		writeOptions: &pebble.WriteOptions{Sync: false},
 	}

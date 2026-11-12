@@ -20,8 +20,7 @@ package rawdb
 import (
 	"bytes"
 	"encoding/binary"
-	// SYSCOIN
-	"math/big"
+	"math/big" // SYSCOIN
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"

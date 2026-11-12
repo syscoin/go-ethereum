@@ -495,6 +495,7 @@ func opPop(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte
 	scope.Stack.pop()
 	return nil, nil
 }
+
 // SYSCOIN
 func opSYSBlockhash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	num := scope.Stack.peek()

@@ -6,11 +6,17 @@ on:
   pull_request:
     branches: [ master ]
   workflow_dispatch:
+    inputs:
+      hosted_runner:
+        description: "Qualify the pinned toolchain on GitHub-hosted Linux runners"
+        type: boolean
+        default: false
 
 jobs:
   lint:
     name: Lint
-    runs-on: self-hosted
+    # SYSCOIN: Allow an explicit qualification run when self-hosted runners are unavailable.
+    runs-on: ${{ inputs.hosted_runner && 'ubuntu-24.04' || 'self-hosted' }}
     steps:
     - uses: actions/checkout@v4
 
@@ -24,7 +30,7 @@ jobs:
       uses: actions/setup-go@v5
       with:
         # SYSCOIN: Run this job with the pinned patched Go compiler.
-        go-version: 1.26.11
+        go-version: 1.27.4
         cache: false
 
     - name: Run linters
@@ -34,17 +40,52 @@ jobs:
         go run build/ci.go check_baddeps
 
   build:
-    runs-on: self-hosted
+    # SYSCOIN: Allow an explicit qualification run when self-hosted runners are unavailable.
+    runs-on: ${{ inputs.hosted_runner && 'ubuntu-24.04' || 'self-hosted' }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           # SYSCOIN: Run this job with the pinned patched Go compiler.
-          go-version: 1.26.11
+          go-version: 1.27.4
           cache: false
       - name: Run tests
         run: go test -short ./...
         env:
           GOOS: linux
           GOARCH: 386
+          # SYSCOIN: Run the 32-bit fallback without requiring multilib C libraries.
+          CGO_ENABLED: 0
+
+  # SYSCOIN BEGIN: Exercise native Linux, race detection and release containers
+  # during an explicitly requested toolchain qualification.
+  qualify:
+    if: ${{ inputs.hosted_runner }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GOTOOLCHAIN: local
+      CGO_CFLAGS: '-O2 -g -D__BLST_PORTABLE__'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.27.4
+          cache: false
+      - name: Native tests with cgo precompiles
+        run: go test -short -count=1 -tags=ckzg ./...
+      - name: Race checks
+        run: go test -race -count=1 ./p2p/tracker ./eth/protocols/eth ./eth/protocols/snap ./eth/downloader ./core/txpool/legacypool
+      - name: Production binaries
+        run: |
+          go run build/ci.go install -dlgo
+          build/bin/geth version
+          go version -m build/bin/geth
+      - name: Release container builds
+        run: |
+          docker build --tag sysgeth-toolchain-check --file Dockerfile .
+          docker run --rm sysgeth-toolchain-check version
+          docker build --tag sysgeth-alltools-toolchain-check --file Dockerfile.alltools .
+          docker run --rm --entrypoint geth sysgeth-alltools-toolchain-check version
+  # SYSCOIN END: Explicit native and container toolchain qualification.

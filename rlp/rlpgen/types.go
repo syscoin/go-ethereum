@@ -47,7 +47,8 @@ func typeReflectKind(typ types.Type) reflect.Kind {
 	case *types.Map:
 		return reflect.Map
 	case *types.Pointer:
-		return reflect.Ptr
+		// SYSCOIN: Use the canonical kind name for Go 1.27 vet.
+		return reflect.Pointer
 	case *types.Signature:
 		return reflect.Func
 	case *types.Slice:

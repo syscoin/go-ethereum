@@ -10,7 +10,7 @@ jobs:
       arch: amd64
       dist: focal
       # SYSCOIN: Run this job with the pinned patched Go compiler.
-      go: 1.26.11
+      go: 1.27.4
       env:
         - docker
       services:
@@ -29,7 +29,7 @@ jobs:
       dist: focal
       sudo: required
       # SYSCOIN: Run this job with the pinned patched Go compiler.
-      go: 1.26.11
+      go: 1.27.4
       env:
         - azure-linux
       git:
@@ -65,7 +65,7 @@ jobs:
       arch: amd64
       dist: focal
       # SYSCOIN: Run this job with the pinned patched Go compiler.
-      go: 1.26.11
+      go: 1.27.4
       script:
         - travis_wait 45 go run build/ci.go test $TEST_PACKAGES
 
@@ -74,7 +74,7 @@ jobs:
       os: linux
       dist: focal
       # SYSCOIN: Run this job with the pinned patched Go compiler.
-      go: 1.26.11
+      go: 1.27.4
       script:
         - travis_wait 45 go run build/ci.go test $TEST_PACKAGES
 
@@ -84,7 +84,7 @@ jobs:
       os: linux
       dist: focal
       # SYSCOIN: Run this job with the pinned patched Go compiler.
-      go: 1.26.11
+      go: 1.27.4
       env:
         - ubuntu-ppa
       git:
@@ -101,7 +101,7 @@ jobs:
       os: linux
       dist: focal
       # SYSCOIN: Run this job with the pinned patched Go compiler.
-      go: 1.26.11
+      go: 1.27.4
       env:
         - azure-purge
       git:
@@ -115,7 +115,7 @@ jobs:
       os: linux
       dist: focal
       # SYSCOIN: Run this job with the pinned patched Go compiler.
-      go: 1.26.11
+      go: 1.27.4
       env:
         - racetests
       script:

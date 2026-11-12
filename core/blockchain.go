@@ -1624,14 +1624,12 @@ func (bc *BlockChain) writeNEVMData(blockBatch ethdb.KeyValueWriter, block *type
 			for _, entry := range nevmBlockConnect.Diff.AddedMNNEVM {
 				addr := common.BytesToAddress(entry.Address)
 				bc.StoreNEVMAddress(blockBatch, addr, entry.CollateralHeight)
-
 			}
 			for _, entry := range nevmBlockConnect.Diff.UpdatedMNNEVM {
 				oldAddr := common.BytesToAddress(entry.OldAddress)
 				newAddr := common.BytesToAddress(entry.NewAddress)
 				bc.RemoveNEVMAddress(blockBatch, oldAddr)
 				bc.StoreNEVMAddress(blockBatch, newAddr, entry.CollateralHeight)
-
 			}
 			for _, entry := range nevmBlockConnect.Diff.RemovedMNNEVM {
 				addr := common.BytesToAddress(entry.Address)
