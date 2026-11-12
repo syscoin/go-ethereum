@@ -76,7 +76,24 @@ jobs:
       - name: Native tests with cgo precompiles
         run: go test -short -count=1 -tags=ckzg ./...
       - name: Race checks
-        run: go test -race -count=1 ./rpc ./eth ./p2p/tracker ./eth/protocols/eth ./eth/protocols/snap ./eth/downloader ./core/txpool/legacypool
+        # SYSCOIN: Keep large RPC payload tests within their I/O deadlines under instrumentation.
+        run: |
+          go test -race -count=1 -p=1 -parallel=1 ./rpc ./eth
+          go test -race -count=1 ./p2p/tracker ./eth/protocols/eth ./eth/protocols/snap ./eth/downloader ./core/txpool/legacypool
+
+  release-builds:
+    if: ${{ inputs.hosted_runner }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GOTOOLCHAIN: local
+      CGO_CFLAGS: '-O2 -g -D__BLST_PORTABLE__'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.27.4
+          cache: false
       - name: Production binaries
         run: |
           go run build/ci.go install -dlgo
