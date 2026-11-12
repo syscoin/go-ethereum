@@ -221,7 +221,8 @@ type Hooks struct {
 // for tracing and reporting.
 type BalanceChangeReason byte
 
-//go:generate go run golang.org/x/tools/cmd/stringer -type=BalanceChangeReason -trimprefix=BalanceChange -output gen_balance_change_reason_stringer.go
+// SYSCOIN: Pin stringer in its own tool module to preserve the application's Go language version.
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type=BalanceChangeReason -trimprefix=BalanceChange -output gen_balance_change_reason_stringer.go
 
 const (
 	BalanceChangeUnspecified BalanceChangeReason = 0
@@ -252,7 +253,7 @@ const (
 	BalanceDecreaseDaoAccount BalanceChangeReason = 9
 	// SYSCOIN
 	BalanceIncreaseVaultManagerContract BalanceChangeReason = 100
-	BalanceDecreaseVaultManagerAccount BalanceChangeReason = 101
+	BalanceDecreaseVaultManagerAccount  BalanceChangeReason = 101
 	// BalanceChangeTransfer is ether transferred via a call.
 	// it is a decrease for the sender and an increase for the recipient.
 	BalanceChangeTransfer BalanceChangeReason = 10
@@ -284,7 +285,8 @@ const (
 // once per transaction, while those that start with `GasChangeCall` are emitted on a call basis.
 type GasChangeReason byte
 
-//go:generate go run golang.org/x/tools/cmd/stringer -type=GasChangeReason -trimprefix=GasChange -output gen_gas_change_reason_stringer.go
+// SYSCOIN: Keep the compatible stringer pinned independently of the application module.
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type=GasChangeReason -trimprefix=GasChange -output gen_gas_change_reason_stringer.go
 
 const (
 	GasChangeUnspecified GasChangeReason = 0
@@ -350,7 +352,8 @@ const (
 // NonceChangeReason is used to indicate the reason for a nonce change.
 type NonceChangeReason byte
 
-//go:generate go run golang.org/x/tools/cmd/stringer -type=NonceChangeReason -trimprefix NonceChange -output gen_nonce_change_reason_stringer.go
+// SYSCOIN: Keep the compatible stringer pinned independently of the application module.
+//go:generate go run golang.org/x/tools/cmd/stringer@v0.50.0 -type=NonceChangeReason -trimprefix NonceChange -output gen_nonce_change_reason_stringer.go
 
 const (
 	NonceChangeUnspecified NonceChangeReason = 0

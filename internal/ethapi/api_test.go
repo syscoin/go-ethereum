@@ -546,7 +546,23 @@ func (b testBackend) RPCGasCap() uint64                        { return 10000000
 func (b testBackend) RPCEVMTimeout() time.Duration             { return time.Second }
 func (b testBackend) RPCTxFeeCap() float64                     { return 0 }
 func (b testBackend) UnprotectedAllowed() bool                 { return false }
-func (b testBackend) SetHead(number uint64)                    {}
+func (b testBackend) SetHead(number uint64) error              { return nil }
+
+// SYSCOIN: recovery refusal must not become a successful debug_setHead reply.
+type rewindErrorBackend struct {
+	Backend
+	err error
+}
+
+func (b rewindErrorBackend) SetHead(uint64) error { return b.err }
+
+func TestDebugSetHeadPropagatesError(t *testing.T) {
+	want := errors.New("recovery history unavailable")
+	if err := NewDebugAPI(rewindErrorBackend{err: want}).SetHead(1); !errors.Is(err, want) {
+		t.Fatalf("SetHead error = %v, want %v", err, want)
+	}
+}
+
 func (b testBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
 	if number == rpc.LatestBlockNumber {
 		return b.chain.CurrentBlock(), nil
@@ -3717,14 +3733,7 @@ func TestRPCGetBlockReceipts(t *testing.T) {
 	}
 }
 
-type precompileContract struct{}
-
-func (p *precompileContract) RequiredGas(input []byte) uint64 { return 0 }
-
-// SYSCOIN
-func (p *precompileContract) Run(input []byte, interpreter *vm.EVMInterpreter) ([]byte, error) {
-	return nil, nil
-}
+// SYSCOIN: The unused precompile stub is removed; override tests exercise their own mock.
 
 func testRPCResponseWithFile(t *testing.T, testid int, result interface{}, rpc string, file string) {
 	data, err := json.MarshalIndent(result, "", "  ")

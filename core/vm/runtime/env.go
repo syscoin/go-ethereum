@@ -33,17 +33,17 @@ func NewEnv(cfg *Config) *vm.EVM {
 		Transfer:    core.Transfer,
 		GetHash:     cfg.GetHashFn,
 		// SYSCOIN
-		ReadSYSHash: cfg.ReadSYSHashFn,
-		ReadDataHash: cfg.ReadDataHashFn,
+		ReadSYSHash:    cfg.ReadSYSHashFn,
+		ReadDataHash:   cfg.ReadDataHashFn,
 		GetNEVMAddress: cfg.GetNEVMAddressFn,
-		Coinbase:    cfg.Coinbase,
-		BlockNumber: cfg.BlockNumber,
-		Time:        cfg.Time,
-		Difficulty:  cfg.Difficulty,
-		GasLimit:    cfg.GasLimit,
-		BaseFee:     cfg.BaseFee,
-		BlobBaseFee: cfg.BlobBaseFee,
-		Random:      cfg.Random,
+		Coinbase:       cfg.Coinbase,
+		BlockNumber:    cfg.BlockNumber,
+		Time:           cfg.Time,
+		Difficulty:     cfg.Difficulty,
+		GasLimit:       cfg.GasLimit,
+		BaseFee:        cfg.BaseFee,
+		BlobBaseFee:    cfg.BlobBaseFee,
+		Random:         cfg.Random,
 	}
 
 	evm := vm.NewEVM(blockContext, cfg.State, cfg.ChainConfig, cfg.EVMConfig)

@@ -18,6 +18,8 @@ func _() {
 	_ = x[BalanceIncreaseGasReturn-7]
 	_ = x[BalanceIncreaseDaoContract-8]
 	_ = x[BalanceDecreaseDaoAccount-9]
+	_ = x[BalanceIncreaseVaultManagerContract-100]
+	_ = x[BalanceDecreaseVaultManagerAccount-101]
 	_ = x[BalanceChangeTransfer-10]
 	_ = x[BalanceChangeTouchAccount-11]
 	_ = x[BalanceIncreaseSelfdestruct-12]
@@ -26,13 +28,24 @@ func _() {
 	_ = x[BalanceChangeRevert-15]
 }
 
-const _BalanceChangeReason_name = "UnspecifiedBalanceIncreaseRewardMineUncleBalanceIncreaseRewardMineBlockBalanceIncreaseWithdrawalBalanceIncreaseGenesisBalanceBalanceIncreaseRewardTransactionFeeBalanceDecreaseGasBuyBalanceIncreaseGasReturnBalanceIncreaseDaoContractBalanceDecreaseDaoAccountTransferTouchAccountBalanceIncreaseSelfdestructBalanceDecreaseSelfdestructBalanceDecreaseSelfdestructBurnRevert"
+const (
+	_BalanceChangeReason_name_0 = "UnspecifiedBalanceIncreaseRewardMineUncleBalanceIncreaseRewardMineBlockBalanceIncreaseWithdrawalBalanceIncreaseGenesisBalanceBalanceIncreaseRewardTransactionFeeBalanceDecreaseGasBuyBalanceIncreaseGasReturnBalanceIncreaseDaoContractBalanceDecreaseDaoAccountTransferTouchAccountBalanceIncreaseSelfdestructBalanceDecreaseSelfdestructBalanceDecreaseSelfdestructBurnRevert"
+	_BalanceChangeReason_name_1 = "BalanceIncreaseVaultManagerContractBalanceDecreaseVaultManagerAccount"
+)
 
-var _BalanceChangeReason_index = [...]uint16{0, 11, 41, 71, 96, 125, 160, 181, 205, 231, 256, 264, 276, 303, 330, 361, 367}
+var (
+	_BalanceChangeReason_index_0 = [...]uint16{0, 11, 41, 71, 96, 125, 160, 181, 205, 231, 256, 264, 276, 303, 330, 361, 367}
+	_BalanceChangeReason_index_1 = [...]uint8{0, 35, 69}
+)
 
 func (i BalanceChangeReason) String() string {
-	if i >= BalanceChangeReason(len(_BalanceChangeReason_index)-1) {
+	switch {
+	case i <= 15:
+		return _BalanceChangeReason_name_0[_BalanceChangeReason_index_0[i]:_BalanceChangeReason_index_0[i+1]]
+	case 100 <= i && i <= 101:
+		i -= 100
+		return _BalanceChangeReason_name_1[_BalanceChangeReason_index_1[i]:_BalanceChangeReason_index_1[i+1]]
+	default:
 		return "BalanceChangeReason(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _BalanceChangeReason_name[_BalanceChangeReason_index[i]:_BalanceChangeReason_index[i+1]]
 }

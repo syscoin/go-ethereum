@@ -51,6 +51,9 @@ const (
 	degradationWarnInterval = time.Minute
 )
 
+// SYSCOIN: preserve backend errors.Is matching while classifying atomic misses.
+var errKeyNotFound = fmt.Errorf("%w: %w", ethdb.ErrKeyNotFound, pebble.ErrNotFound)
+
 // Database is a persistent key-value store based on the pebble storage engine.
 // Apart from basic data storage functionality it also supports batch writes and
 // iterating over the keyspace in binary-alphabetical order.
@@ -182,9 +185,9 @@ func New(file string, cache int, handles int, namespace string, readonly bool, e
 		memTableSize = maxMemTableSize - 1
 	}
 	db := &Database{
-		fn:           file,
-		log:          logger,
-		quitChan:     make(chan chan error),
+		fn:       file,
+		log:      logger,
+		quitChan: make(chan chan error),
 		// SYSCOIN
 		writeOptions: &pebble.WriteOptions{Sync: false},
 	}
@@ -308,6 +311,10 @@ func (d *Database) Get(key []byte) ([]byte, error) {
 		return nil, pebble.ErrClosed
 	}
 	dat, closer, err := d.db.Get(key)
+	// SYSCOIN: only a genuine missing key is normalized; I/O errors are unchanged.
+	if err == pebble.ErrNotFound {
+		return nil, errKeyNotFound
+	}
 	if err != nil {
 		return nil, err
 	}

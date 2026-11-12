@@ -16,8 +16,10 @@ archives are published at https://geth.ethereum.org/downloads/.
 
 For prerequisites and detailed build instructions please read the [Installation Instructions](https://geth.ethereum.org/docs/getting-started/installing-geth).
 
-Building `geth` requires both a Go (version 1.23 or later) and a C compiler. You can install
-them using your favourite package manager. Once the dependencies are installed, run
+<!-- SYSCOIN: Keep compiler and platform requirements aligned with the build pins. -->
+Building `geth` requires a C compiler and Go 1.27.4. The build configuration pins
+that compiler; the Go 1.27 module directive enables its current compatibility
+defaults. Go 1.27 requires macOS 13 or later. Once the dependencies are installed, run
 
 ```shell
 make geth

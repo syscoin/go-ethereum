@@ -9,7 +9,8 @@ jobs:
       os: linux
       arch: amd64
       dist: focal
-      go: 1.24.x
+      # SYSCOIN: Run this job with the pinned patched Go compiler.
+      go: 1.27.4
       env:
         - docker
       services:
@@ -27,7 +28,8 @@ jobs:
       os: linux
       dist: focal
       sudo: required
-      go: 1.24.x
+      # SYSCOIN: Run this job with the pinned patched Go compiler.
+      go: 1.27.4
       env:
         - azure-linux
       git:
@@ -62,7 +64,8 @@ jobs:
       os: linux
       arch: amd64
       dist: focal
-      go: 1.24.x
+      # SYSCOIN: Run this job with the pinned patched Go compiler.
+      go: 1.27.4
       script:
         - travis_wait 45 go run build/ci.go test $TEST_PACKAGES
 
@@ -70,7 +73,8 @@ jobs:
       if: type = push
       os: linux
       dist: focal
-      go: 1.23.x
+      # SYSCOIN: Run this job with the pinned patched Go compiler.
+      go: 1.27.4
       script:
         - travis_wait 45 go run build/ci.go test $TEST_PACKAGES
 
@@ -79,7 +83,8 @@ jobs:
       if: type = cron || (type = push && tag ~= /^v[0-9]/)
       os: linux
       dist: focal
-      go: 1.24.x
+      # SYSCOIN: Run this job with the pinned patched Go compiler.
+      go: 1.27.4
       env:
         - ubuntu-ppa
       git:
@@ -95,7 +100,8 @@ jobs:
       if: type = cron
       os: linux
       dist: focal
-      go: 1.24.x
+      # SYSCOIN: Run this job with the pinned patched Go compiler.
+      go: 1.27.4
       env:
         - azure-purge
       git:
@@ -108,7 +114,8 @@ jobs:
       if: type = cron
       os: linux
       dist: focal
-      go: 1.24.x
+      # SYSCOIN: Run this job with the pinned patched Go compiler.
+      go: 1.27.4
       env:
         - racetests
       script:

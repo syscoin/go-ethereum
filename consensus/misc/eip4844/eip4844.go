@@ -50,7 +50,8 @@ func VerifyEIP4844Header(config *params.ChainConfig, parent, header *types.Heade
 		return fmt.Errorf("blob gas used %d exceeds maximum allowance %d", *header.BlobGasUsed, maxBlobGas)
 	}
 	if *header.BlobGasUsed%params.BlobTxBlobGasPerBlob != 0 {
-		return fmt.Errorf("blob gas used %d not a multiple of blob gas per blob %d", header.BlobGasUsed, params.BlobTxBlobGasPerBlob)
+		// SYSCOIN: Report the guarded gas value rather than its pointer.
+		return fmt.Errorf("blob gas used %d not a multiple of blob gas per blob %d", *header.BlobGasUsed, params.BlobTxBlobGasPerBlob)
 	}
 	// Verify the excessBlobGas is correct based on the parent header
 	expectedExcessBlobGas := CalcExcessBlobGas(config, parent, header.Time)

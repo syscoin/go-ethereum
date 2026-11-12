@@ -61,12 +61,42 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 		}
 	}
 
-	// Header validity is known at this point. Here we verify that uncles, transactions
-	// and withdrawals given in the block body match the header.
-	header := block.Header()
+	if err := ValidateNEVMPayload(block); err != nil {
+		return err
+	}
+	if err := validateBodySemantics(block); err != nil {
+		return err
+	}
 	if err := v.bc.engine.VerifyUncles(v.bc, block); err != nil {
 		return err
 	}
+
+	// Ancestor block must be known.
+	if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
+		if !v.bc.HasBlock(block.ParentHash(), block.NumberU64()-1) {
+			return consensus.ErrUnknownAncestor
+		}
+		return consensus.ErrPrunedAncestor
+	}
+	return nil
+}
+
+// ValidateNEVMPayload checks only body representation commitments. It does not
+// consult chain state, verify ancestry or execute transactions. Import uses this
+// same check once; recovery may invoke it separately for a replacement payload.
+func ValidateNEVMPayload(block *types.Block) error {
+	if block == nil {
+		return errors.New("empty block")
+	}
+	return types.MarkNEVMPayloadError(validateBodyCommitments(block), block)
+}
+
+// validateBodyCommitments checks the supplied body against its immutable header.
+// A failure describes mutable payload data, not permanent header invalidity.
+func validateBodyCommitments(block *types.Block) error {
+	// Header validity is known at this point. Here we verify that uncles, transactions
+	// and withdrawals given in the block body match the header.
+	header := block.Header()
 	if hash := types.CalcUncleHash(block.Uncles()); hash != header.UncleHash {
 		return fmt.Errorf("uncle root hash mismatch (header value %x, calculated %x)", header.UncleHash, hash)
 	}
@@ -89,11 +119,7 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 	}
 
 	// Blob transactions may be present after the Cancun fork.
-	var blobs int
 	for i, tx := range block.Transactions() {
-		// Count the number of blobs to validate against the header's blobGasUsed
-		blobs += len(tx.BlobHashes())
-
 		// If the tx is a blob tx, it must NOT have a sidecar attached to be valid in a block.
 		if tx.BlobTxSidecar() != nil {
 			return fmt.Errorf("unexpected blob sidecar in transaction at index %d", i)
@@ -103,36 +129,53 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 		// happens in state transition.
 	}
 
+	return nil
+}
+
+// validateBodySemantics runs only after the body's commitments and absence of
+// mutable sidecars are proven. Blob counts are then fixed by the committed txs.
+func validateBodySemantics(block *types.Block) error {
+	header := block.Header()
+	var blobs int
+	for _, tx := range block.Transactions() {
+		blobs += len(tx.BlobHashes())
+	}
 	// Check blob gas usage.
 	if header.BlobGasUsed != nil {
 		if want := *header.BlobGasUsed / params.BlobTxBlobGasPerBlob; uint64(blobs) != want { // div because the header is surely good vs the body might be bloated
-			return fmt.Errorf("blob gas used mismatch (header %v, calculated %v)", *header.BlobGasUsed, blobs*params.BlobTxBlobGasPerBlob)
+			return consensus.MarkInvalidBlock(fmt.Errorf("blob gas used mismatch (header %v, calculated %v)", *header.BlobGasUsed, blobs*params.BlobTxBlobGasPerBlob))
 		}
 	} else {
 		if blobs > 0 {
-			return errors.New("data blobs present in block body")
+			return consensus.MarkInvalidBlock(errors.New("data blobs present in block body"))
 		}
 	}
 
-	// Ancestor block must be known.
-	if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
-		if !v.bc.HasBlock(block.ParentHash(), block.NumberU64()-1) {
-			return consensus.ErrUnknownAncestor
-		}
-		return consensus.ErrPrunedAncestor
-	}
 	return nil
+}
+
+// invalidBlockExecutionError is used only at deterministic execution/validation
+// origins. A different body can share the same header hash, so prove its
+// commitments before allowing an external caller to permanently reject it.
+func invalidBlockExecutionError(block *types.Block, err error) error {
+	if validateBodyCommitments(block) != nil {
+		return err
+	}
+	return consensus.MarkInvalidBlock(err)
 }
 
 // ValidateState validates the various changes that happen after a state transition,
 // such as amount of used gas, the receipt roots and the state root itself.
 func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateDB, res *ProcessResult, stateless bool) error {
+	if err := statedb.Error(); err != nil {
+		return err
+	}
 	if res == nil {
 		return errors.New("nil ProcessResult value")
 	}
 	header := block.Header()
 	if block.GasUsed() != res.GasUsed {
-		return fmt.Errorf("invalid gas used (remote: %d local: %d)", block.GasUsed(), res.GasUsed)
+		return invalidBlockExecutionError(block, fmt.Errorf("invalid gas used (remote: %d local: %d)", block.GasUsed(), res.GasUsed))
 	}
 	// Validate the received block's bloom with the one derived from the generated receipts.
 	// For valid blocks this should always validate to true.
@@ -142,7 +185,7 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 	// everything.
 	rbloom := types.MergeBloom(res.Receipts)
 	if rbloom != header.Bloom {
-		return fmt.Errorf("invalid bloom (remote: %x  local: %x)", header.Bloom, rbloom)
+		return invalidBlockExecutionError(block, fmt.Errorf("invalid bloom (remote: %x  local: %x)", header.Bloom, rbloom))
 	}
 	// In stateless mode, return early because the receipt and state root are not
 	// provided through the witness, rather the cross validator needs to return it.
@@ -152,21 +195,25 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 	// The receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, Rn]]))
 	receiptSha := types.DeriveSha(res.Receipts, trie.NewStackTrie(nil))
 	if receiptSha != header.ReceiptHash {
-		return fmt.Errorf("invalid receipt root hash (remote: %x local: %x)", header.ReceiptHash, receiptSha)
+		return invalidBlockExecutionError(block, fmt.Errorf("invalid receipt root hash (remote: %x local: %x)", header.ReceiptHash, receiptSha))
 	}
 	// Validate the parsed requests match the expected header value.
 	if header.RequestsHash != nil {
 		reqhash := types.CalcRequestsHash(res.Requests)
 		if reqhash != *header.RequestsHash {
-			return fmt.Errorf("invalid requests hash (remote: %x local: %x)", *header.RequestsHash, reqhash)
+			return invalidBlockExecutionError(block, fmt.Errorf("invalid requests hash (remote: %x local: %x)", *header.RequestsHash, reqhash))
 		}
 	} else if res.Requests != nil {
-		return errors.New("block has requests before prague fork")
+		return invalidBlockExecutionError(block, errors.New("block has requests before prague fork"))
 	}
 	// Validate the state root against the received state root and throw
 	// an error if they don't match.
-	if root := statedb.IntermediateRoot(v.config.IsEIP158(header.Number)); header.Root != root {
-		return fmt.Errorf("invalid merkle root (remote: %x local: %x) dberr: %w", header.Root, root, statedb.Error())
+	root := statedb.IntermediateRoot(v.config.IsEIP158(header.Number))
+	if err := statedb.Error(); err != nil {
+		return err
+	}
+	if header.Root != root {
+		return invalidBlockExecutionError(block, fmt.Errorf("invalid merkle root (remote: %x local: %x)", header.Root, root))
 	}
 	return nil
 }

@@ -560,6 +560,7 @@ type dummyChain struct {
 func (d *dummyChain) Engine() consensus.Engine                        { return nil }
 func (d *dummyChain) GetHeader(h common.Hash, n uint64) *types.Header { return nil }
 func (d *dummyChain) Config() *params.ChainConfig                     { return d.config }
+
 // SYSCOIN
 func (d *dummyChain) ReadSYSHash(uint64) []byte {
 	return []byte{}

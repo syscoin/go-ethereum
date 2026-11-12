@@ -19,6 +19,7 @@ package dbtest
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"slices"
 	"sort"
 	"strconv"
@@ -30,6 +31,32 @@ import (
 // TestDatabaseSuite runs a suite of tests against a KeyValueStore database
 // implementation.
 func TestDatabaseSuite(t *testing.T, New func() ethdb.KeyValueStore) {
+	// SYSCOIN: exercise the missing-key contract on each production backend.
+	t.Run("MissingKeyClassification", func(t *testing.T) {
+		db := New()
+		key := []byte("absent")
+		if _, err := db.Get(key); !errors.Is(err, ethdb.ErrKeyNotFound) {
+			t.Fatalf("missing key: %v", err)
+		}
+		if err := db.Put(key, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Get(key); err != nil {
+			t.Fatalf("empty value is not missing: %v", err)
+		}
+		if err := db.Delete(key); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Get(key); !errors.Is(err, ethdb.ErrKeyNotFound) {
+			t.Fatalf("deleted key: %v", err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Get(key); err == nil || errors.Is(err, ethdb.ErrKeyNotFound) {
+			t.Fatalf("closed database classified as absence: %v", err)
+		}
+	})
 	t.Run("Iterator", func(t *testing.T) {
 		tests := []struct {
 			content map[string]string

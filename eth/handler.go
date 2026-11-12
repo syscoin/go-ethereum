@@ -455,6 +455,13 @@ func (h *handler) Start(maxPeers int) {
 func (h *handler) Stop() {
 	if !h.running.Load() {
 		log.Warn("Handler not started or already stopped")
+		h.downloader.Terminate()
+		// Release protocol admission even if delayed startup never reached Start.
+		select {
+		case <-h.quitSync:
+		default:
+			close(h.quitSync)
+		}
 		return
 	}
 	h.txsSub.Unsubscribe() // quits txBroadcastLoop

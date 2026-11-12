@@ -54,7 +54,17 @@ func NewStateProcessor(config *params.ChainConfig, chain *HeaderChain) *StatePro
 // Process returns the receipts and logs accumulated during the process and
 // returns the amount of gas that was used in the process. If any of the
 // transactions failed to execute due to insufficient gas it will return an error.
-func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config) (*ProcessResult, error) {
+func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config) (result *ProcessResult, resultErr error) {
+	chain := &executionChainContext{HeaderChain: p.chain}
+	defer func() {
+		// Local read failures take precedence even when they caused an apparent
+		// nonce, balance, gas or state-root consensus mismatch.
+		if err := statedb.Error(); err != nil {
+			result, resultErr = nil, err
+		} else if chain.err != nil {
+			result, resultErr = nil, chain.err
+		}
+	}()
 	var (
 		receipts    types.Receipts
 		usedGas     = new(uint64)
@@ -77,7 +87,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	if hooks := cfg.Tracer; hooks != nil {
 		tracingStateDB = state.NewHookedState(statedb, hooks)
 	}
-	context = NewEVMBlockContext(header, p.chain, nil)
+	context = NewEVMBlockContext(header, chain, nil)
 	evm := vm.NewEVM(context, tracingStateDB, p.config, cfg)
 
 	if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
@@ -91,13 +101,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	for i, tx := range block.Transactions() {
 		msg, err := TransactionToMessage(tx, signer, header.BaseFee)
 		if err != nil {
-			return nil, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
+			return nil, invalidBlockExecutionError(block, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err))
 		}
 		statedb.SetTxContext(tx.Hash(), i)
 
 		receipt, err := ApplyTransactionWithEVM(msg, gp, statedb, blockNumber, blockHash, tx, usedGas, evm)
 		if err != nil {
-			return nil, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
+			return nil, invalidBlockExecutionError(block, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err))
 		}
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)

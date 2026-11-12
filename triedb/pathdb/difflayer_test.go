@@ -133,7 +133,7 @@ func BenchmarkPersist(b *testing.B) {
 		if !ok {
 			break
 		}
-		dl.persist(false)
+		dl.persist(false, nil) // SYSCOIN: this layer-only fixture has no recovery journal.
 	}
 }
 

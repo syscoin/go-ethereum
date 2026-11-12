@@ -203,7 +203,8 @@ func rtypeToStructType(typ reflect.Type, rec map[reflect.Type]*rlpstruct.Type) *
 		IsDecoder: typ.Implements(decoderInterface),
 	}
 	rec[typ] = t
-	if k == reflect.Array || k == reflect.Slice || k == reflect.Ptr {
+	// SYSCOIN: Use the canonical kind name for Go 1.27 vet.
+	if k == reflect.Array || k == reflect.Slice || k == reflect.Pointer {
 		t.Elem = rtypeToStructType(typ.Elem(), rec)
 	}
 	return t

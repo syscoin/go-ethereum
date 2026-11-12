@@ -79,19 +79,9 @@ func (bc *BlockChain) CurrentSnapBlock() *types.Header {
 // CurrentFinalBlock retrieves the current finalized block of the canonical
 // chain. The block is retrieved from the blockchain's internal cache.
 func (bc *BlockChain) CurrentFinalBlock() *types.Header {
-	// SYSCOIN
+	// SYSCOIN: only Core's checked, runtime projection establishes finality.
 	if bc.Config().SyscoinBlock != nil {
-		// chainlock
-		header := bc.currentBlock.Load()
-		blockNum := header.Number.Uint64()
-		// safe should be the last chainlock (every 5 blocks)
-		lookback := blockNum - (blockNum % 5) - 5
-		if lookback < 5 {
-			lookback = 5
-		}
-		// finalized should be previous chainlock
-		lookback -= 5
-		return bc.GetHeaderByNumber(lookback)
+		return bc.currentSyscoinFinalBlock.Load()
 	}
 	return bc.currentFinalBlock.Load()
 }
@@ -99,17 +89,9 @@ func (bc *BlockChain) CurrentFinalBlock() *types.Header {
 // CurrentSafeBlock retrieves the current safe block of the canonical
 // chain. The block is retrieved from the blockchain's internal cache.
 func (bc *BlockChain) CurrentSafeBlock() *types.Header {
-	// SYSCOIN
+	// SYSCOIN: an accepted ChainLock supplies the same guarantee for both tags.
 	if bc.Config().SyscoinBlock != nil {
-		// chainlock
-		header := bc.currentBlock.Load()
-		blockNum := header.Number.Uint64()
-		// safe should be the last chainlock (every 5 blocks)
-		lookback := blockNum - (blockNum % 5) - 5
-		if lookback < 5 {
-			lookback = 5
-		}
-		return bc.GetHeaderByNumber(lookback)
+		return bc.currentSyscoinFinalBlock.Load()
 	}
 	return bc.currentSafeBlock.Load()
 }
@@ -536,6 +518,7 @@ func (bc *BlockChain) ReadBTCCheckpointHashByIndex(idx uint64) []byte {
 func (bc *BlockChain) GetNEVMAddress(address common.Address) []byte {
 	return bc.hc.GetNEVMAddress(address)
 }
+
 func (bc *BlockChain) StoreNEVMAddress(db ethdb.KeyValueWriter, address common.Address, height uint32) {
 	bc.hc.StoreNEVMAddress(db, address, height)
 }
@@ -552,8 +535,8 @@ func (bc *BlockChain) WriteSYSHash(db ethdb.KeyValueWriter, sysBlockhash string,
 }
 
 // SYSCOIN
-func (bc *BlockChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btcHash common.Hash) {
-	bc.hc.WriteBTCCheckpoint(db, n, btcHash)
+func (bc *BlockChain) WriteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64, btcHash common.Hash) error {
+	return bc.hc.WriteBTCCheckpoint(db, n, btcHash)
 }
 func (bc *BlockChain) WriteDataHashes(db ethdb.KeyValueWriter, n uint64, dataHashes []*common.Hash) {
 	bc.hc.WriteDataHashes(db, n, dataHashes)
@@ -561,11 +544,12 @@ func (bc *BlockChain) WriteDataHashes(db ethdb.KeyValueWriter, n uint64, dataHas
 func (bc *BlockChain) DeleteDataHashes(db ethdb.KeyValueWriter, n uint64) {
 	bc.hc.DeleteDataHashes(db, n)
 }
+
 func (bc *BlockChain) DeleteSYSHash(db ethdb.KeyValueWriter, n uint64) {
 	bc.hc.DeleteSYSHash(db, n)
 }
 
 // SYSCOIN
-func (bc *BlockChain) DeleteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64) {
-	bc.hc.DeleteBTCCheckpoint(db, n)
+func (bc *BlockChain) DeleteBTCCheckpoint(db ethdb.KeyValueWriter, n uint64) error {
+	return bc.hc.DeleteBTCCheckpoint(db, n)
 }

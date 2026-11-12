@@ -55,20 +55,38 @@ var (
 	signer = types.LatestSignerForChainID(gspec.Config.ChainID)
 )
 
-func initBackend(withLocal bool) *EthAPIBackend {
+// SYSCOIN: Tie background fixture workers and databases to the test lifetime.
+func initBackend(t *testing.T, withLocal bool) *EthAPIBackend {
+	t.Helper()
 	var (
 		// Create a database pre-initialize with a genesis block
 		db     = rawdb.NewMemoryDatabase()
 		engine = beacon.New(ethash.NewFaker())
 	)
-	chain, _ := core.NewBlockChain(db, nil, gspec, nil, engine, vm.Config{}, nil)
+	t.Cleanup(func() {
+		engine.Close()
+		db.Close()
+	})
+	chain, err := core.NewBlockChain(db, nil, gspec, nil, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(chain.Stop)
 
 	txconfig := legacypool.DefaultConfig
 	txconfig.Journal = "" // Don't litter the disk with test journals
 
 	blobPool := blobpool.New(blobpool.Config{Datadir: ""}, chain, nil)
 	legacyPool := legacypool.New(txconfig, chain)
-	txpool, _ := txpool.New(txconfig.PriceLimit, chain, []txpool.SubPool{legacyPool, blobPool})
+	txpool, err := txpool.New(txconfig.PriceLimit, chain, []txpool.SubPool{legacyPool, blobPool})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := txpool.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 
 	eth := &Ethereum{
 		blockchain: chain,
@@ -132,7 +150,7 @@ func TestSendTx(t *testing.T) {
 }
 
 func testSendTx(t *testing.T, withLocal bool) {
-	b := initBackend(withLocal)
+	b := initBackend(t, withLocal)
 
 	txA := pricedSetCodeTx(0, 250000, uint256.NewInt(params.GWei), uint256.NewInt(params.GWei), key, []unsignedAuth{
 		{
@@ -140,7 +158,17 @@ func testSendTx(t *testing.T, withLocal bool) {
 			key:   key,
 		},
 	})
-	b.SendTx(context.Background(), txA)
+	// SYSCOIN: SendTx promotes asynchronously. Establish the pending delegation
+	// before checking its in-flight limit, rather than racing the nonce-gap check.
+	if err := b.SendTx(context.Background(), txA); err != nil {
+		t.Fatalf("Sending initial transaction: %v", err)
+	}
+	if err := b.eth.txPool.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if status := b.eth.txPool.Status(txA.Hash()); status != txpool.TxStatusPending {
+		t.Fatalf("Initial transaction status = %v, want pending", status)
+	}
 
 	txB := makeTx(1, nil, nil, key)
 	err := b.SendTx(context.Background(), txB)

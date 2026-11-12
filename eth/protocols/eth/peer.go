@@ -18,11 +18,14 @@ package eth
 
 import (
 	"math/rand"
+	"sync" // SYSCOIN: Bound repeated malformed-header logging.
+	"time" // SYSCOIN: Expire per-peer response reservations.
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/p2p"
+	"github.com/ethereum/go-ethereum/p2p/tracker" // SYSCOIN: Track concrete request and response limits.
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -53,9 +56,11 @@ type Peer struct {
 	txBroadcast chan []common.Hash // Channel used to queue transaction propagation requests
 	txAnnounce  chan []common.Hash // Channel used to queue transaction announcement requests
 
-	reqDispatch chan *request  // Dispatch channel to send requests and track then until fulfillment
-	reqCancel   chan *cancel   // Dispatch channel to cancel pending requests and untrack them
-	resDispatch chan *response // Dispatch channel to fulfil pending requests and untrack them
+	reqDispatch chan *request            // Dispatch channel to send requests and track then until fulfillment
+	reqCancel   chan *cancel             // Dispatch channel to cancel pending requests and untrack them
+	resDispatch chan *response           // Dispatch channel to fulfil pending requests and untrack them
+	responses   *tracker.ResponseTracker // SYSCOIN: Active response limits, independent of metrics
+	skipWarning sync.Once                // SYSCOIN: Bound repeated malformed-header warnings per connection
 
 	term chan struct{} // Termination channel to stop the broadcasters
 }
@@ -74,6 +79,7 @@ func NewPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter, txpool TxPool) *Pe
 		reqDispatch: make(chan *request),
 		reqCancel:   make(chan *cancel),
 		resDispatch: make(chan *response),
+		responses:   tracker.NewResponseTracker(5 * time.Minute), // SYSCOIN: Bound response lifetimes.
 		txpool:      txpool,
 		term:        make(chan struct{}),
 	}
@@ -337,10 +343,19 @@ func (p *Peer) RequestTxs(hashes []common.Hash) error {
 	id := rand.Uint64()
 
 	requestTracker.Track(p.id, p.version, GetPooledTransactionsMsg, PooledTransactionsMsg, id)
-	return p2p.Send(p.rw, GetPooledTransactionsMsg, &GetPooledTransactionsPacket{
+	// SYSCOIN BEGIN: Track pooled-transaction response limits and forget failed sends.
+	if err := p.responses.Track(id, PooledTransactionsMsg, tracker.ResponseLimits{Items: len(hashes), Bytes: maxMessageSize}); err != nil {
+		return err
+	}
+	err := p2p.Send(p.rw, GetPooledTransactionsMsg, &GetPooledTransactionsPacket{
 		RequestId:                    id,
 		GetPooledTransactionsRequest: hashes,
 	})
+	if err != nil {
+		p.responses.Forget(id)
+	}
+	return err
+	// SYSCOIN END: Track pooled-transaction response limits and forget failed sends.
 }
 
 // knownCache is a cache for known hashes.
