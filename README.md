@@ -18,8 +18,8 @@ For prerequisites and detailed build instructions please read the [Installation 
 
 <!-- SYSCOIN: Keep compiler and platform requirements aligned with the build pins. -->
 Building `geth` requires a C compiler and Go 1.27.4. The build configuration pins
-that compiler; the Go 1.23 language directive preserves compatibility defaults.
-Go 1.27 requires macOS 13 or later. Once the dependencies are installed, run
+that compiler; the Go 1.27 module directive enables its current compatibility
+defaults. Go 1.27 requires macOS 13 or later. Once the dependencies are installed, run
 
 ```shell
 make geth

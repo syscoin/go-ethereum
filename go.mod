@@ -1,6 +1,7 @@
 module github.com/ethereum/go-ethereum
 
-go 1.23.0
+// SYSCOIN: Enable Go 1.27 language and runtime compatibility defaults.
+go 1.27.0
 
 // SYSCOIN: Pin the patched compiler independently of the module language version.
 toolchain go1.27.4
