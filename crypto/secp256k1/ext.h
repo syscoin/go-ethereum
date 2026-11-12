@@ -109,10 +109,12 @@ int secp256k1_ext_scalar_mul(const secp256k1_context* ctx, unsigned char *point,
 	ARG_CHECK(scalar != NULL);
 	(void)ctx;
 
+	// SYSCOIN BEGIN: Reject field-element decoding failures before scalar multiplication.
 	if (!secp256k1_fe_set_b32_limit(&feX, point) ||
 		!secp256k1_fe_set_b32_limit(&feY, point+32)) {
 		return 0;
 	}
+	// SYSCOIN END: Reject field-element decoding failures before scalar multiplication.
 	secp256k1_ge_set_xy(&ge, &feX, &feY);
 	secp256k1_scalar_set_b32(&s, scalar, &overflow);
 	if (overflow || secp256k1_scalar_is_zero(&s)) {

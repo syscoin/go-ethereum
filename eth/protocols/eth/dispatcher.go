@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/tracker"
+	"github.com/ethereum/go-ethereum/p2p/tracker" // SYSCOIN: Enforce per-request response budgets.
 )
 
 var (
@@ -139,6 +139,7 @@ func (p *Peer) dispatchRequest(req *Request) error {
 
 // dispatchResponse fulfils a pending request and delivers it to the requested
 // sink.
+// SYSCOIN: Propagate deferred metadata-validation errors from response dispatch.
 func (p *Peer) dispatchResponse(res *Response, metadata func() (interface{}, error)) error {
 	resOp := &response{
 		res:  res,
@@ -153,18 +154,22 @@ func (p *Peer) dispatchResponse(res *Response, metadata func() (interface{}, err
 		if err := <-resOp.fail; err != nil {
 			return nil
 		}
+		// SYSCOIN BEGIN: Skip metadata work for responses cancelled before dispatch acceptance.
 		select {
 		case <-res.Req.cancel:
 			return nil
 		default:
 		}
+		// SYSCOIN END: Skip metadata work for responses cancelled before dispatch acceptance.
 		// Request was accepted, run any postprocessing step to generate metadata
 		// on the receiver thread, not the sink thread
 		if metadata != nil {
+			// SYSCOIN BEGIN: Reject metadata-validation failures before delivering the response.
 			var err error
 			if res.Meta, err = metadata(); err != nil {
 				return err
 			}
+			// SYSCOIN END: Reject metadata-validation failures before delivering the response.
 		}
 		// Deliver the filled out response and wait until it's handled. This
 		// path is a bit funky as Go's select has no order, so if a response
@@ -205,6 +210,7 @@ func (p *Peer) dispatcher() {
 			req := reqOp.req
 			req.Sent = time.Now()
 
+			// SYSCOIN BEGIN: Record response budgets before sending requests and release them on send failure.
 			limits := tracker.ResponseLimits{Bytes: maxMessageSize}
 			switch data := req.data.(type) {
 			case *GetBlockHeadersPacket:
@@ -224,6 +230,7 @@ func (p *Peer) dispatcher() {
 			if err != nil {
 				p.responses.Forget(req.id)
 			}
+			// SYSCOIN END: Record response budgets before sending requests and release them on send failure.
 			reqOp.fail <- err
 
 			if err == nil {
@@ -240,7 +247,7 @@ func (p *Peer) dispatcher() {
 			}
 			// Stop tracking the request
 			delete(pending, cancelOp.id)
-			p.responses.Cancel(cancelOp.id)
+			p.responses.Cancel(cancelOp.id) // SYSCOIN: Preserve cancellation state for late responses.
 			cancelOp.fail <- nil
 
 		case resOp := <-p.resDispatch:

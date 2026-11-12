@@ -164,12 +164,15 @@ type btCurve struct {
 	*secp256k1.KoblitzCurve
 }
 
+// SYSCOIN BEGIN: Apply the canonical coordinate checks in pure-Go builds too.
 func (curve btCurve) IsOnCurve(x, y *big.Int) bool {
 	if x == nil || y == nil || x.Sign() < 0 || y.Sign() < 0 || x.Cmp(secp256k1.Params().P) >= 0 || y.Cmp(secp256k1.Params().P) >= 0 {
 		return false
 	}
 	return curve.KoblitzCurve.IsOnCurve(x, y)
 }
+
+// SYSCOIN END: Apply the canonical coordinate checks in pure-Go builds too.
 
 // Marshal converts a point given as (x, y) into a byte slice.
 func (curve btCurve) Marshal(x, y *big.Int) []byte {

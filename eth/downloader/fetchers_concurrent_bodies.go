@@ -87,6 +87,7 @@ func (q *bodyQueue) request(peer *peerConnection, req *fetchRequest, resCh chan 
 
 // deliver is responsible for taking a generic response packet from the concurrent
 // fetcher, unpacking the body data and delivering it to the downloader's queue.
+// SYSCOIN BEGIN: Adapt upstream body delivery for raw payloads and decoded in-process callers.
 func (q *bodyQueue) deliver(peer *peerConnection, packet *eth.Response) (int, error) {
 	hashsets := packet.Meta.([][]common.Hash) // {txs hashes, uncle hashes, withdrawal hashes}
 	var count, accepted int
@@ -113,3 +114,5 @@ func (q *bodyQueue) deliver(peer *peerConnection, packet *eth.Response) (int, er
 	}
 	return accepted, err
 }
+
+// SYSCOIN END: Adapt upstream body delivery for raw payloads and decoded in-process callers.

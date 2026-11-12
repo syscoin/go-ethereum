@@ -16,6 +16,7 @@
 
 //go:build !gofuzz && cgo
 
+// SYSCOIN: Security regression coverage.
 package secp256k1
 
 import (

@@ -701,6 +701,7 @@ func testGetPooledTransaction(t *testing.T, blobTx bool) {
 }
 
 // Tests that unknown hashes count toward the pooled transaction lookup limit.
+// SYSCOIN BEGIN: Cover the lookup budget including unknown transaction hashes.
 func TestGetPooledTransactionsLookupCap(t *testing.T) {
 	backend := newTestBackendWithGenerator(0, true, false, nil)
 	defer backend.close()
@@ -730,3 +731,5 @@ func TestGetPooledTransactionsLookupCap(t *testing.T) {
 		t.Errorf("transaction beyond lookup cap served: have %d hashes and %d transactions", len(hashes), len(txs))
 	}
 }
+
+// SYSCOIN END: Cover the lookup budget including unknown transaction hashes.

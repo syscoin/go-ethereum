@@ -1,3 +1,4 @@
+// SYSCOIN: Security regression coverage.
 package eth
 
 import (

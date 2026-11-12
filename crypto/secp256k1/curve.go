@@ -92,9 +92,11 @@ func (bitCurve *BitCurve) Params() *elliptic.CurveParams {
 
 // IsOnCurve returns true if the given (x,y) lies on the BitCurve.
 func (bitCurve *BitCurve) IsOnCurve(x, y *big.Int) bool {
+	// SYSCOIN BEGIN: Reject coordinates outside the canonical field range.
 	if x == nil || y == nil || x.Sign() < 0 || y.Sign() < 0 || x.Cmp(bitCurve.P) >= 0 || y.Cmp(bitCurve.P) >= 0 {
 		return false
 	}
+	// SYSCOIN END: Reject coordinates outside the canonical field range.
 
 	// y² = x³ + b
 	y2 := new(big.Int).Mul(y, y) //y²

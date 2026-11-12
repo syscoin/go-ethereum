@@ -24,7 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/p2p/tracker"
+	"github.com/ethereum/go-ethereum/p2p/tracker" // SYSCOIN: Replace eager decoding with bounded response decoding.
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -109,9 +109,11 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 				next    = current + query.Skip + 1
 			)
 			if next <= current {
+				// SYSCOIN BEGIN: Log repeated header-overflow attempts only once per connection.
 				peer.skipWarning.Do(func() {
 					peer.Log().Warn("GetBlockHeaders skip overflow", "current", current, "skip", query.Skip, "next", next)
 				})
+				// SYSCOIN END: Log repeated header-overflow attempts only once per connection.
 				unknown = true
 			} else {
 				if header := chain.GetHeaderByNumber(next); header != nil {
@@ -292,6 +294,7 @@ func handleNewBlock(backend Backend, msg Decoder, peer *Peer) error {
 	return errors.New("block broadcasts disallowed") // We dropped support for non-merge networks
 }
 
+// SYSCOIN BEGIN: Retain upstream response dispatch while bounding decoding and delaying body/receipt expansion.
 func handleBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
 	// A batch of headers arrived to one of our previous requests
 	res := new(BlockHeadersPacket)
@@ -372,6 +375,8 @@ func handleReceipts(backend Backend, msg Decoder, peer *Peer) error {
 	})
 }
 
+// SYSCOIN END: Retain upstream response dispatch while bounding decoding and delaying body/receipt expansion.
+
 func handleNewPooledTransactionHashes(backend Backend, msg Decoder, peer *Peer) error {
 	// New transaction announcement arrived, make sure we have
 	// a valid and fresh chain to handle them
@@ -379,6 +384,7 @@ func handleNewPooledTransactionHashes(backend Backend, msg Decoder, peer *Peer) 
 		return nil
 	}
 	ann := new(NewPooledTransactionHashesPacket)
+	// SYSCOIN: Preflight announcement list sizes before allocating typed entries.
 	if err := msg.Decode(&transactionAnnouncementsDecoder{ann}); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
@@ -409,6 +415,7 @@ func answerGetPooledTransactions(backend Backend, query GetPooledTransactionsReq
 		hashes []common.Hash
 		txs    []rlp.RawValue
 	)
+	// SYSCOIN: Bound lookup work even when requested transaction hashes are unknown.
 	for i, hash := range query {
 		if bytes >= softResponseLimit || i >= maxPooledTxServe {
 			break
@@ -432,6 +439,7 @@ func handleTransactions(backend Backend, msg Decoder, peer *Peer) error {
 	}
 	// Transactions can be processed, parse all of them and deliver to the pool
 	var txs TransactionsPacket
+	// SYSCOIN: Bound unsolicited transaction count before typed decoding.
 	if err := msg.Decode(&tracker.ListDecoder{Items: maxTransactionAnnouncements, Bytes: maxMessageSize, Value: &txs}); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
@@ -452,6 +460,7 @@ func handlePooledTransactions(backend Backend, msg Decoder, peer *Peer) error {
 	}
 	// Transactions can be processed, parse all of them and deliver to the pool
 	var txs PooledTransactionsPacket
+	// SYSCOIN: Require a live bounded request before decoding pooled transactions.
 	if cancelled, err := decodeResponse(msg, peer, PooledTransactionsMsg, &txs.RequestId, &txs.PooledTransactionsResponse); cancelled {
 		return nil
 	} else if err != nil {
@@ -469,8 +478,11 @@ func handlePooledTransactions(backend Backend, msg Decoder, peer *Peer) error {
 	return backend.Handle(peer, &txs.PooledTransactionsResponse)
 }
 
+// SYSCOIN BEGIN: Apply the tracked byte, count and cancellation limits before typed decoding.
 func decodeResponse(msg Decoder, peer *Peer, code uint64, id *uint64, values ...interface{}) (bool, error) {
 	decoder := tracker.ResponseDecoder{Tracker: peer.responses, Code: code, ID: id, Values: values}
 	err := msg.Decode(&decoder)
 	return decoder.Cancelled, err
 }
+
+// SYSCOIN END: Apply the tracked byte, count and cancellation limits before typed decoding.

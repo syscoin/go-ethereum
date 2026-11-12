@@ -452,6 +452,7 @@ func TestUDPv4_successfulPing(t *testing.T) {
 }
 
 // This test checks that pings from unbonded nodes do not feed the endpoint predictor.
+// SYSCOIN BEGIN: Cover endpoint statements from unbonded and bonded peers.
 func TestUDPv4_pingEndpointStatementRequiresBond(t *testing.T) {
 	test := newUDPTest(t)
 	defer test.close()
@@ -485,6 +486,8 @@ func TestUDPv4_pingEndpointStatementRequiresBond(t *testing.T) {
 		t.Fatalf("local endpoint not updated by bonded pings: %v", ip)
 	}
 }
+
+// SYSCOIN END: Cover endpoint statements from unbonded and bonded peers.
 
 // This test checks that EIP-868 requests work.
 func TestUDPv4_EIP868(t *testing.T) {

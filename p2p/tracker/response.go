@@ -6,6 +6,7 @@
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+// SYSCOIN: Bounded peer-response decoding and validation.
 package tracker
 
 import (

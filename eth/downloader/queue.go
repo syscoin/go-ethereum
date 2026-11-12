@@ -35,7 +35,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/rlp" // SYSCOIN: Decode receipts only after root validation.
 )
 
 const (
@@ -556,6 +556,7 @@ func (q *queue) expire(peer string, pendPool map[string]*fetchRequest, taskQueue
 	return len(req.Headers)
 }
 
+// SYSCOIN BEGIN: Retain upstream root and body checks while deferring nested decoding until authentication.
 // DeliverBodies injects a block body retrieval response into the results queue.
 // The method returns the number of blocks bodies accepted from the delivery and
 // also wakes any threads waiting for data delivery.
@@ -697,6 +698,8 @@ func (q *queue) deliverReceipts(id string, count int, receiptListHashes []common
 	return q.deliver(id, q.receiptTaskPool, q.receiptTaskQueue, q.receiptPendPool,
 		receiptReqTimer, receiptInMeter, receiptDropMeter, count, validate, reconstruct)
 }
+
+// SYSCOIN END: Retain upstream root and body checks while deferring nested decoding until authentication.
 
 // deliver injects a data retrieval response into the results queue.
 //

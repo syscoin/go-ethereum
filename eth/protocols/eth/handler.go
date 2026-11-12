@@ -50,9 +50,11 @@ const (
 	// be softResponseLimit.
 	maxReceiptsServe = 1024
 
+	// SYSCOIN BEGIN: Bound pooled-transaction lookup work independently of response bytes.
 	// maxPooledTxServe bounds pool lookups, including unknown hashes which do
 	// not contribute to the response size.
 	maxPooledTxServe = 4096
+	// SYSCOIN END: Bound pooled-transaction lookup work independently of response bytes.
 )
 
 // Handler is a callback to invoke from an outside runner after the boilerplate

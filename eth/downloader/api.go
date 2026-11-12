@@ -181,6 +181,7 @@ type SyncStatusSubscription struct {
 func (s *SyncStatusSubscription) Unsubscribe() {
 	s.unsubOnce.Do(func() {
 		req := uninstallSyncSubscriptionRequest{s.c, make(chan interface{})}
+		// SYSCOIN BEGIN: Drain status events while unsubscribing to avoid a shutdown deadlock.
 	uninstallLoop:
 		for {
 			// Send the uninstall request while also consuming events from the
@@ -201,6 +202,7 @@ func (s *SyncStatusSubscription) Unsubscribe() {
 		// which the caller will probably stop reading or close right after
 		// this method returns.
 		<-req.uninstalled
+		// SYSCOIN END: Drain status events while unsubscribing to avoid a shutdown deadlock.
 	})
 }
 

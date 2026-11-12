@@ -580,6 +580,7 @@ func (pool *LegacyPool) ValidateTxBasics(tx *types.Transaction) error {
 // validateTx checks whether a transaction is valid according to the consensus
 // rules and adheres to some heuristic limits of the local node (price and size).
 func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
+	// SYSCOIN BEGIN: Include queued-prefix costs in upstream stateful validation.
 	// Charge the queued prefix through the candidate nonce. Higher-nonce
 	// transactions can be pruned after a successful insertion, allowing a
 	// lower nonce to fill a gap without trusting a prior batch boundary.
@@ -617,6 +618,7 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction) error {
 			return nil
 		},
 	}
+	// SYSCOIN END: Include queued-prefix costs in upstream stateful validation.
 	if err := txpool.ValidateTransactionWithState(tx, pool.signer, opts); err != nil {
 		return err
 	}
@@ -691,6 +693,7 @@ func (pool *LegacyPool) validateAuth(tx *types.Transaction) error {
 // longer fit after inserting tx. Lower nonces have priority, but a costly
 // future transaction cannot reserve the balance ahead of a cheaper one after
 // it. This lets gap fills retain useful later transactions.
+// SYSCOIN BEGIN: Determine the affordable queued suffix before mutating the pool.
 func (pool *LegacyPool) unaffordableQueueAfter(addr common.Address, tx *types.Transaction) types.Transactions {
 	remaining := pool.currentState.GetBalance(addr).ToBig()
 	pendingReplacement := false
@@ -725,6 +728,8 @@ func (pool *LegacyPool) unaffordableQueueAfter(addr common.Address, tx *types.Tr
 	return drops
 }
 
+// SYSCOIN END: Determine the affordable queued suffix before mutating the pool.
+
 // add validates a transaction and inserts it into the non-executable queue for later
 // pending promotion and execution. If the transaction is a replacement for an already
 // pending or queued one, it overwrites the previous transaction if its price is higher.
@@ -745,6 +750,7 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 	}
 	// already validated by this point
 	from, _ := types.Sender(pool.signer, tx)
+	// SYSCOIN BEGIN: Validate replacement pricing and account for its own removable slots.
 	// Check replacement pricing before making room for the transaction. A
 	// rejected replacement must not evict transactions from other accounts.
 	var old *types.Transaction
@@ -769,6 +775,7 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 	for _, old := range queueDrops {
 		dropSlots += numSlots(old)
 	}
+	// SYSCOIN END: Validate replacement pricing and account for its own removable slots.
 
 	// If the address is not yet known, request exclusivity to track the account
 	// only by this subpool until all transactions are evicted
@@ -793,18 +800,22 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 		}()
 	}
 	// If the transaction pool is full, discard underpriced transactions
+	// SYSCOIN BEGIN: Credit the displaced transaction when calculating required pool capacity.
 	projectedSlots := pool.all.Slots() + numSlots(tx) - dropSlots
 	if old != nil {
 		// A successful replacement removes its predecessor, so only its net
 		// slot growth needs to evict another transaction.
 		projectedSlots -= numSlots(old)
 	}
+	// SYSCOIN END: Credit the displaced transaction when calculating required pool capacity.
 	if uint64(projectedSlots) > pool.config.GlobalSlots+pool.config.GlobalQueue {
+		// SYSCOIN BEGIN: Keep self-pruning admissions from evicting other accounts first.
 		if len(queueDrops) != 0 {
 			// A transaction that needs self-pruning must not evict another
 			// account's priced transactions before its own suffix is removed.
 			return false, ErrTxPoolOverflow
 		}
+		// SYSCOIN END: Keep self-pruning admissions from evicting other accounts first.
 		// If the new transaction is underpriced, don't accept it
 		if pool.priced.Underpriced(tx) {
 			log.Trace("Discarding underpriced transaction", "hash", hash, "gasTipCap", tx.GasTipCap(), "gasFeeCap", tx.GasFeeCap())
@@ -823,6 +834,7 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 
 		// New transaction is better than our worse ones, make room for it.
 		// If we can't make enough room for new one, abort the operation.
+		// SYSCOIN: Exclude the credited predecessor from further capacity eviction.
 		drop, success := pool.priced.Discard(projectedSlots-int(pool.config.GlobalSlots+pool.config.GlobalQueue), old)
 
 		// Special case, we still can't make the room for the new remote one.
@@ -885,10 +897,12 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 
 		// Successful promotion, bump the heartbeat
 		pool.beats[from] = time.Now()
+		// SYSCOIN BEGIN: Prune the unaffordable suffix only after replacement succeeds.
 		for _, old := range queueDrops {
 			pool.removeTx(old.Hash(), true, false)
 			queuedNofundsMeter.Mark(1)
 		}
+		// SYSCOIN END: Prune the unaffordable suffix only after replacement succeeds.
 		return old != nil, nil
 	}
 	// New transaction isn't replacing a pending one, push into queue
@@ -896,10 +910,12 @@ func (pool *LegacyPool) add(tx *types.Transaction) (replaced bool, err error) {
 	if err != nil {
 		return false, err
 	}
+	// SYSCOIN BEGIN: Prune the unaffordable suffix only after insertion succeeds.
 	for _, old := range queueDrops {
 		pool.removeTx(old.Hash(), true, false)
 		queuedNofundsMeter.Mark(1)
 	}
+	// SYSCOIN END: Prune the unaffordable suffix only after insertion succeeds.
 
 	log.Trace("Pooled new future transaction", "hash", hash, "from", from, "to", tx.To())
 	return replaced, nil
@@ -1089,6 +1105,7 @@ func (pool *LegacyPool) Add(txs []*types.Transaction, sync bool) []error {
 func (pool *LegacyPool) addTxsLocked(txs []*types.Transaction) ([]error, *accountSet) {
 	dirty := newAccountSet(pool.signer)
 	errs := make([]error, len(txs))
+	// SYSCOIN: Admit each account in nonce order while preserving result indices.
 	for _, i := range pool.nonceOrder(txs) {
 		tx := txs[i]
 		replaced, err := pool.add(tx)
@@ -1103,6 +1120,7 @@ func (pool *LegacyPool) addTxsLocked(txs []*types.Transaction) ([]error, *accoun
 
 // nonceOrder preserves each sender's replacement order while admitting lower
 // nonces first. Results remain indexed to the original input order.
+// SYSCOIN BEGIN: Order per-sender admissions without reordering replacement attempts.
 func (pool *LegacyPool) nonceOrder(txs []*types.Transaction) []int {
 	order := make([]int, len(txs))
 	senders := make([]common.Address, len(txs))
@@ -1133,6 +1151,8 @@ func (pool *LegacyPool) nonceOrder(txs []*types.Transaction) []int {
 	}
 	return order
 }
+
+// SYSCOIN END: Order per-sender admissions without reordering replacement attempts.
 
 // Status returns the status (unknown/pending/queued) of a batch of transactions
 // identified by their hashes.
@@ -1586,6 +1606,7 @@ func (pool *LegacyPool) promoteExecutables(accounts []common.Address) []*types.T
 		log.Trace("Removed unpayable queued transactions", "count", len(drops))
 		queuedNofundsMeter.Mark(int64(len(drops)))
 
+		// SYSCOIN BEGIN: Apply a cumulative balance budget while retaining upstream promotion bookkeeping.
 		remaining := pool.currentState.GetBalance(addr).ToBig()
 		pendingValid := true
 		if pending := pool.pending[addr]; pending != nil {
@@ -1625,6 +1646,7 @@ func (pool *LegacyPool) promoteExecutables(accounts []common.Address) []*types.T
 				promoted = append(promoted, tx)
 			}
 		}
+		// SYSCOIN END: Apply a cumulative balance budget while retaining upstream promotion bookkeeping.
 		log.Trace("Promoted queued transactions", "count", len(promoted))
 		queuedGauge.Dec(int64(len(readies)))
 
@@ -1799,6 +1821,7 @@ func (pool *LegacyPool) demoteUnexecutables() {
 		}
 		// Drop all transactions that are too costly (low balance or out of gas), and queue any invalids back for later
 		drops, invalids := list.Filter(pool.currentState.GetBalance(addr), gasLimit)
+		// SYSCOIN BEGIN: Demote a pending suffix that exceeds the cumulative account balance.
 		// A balance change can make a sequence unaffordable even when each
 		// transaction still fits individually. Keep only its affordable prefix.
 		spent := new(big.Int)
@@ -1812,6 +1835,7 @@ func (pool *LegacyPool) demoteUnexecutables() {
 				break
 			}
 		}
+		// SYSCOIN END: Demote a pending suffix that exceeds the cumulative account balance.
 		for _, tx := range drops {
 			hash := tx.Hash()
 			pool.all.Remove(hash)
