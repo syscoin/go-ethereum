@@ -410,8 +410,16 @@ func (eth *Ethereum) AddBlock(nevmBlockConnectIn *types.NEVMBlockConnect) error 
     }
     eth.bufferLock.Unlock()
 
+    // Core may restart behind Geth after its final chainstate flush failed.
+    // Only acknowledge an exact, already executed canonical Core/NEVM pair;
+    // this path must never insert a block or reapply auxiliary metadata.
+    if incomingBlockNumber < lastBlockNumber && eth.blockchain.IsCanonicalSyscoinReplay(nevmBlockConnectIn.Block, []byte(nevmBlockConnectIn.Sysblockhash)) {
+        log.Trace("Canonical NEVM/Syscoin pair replay, skipping insert", "number", incomingBlockNumber, "hash", incomingBlockHash)
+        return nil
+    }
+
     if incomingBlockNumber != lastBlockNumber+1 || incomingParentHash != lastBlockHash {
-        // Includes replaying an older canonical NEVM block: must not return success.
+        // Unknown, unpaired and non-canonical historical blocks remain invalid.
         log.Error("Non contiguous block insert",
             "number", incomingBlockNumber,
             "hash", incomingBlockHash,

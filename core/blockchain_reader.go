@@ -70,6 +70,51 @@ func (bc *BlockChain) CurrentSyscoinPair() (uint64, []byte, bool) {
 	return number, bytes.Clone(sysHash), true
 }
 
+// IsCanonicalSyscoinReplay recognizes an already executed historical Core/NEVM
+// pair without changing the head, state or auxiliary metadata. Core can lose its
+// last unflushed blocks while Geth persists them during shutdown, then replay
+// those same pairs on restart. A known block on another branch is not a replay.
+func (bc *BlockChain) IsCanonicalSyscoinReplay(block *types.Block, sysHash []byte) bool {
+	if block == nil || len(sysHash) != common.HashLength || common.BytesToHash(sysHash) == (common.Hash{}) {
+		return false
+	}
+	if !bc.chainmu.TryLock() {
+		return false
+	}
+	defer bc.chainmu.Unlock()
+
+	head := bc.currentBlock.Load()
+	if head == nil || block.NumberU64() >= head.Number.Uint64() {
+		return false // Current-tip retries retain their separate AddBlock checks.
+	}
+	// The canonical index is authoritative for ancestry, as in GetAncestor.
+	// Hold chainmu across the head, ancestry, body and pairing reads so a reorg
+	// cannot combine a block from one branch with another branch's SYS metadata.
+	if rawdb.ReadCanonicalHash(bc.db, head.Number.Uint64()) != head.Hash() {
+		return false
+	}
+	var maxNonCanonical uint64
+	ancestor, number := bc.hc.GetAncestor(head.Hash(), head.Number.Uint64(), head.Number.Uint64()-block.NumberU64(), &maxNonCanonical)
+	if number != block.NumberU64() || ancestor != block.Hash() {
+		return false
+	}
+	if !bytes.Equal(rawdb.ReadSYSHash(bc.db, number), sysHash) {
+		return false
+	}
+	stored := rawdb.ReadBlock(bc.db, ancestor, number)
+	if stored == nil || stored.Hash() != block.Hash() || stored.NumberU64() != number {
+		return false
+	}
+	// A header hash alone does not validate the supplied body. Require the exact
+	// persisted block bytes before bypassing ordinary import validation.
+	storedRLP, err := rlp.EncodeToBytes(stored)
+	if err != nil {
+		return false
+	}
+	replayRLP, err := rlp.EncodeToBytes(block)
+	return err == nil && bytes.Equal(storedRLP, replayRLP)
+}
+
 // CurrentSnapBlock retrieves the current snap-sync head block of the canonical
 // chain. The block is retrieved from the blockchain's internal cache.
 func (bc *BlockChain) CurrentSnapBlock() *types.Header {
