@@ -29,6 +29,39 @@ func readExecutionValue(db ethdb.KeyValueReader, key []byte, size int) ([]byte, 
 	return data, nil
 }
 
+// HasHeadMarkers reports whether the hot database has already recorded a head.
+// An empty hot database attached to a freezer has no such markers yet.
+func HasHeadMarkers(db ethdb.KeyValueReader) (bool, error) {
+	for _, key := range [][]byte{headBlockKey, headHeaderKey, headFastBlockKey} {
+		present, err := db.Has(key)
+		if err != nil || present {
+			return present, err
+		}
+	}
+	return false, nil
+}
+
+// ReadSyscoinHeadHash requires all three persisted head markers to identify the
+// same executed block. A missing or unreadable marker is not a genesis fallback.
+func ReadSyscoinHeadHash(db ethdb.KeyValueReader) (common.Hash, error) {
+	var head common.Hash
+	for i, key := range [][]byte{headBlockKey, headHeaderKey, headFastBlockKey} {
+		data, err := readExecutionValue(db, key, common.HashLength)
+		if err != nil {
+			return common.Hash{}, fmt.Errorf("read Syscoin head marker %q: %w", key, err)
+		}
+		hash := common.BytesToHash(data)
+		if hash == (common.Hash{}) {
+			return common.Hash{}, fmt.Errorf("missing Syscoin head marker %q", key)
+		}
+		if i > 0 && hash != head {
+			return common.Hash{}, errors.New("inconsistent Syscoin head markers; rebuild Geth state explicitly")
+		}
+		head = hash
+	}
+	return head, nil
+}
+
 func ReadSYSHashWithError(db ethdb.KeyValueReader, n uint64) ([]byte, error) {
 	return readExecutionValue(db, blockNumToSysKey(n), common.HashLength)
 }

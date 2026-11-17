@@ -18,6 +18,7 @@ package rawdb
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -65,6 +66,23 @@ func ReadChainConfig(db ethdb.KeyValueReader, hash common.Hash) *params.ChainCon
 		return nil
 	}
 	return &config
+}
+
+// ReadChainConfigWithError preserves storage and decoding errors so startup
+// cannot mistake an unreadable configuration for an uninitialized database.
+func ReadChainConfigWithError(db ethdb.KeyValueReader, hash common.Hash) (*params.ChainConfig, error) {
+	data, err := db.Get(configKey(hash))
+	if errors.Is(err, ethdb.ErrKeyNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var config params.ChainConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+	return &config, nil
 }
 
 // WriteChainConfig writes the chain config settings to the database.

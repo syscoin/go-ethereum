@@ -389,6 +389,13 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if chainConfig.SyscoinBlock != nil && (bc.CurrentHeader().Hash() != bc.CurrentBlock().Hash() || bc.CurrentSnapBlock().Hash() != bc.CurrentBlock().Hash()) {
 		return nil, errors.New("inconsistent Syscoin head markers; rebuild Geth state explicitly")
 	}
+	// SYSCOIN: migrate DA membership only after loading a verified executed
+	// head. HeaderChain's genesis fallback cannot establish the migration head.
+	if chainConfig.SyscoinBlock != nil {
+		if err := rawdb.EnsureDataHashIndex(db, bc.CurrentBlock().Number.Uint64()); err != nil {
+			return nil, fmt.Errorf("initialize data-hash index: %w", err)
+		}
+	}
 	// Make sure the state associated with the block is available, or log out
 	// if there is no available state, waiting for state sync.
 	head := bc.CurrentBlock()
@@ -554,7 +561,17 @@ func (bc *BlockChain) empty() bool {
 // assumes that the chain manager mutex is held.
 func (bc *BlockChain) loadLastState() error {
 	// Restore the last known head block
-	head := rawdb.ReadHeadBlockHash(bc.db)
+	syscoin := bc.chainConfig.SyscoinBlock != nil
+	var head common.Hash
+	if syscoin {
+		var err error
+		head, err = rawdb.ReadSyscoinHeadHash(bc.db)
+		if err != nil {
+			return err
+		}
+	} else {
+		head = rawdb.ReadHeadBlockHash(bc.db)
+	}
 	if head == (common.Hash{}) {
 		// Corrupt or empty database, init from scratch
 		log.Warn("Empty database, resetting chain")
@@ -562,6 +579,9 @@ func (bc *BlockChain) loadLastState() error {
 	}
 	headHeader := bc.GetHeaderByHash(head)
 	if headHeader == nil {
+		if syscoin {
+			return fmt.Errorf("cannot load Syscoin executed head header %s", head)
+		}
 		// Corrupt or empty database, init from scratch
 		log.Warn("Head header missing, resetting chain", "hash", head)
 		return bc.Reset()
@@ -578,18 +598,36 @@ func (bc *BlockChain) loadLastState() error {
 		headBlock = bc.genesisBlock
 	}
 	if headBlock == nil {
+		if syscoin {
+			return fmt.Errorf("cannot load Syscoin executed head block %s", head)
+		}
 		// Corrupt or empty database, init from scratch
 		log.Warn("Head block missing, resetting chain", "hash", head)
 		return bc.Reset()
+	}
+	if syscoin {
+		if headHeader.Hash() != head || headBlock.Hash() != head || !headHeader.Number.IsUint64() {
+			return fmt.Errorf("inconsistent Syscoin executed head %s", head)
+		}
+		canonical, err := rawdb.ReadCanonicalHashWithError(bc.db, headHeader.Number.Uint64())
+		if err != nil {
+			return fmt.Errorf("read Syscoin executed head canonical hash: %w", err)
+		}
+		if canonical != head {
+			return fmt.Errorf("noncanonical Syscoin executed head %s", head)
+		}
 	}
 	// Everything seems to be fine, set as the head block
 	bc.currentBlock.Store(headHeader)
 	headBlockGauge.Update(int64(headBlock.NumberU64()))
 
 	// Restore the last known head header
-	if head := rawdb.ReadHeadHeaderHash(bc.db); head != (common.Hash{}) {
-		if header := bc.GetHeaderByHash(head); header != nil {
-			headHeader = header
+	// Syscoin already checked that all persisted markers identify this block.
+	if !syscoin {
+		if head := rawdb.ReadHeadHeaderHash(bc.db); head != (common.Hash{}) {
+			if header := bc.GetHeaderByHash(head); header != nil {
+				headHeader = header
+			}
 		}
 	}
 	bc.hc.SetCurrentHeader(headHeader)
@@ -604,10 +642,12 @@ func (bc *BlockChain) loadLastState() error {
 	bc.currentSnapBlock.Store(headBlock.Header())
 	headFastBlockGauge.Update(int64(headBlock.NumberU64()))
 
-	if head := rawdb.ReadHeadFastBlockHash(bc.db); head != (common.Hash{}) {
-		if block := bc.GetBlockByHash(head); block != nil {
-			bc.currentSnapBlock.Store(block.Header())
-			headFastBlockGauge.Update(int64(block.NumberU64()))
+	if !syscoin {
+		if head := rawdb.ReadHeadFastBlockHash(bc.db); head != (common.Hash{}) {
+			if block := bc.GetBlockByHash(head); block != nil {
+				bc.currentSnapBlock.Store(block.Header())
+				headFastBlockGauge.Update(int64(block.NumberU64()))
+			}
 		}
 	}
 

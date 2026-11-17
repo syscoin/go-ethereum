@@ -53,6 +53,35 @@ func ReadCanonicalHash(db ethdb.Reader, number uint64) common.Hash {
 	return common.BytesToHash(data)
 }
 
+// ReadCanonicalHashWithError distinguishes an absent mapping from a failed or
+// malformed lookup, including when the canonical hash lives in the freezer.
+func ReadCanonicalHashWithError(db ethdb.Reader, number uint64) (common.Hash, error) {
+	var data []byte
+	err := db.ReadAncients(func(reader ethdb.AncientReaderOp) error {
+		present, err := reader.HasAncient(ChainFreezerHashTable, number)
+		if err != nil && !errors.Is(err, errNotSupported) {
+			return err
+		}
+		if present {
+			data, err = reader.Ancient(ChainFreezerHashTable, number)
+			if err == nil && len(data) != common.HashLength {
+				return fmt.Errorf("invalid ancient canonical hash length %d", len(data))
+			}
+		} else {
+			data, err = readExecutionValue(db, headerHashKey(number), common.HashLength)
+		}
+		return err
+	})
+	if err != nil {
+		return common.Hash{}, err
+	}
+	hash := common.BytesToHash(data)
+	if data != nil && hash == (common.Hash{}) {
+		return common.Hash{}, errors.New("invalid zero canonical hash")
+	}
+	return hash, nil
+}
+
 // WriteCanonicalHash stores the hash assigned to a canonical block number.
 func WriteCanonicalHash(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
 	if err := db.Put(headerHashKey(number), hash.Bytes()); err != nil {

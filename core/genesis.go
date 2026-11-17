@@ -305,8 +305,14 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *triedb.Database, g
 		return nil, common.Hash{}, nil, errGenesisNoConfig
 	}
 	// Commit the genesis if the database is empty
-	ghash := rawdb.ReadCanonicalHash(db, 0)
+	ghash, err := rawdb.ReadCanonicalHashWithError(db, 0)
+	if err != nil {
+		return nil, common.Hash{}, nil, fmt.Errorf("read canonical genesis hash: %w", err)
+	}
 	if (ghash == common.Hash{}) {
+		if err := checkGenesisBootstrap(db); err != nil {
+			return nil, common.Hash{}, nil, err
+		}
 		if genesis == nil {
 			log.Info("Writing default main-net genesis block")
 			genesis = DefaultGenesisBlock()
@@ -327,8 +333,14 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *triedb.Database, g
 	// but the key-value database is empty without initializing the genesis
 	// fields. This scenario can occur when the node is created from scratch
 	// with an existing ancient store.
-	storedCfg := rawdb.ReadChainConfig(db, ghash)
+	storedCfg, err := rawdb.ReadChainConfigWithError(db, ghash)
+	if err != nil {
+		return nil, common.Hash{}, nil, fmt.Errorf("read genesis chain config: %w", err)
+	}
 	if storedCfg == nil {
+		if err := checkGenesisBootstrap(db); err != nil {
+			return nil, common.Hash{}, nil, err
+		}
 		// Ensure the stored genesis block matches with the given genesis. Private
 		// networks must explicitly specify the genesis in the config file, mainnet
 		// genesis will be used as default and the initialization will always fail.
@@ -392,6 +404,19 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *triedb.Database, g
 		rawdb.WriteChainConfig(db, ghash, newCfg)
 	}
 	return newCfg, ghash, nil, nil
+}
+
+// Missing genesis metadata permits bootstrap only before a hot head was stored.
+// Otherwise re-committing genesis would overwrite an existing execution head.
+func checkGenesisBootstrap(db ethdb.KeyValueReader) error {
+	initialized, err := rawdb.HasHeadMarkers(db)
+	if err != nil {
+		return fmt.Errorf("check genesis initialization: %w", err)
+	}
+	if initialized {
+		return errors.New("genesis metadata missing from initialized database")
+	}
+	return nil
 }
 
 // LoadChainConfig loads the stored chain config if it is already present in

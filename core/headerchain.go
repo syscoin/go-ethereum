@@ -235,13 +235,6 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 	}
 	hc.currentHeaderHash = hc.CurrentHeader().Hash()
 	headHeaderGauge.Update(hc.CurrentHeader().Number.Int64())
-	// SYSCOIN: repair/migrate consensus-visible DA membership from canonical
-	// per-height records before any precompile can query it.
-	if config.SyscoinBlock != nil {
-		if err := rawdb.EnsureDataHashIndex(chainDb, hc.CurrentHeader().Number.Uint64()); err != nil {
-			return nil, fmt.Errorf("initialize data-hash index: %w", err)
-		}
-	}
 	return hc, nil
 }
 
