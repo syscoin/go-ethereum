@@ -94,6 +94,7 @@ type generateParams struct {
 	beaconRoot  *common.Hash      // The beacon root (cancun field).
 	noTxs       bool              // Flag whether an empty block without any transaction is expected
 }
+
 // SYSCOIN generates a sealing block based on the given parameters.
 func (miner *Miner) GenerateWorkSyscoin(coinbase common.Address, random common.Hash) *types.Block {
 	result := miner.generateWork(&generateParams{

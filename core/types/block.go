@@ -275,6 +275,7 @@ type NEVMBlockConnect struct {
 	Block         *Block
 	VersionHashes []*common.Hash
 	Diff          *wire.NEVMAddressDiff
+	payload       *nevmPayloadContext
 }
 
 func (n *NEVMBlockConnect) HasDiff() bool {
@@ -284,6 +285,8 @@ func (n *NEVMBlockDisconnect) HasDiff() bool {
 	return len(n.Diff.AddedMNNEVM) > 0 || len(n.Diff.RemovedMNNEVM) > 0 || len(n.Diff.UpdatedMNNEVM) > 0
 }
 func (n *NEVMBlockConnect) Deserialize(bytesIn []byte) error {
+	// A reused receiver must never retain evidence from an earlier request.
+	n.payload = nil
 	var NEVMBlockWire wire.NEVMBlockWire
 	r := bytes.NewReader(bytesIn)
 	err := NEVMBlockWire.Deserialize(r)
@@ -296,9 +299,13 @@ func (n *NEVMBlockConnect) Deserialize(bytesIn []byte) error {
 	n.Blockhash = common.BytesToHash(NEVMBlockWire.NEVMBlockHash)
 	n.Sysblockhash = string(NEVMBlockWire.SYSBlockHash)
 	n.BTCPrevHash = common.BytesToHash(NEVMBlockWire.BTCPrevHash)
+	n.payload = &nevmPayloadContext{
+		nevmHash: n.Blockhash, sysHash: common.BytesToHash(NEVMBlockWire.SYSBlockHash),
+		txRoot: common.BytesToHash(NEVMBlockWire.TxRoot), receiptRoot: common.BytesToHash(NEVMBlockWire.ReceiptRoot),
+	}
 
 	if len(NEVMBlockWire.NEVMBlockData) == 0 {
-		return errors.New("empty block data")
+		return n.rejectPayload(errors.New("empty block data"), NEVMBlockWire.NEVMBlockData)
 	}
 
 	// Decode the raw block inside of NEVM data
@@ -306,25 +313,27 @@ func (n *NEVMBlockConnect) Deserialize(bytesIn []byte) error {
 	err = rlp.DecodeBytes(NEVMBlockWire.NEVMBlockData, &block)
 	if err != nil {
 		log.Error("NEVMBlockConnect: could not decode NEVMBlockData", "err", err)
-		return err
+		return n.rejectPayload(err, NEVMBlockWire.NEVMBlockData)
 	}
 
 	// Create NEVMBlockConnect object from deserialized block and NEVM wire data
 	n.Block = &block
 
+	// A different header remains a replaceable representation. Only after
+	// matching its committed hash are contradictions in its roots immutable.
+	if n.Blockhash != block.Hash() {
+		return n.rejectPayload(errors.New("blockhash mismatch"), NEVMBlockWire.NEVMBlockData)
+	}
+
 	// Validate that tx root and receipt root is correct based on the block
 	txRootHash := common.BytesToHash(NEVMBlockWire.TxRoot)
 	if txRootHash != block.TxHash() {
-		return errors.New("transaction Root mismatch")
+		return &nevmCommittedRootError{err: errors.New("transaction Root mismatch"), block: &block, context: n.payload}
 	}
 
 	receiptRootHash := common.BytesToHash(NEVMBlockWire.ReceiptRoot)
 	if receiptRootHash != block.ReceiptHash() {
-		return errors.New("receipt Root mismatch")
-	}
-
-	if n.Blockhash != block.Hash() {
-		return errors.New("blockhash mismatch")
+		return &nevmCommittedRootError{err: errors.New("receipt Root mismatch"), block: &block, context: n.payload}
 	}
 
 	// Process VersionHashes
@@ -337,6 +346,7 @@ func (n *NEVMBlockConnect) Deserialize(bytesIn []byte) error {
 
 	// Deserialize and handle the Diff field
 	n.Diff = &NEVMBlockWire.Diff
+	n.payload.block = n.Block
 
 	return nil
 }

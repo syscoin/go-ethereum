@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -25,8 +24,8 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/p2p/tracker" // SYSCOIN: Replace eager decoding with bounded response decoding.
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/trie"
 )
 
 func handleGetBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
@@ -110,8 +109,11 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 				next    = current + query.Skip + 1
 			)
 			if next <= current {
-				infos, _ := json.MarshalIndent(peer.Peer.Info(), "", "  ")
-				peer.Log().Warn("GetBlockHeaders skip overflow attack", "current", current, "skip", query.Skip, "next", next, "attacker", infos)
+				// SYSCOIN BEGIN: Log repeated header-overflow attempts only once per connection.
+				peer.skipWarning.Do(func() {
+					peer.Log().Warn("GetBlockHeaders skip overflow", "current", current, "skip", query.Skip, "next", next)
+				})
+				// SYSCOIN END: Log repeated header-overflow attempts only once per connection.
 				unknown = true
 			} else {
 				if header := chain.GetHeaderByNumber(next); header != nil {
@@ -292,18 +294,21 @@ func handleNewBlock(backend Backend, msg Decoder, peer *Peer) error {
 	return errors.New("block broadcasts disallowed") // We dropped support for non-merge networks
 }
 
+// SYSCOIN BEGIN: Retain upstream response dispatch while bounding decoding and delaying body/receipt expansion.
 func handleBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
 	// A batch of headers arrived to one of our previous requests
 	res := new(BlockHeadersPacket)
-	if err := msg.Decode(res); err != nil {
+	if cancelled, err := decodeResponse(msg, peer, BlockHeadersMsg, &res.RequestId, &res.BlockHeadersRequest); cancelled {
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	metadata := func() interface{} {
+	metadata := func() (interface{}, error) {
 		hashes := make([]common.Hash, len(res.BlockHeadersRequest))
 		for i, header := range res.BlockHeadersRequest {
 			hashes[i] = header.Hash()
 		}
-		return hashes
+		return hashes, nil
 	}
 	return peer.dispatchResponse(&Response{
 		id:   res.RequestId,
@@ -314,53 +319,63 @@ func handleBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
 
 func handleBlockBodies(backend Backend, msg Decoder, peer *Peer) error {
 	// A batch of block bodies arrived to one of our previous requests
-	res := new(BlockBodiesPacket)
-	if err := msg.Decode(res); err != nil {
+	var id uint64
+	var encoded BlockBodiesRLPResponse
+	if cancelled, err := decodeResponse(msg, peer, BlockBodiesMsg, &id, &encoded); cancelled {
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	metadata := func() interface{} {
-		var (
-			txsHashes        = make([]common.Hash, len(res.BlockBodiesResponse))
-			uncleHashes      = make([]common.Hash, len(res.BlockBodiesResponse))
-			withdrawalHashes = make([]common.Hash, len(res.BlockBodiesResponse))
-		)
-		hasher := trie.NewStackTrie(nil)
-		for i, body := range res.BlockBodiesResponse {
-			txsHashes[i] = types.DeriveSha(types.Transactions(body.Transactions), hasher)
-			uncleHashes[i] = types.CalcUncleHash(body.Uncles)
-			if body.Withdrawals != nil {
-				withdrawalHashes[i] = types.DeriveSha(types.Withdrawals(body.Withdrawals), hasher)
-			}
+	bodies := make(BlockBodiesRawResponse, len(encoded))
+	for i, raw := range encoded {
+		if err := rlp.DecodeBytes(raw, &bodies[i]); err != nil {
+			return fmt.Errorf("%w: body %d: %v", errDecode, i, err)
 		}
-		return [][]common.Hash{txsHashes, uncleHashes, withdrawalHashes}
+		if err := bodies[i].validate(); err != nil {
+			return fmt.Errorf("%w: body %d: %v", errDecode, i, err)
+		}
 	}
 	return peer.dispatchResponse(&Response{
-		id:   res.RequestId,
+		id:   id,
 		code: BlockBodiesMsg,
-		Res:  &res.BlockBodiesResponse,
-	}, metadata)
+		Res:  &bodies,
+	}, func() (interface{}, error) {
+		hashes, err := bodies.hashes()
+		if err != nil {
+			return nil, fmt.Errorf("%w: body roots: %v", errDecode, err)
+		}
+		return hashes, nil
+	})
 }
 
 func handleReceipts(backend Backend, msg Decoder, peer *Peer) error {
 	// A batch of receipts arrived to one of our previous requests
-	res := new(ReceiptsPacket)
-	if err := msg.Decode(res); err != nil {
+	var id uint64
+	var receipts ReceiptsRLPResponse
+	if cancelled, err := decodeResponse(msg, peer, ReceiptsMsg, &id, &receipts); cancelled {
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	metadata := func() interface{} {
-		hasher := trie.NewStackTrie(nil)
-		hashes := make([]common.Hash, len(res.ReceiptsResponse))
-		for i, receipt := range res.ReceiptsResponse {
-			hashes[i] = types.DeriveSha(types.Receipts(receipt), hasher)
+	for i, raw := range receipts {
+		if _, err := newRawDerivableList(raw, minReceiptEncodedSize, true); err != nil {
+			return fmt.Errorf("%w: receipts %d: %v", errDecode, i, err)
 		}
-		return hashes
 	}
 	return peer.dispatchResponse(&Response{
-		id:   res.RequestId,
+		id:   id,
 		code: ReceiptsMsg,
-		Res:  &res.ReceiptsResponse,
-	}, metadata)
+		Res:  &receipts,
+	}, func() (interface{}, error) {
+		hashes, err := receipts.hashes()
+		if err != nil {
+			return nil, fmt.Errorf("%w: receipt roots: %v", errDecode, err)
+		}
+		return hashes, nil
+	})
 }
+
+// SYSCOIN END: Retain upstream response dispatch while bounding decoding and delaying body/receipt expansion.
 
 func handleNewPooledTransactionHashes(backend Backend, msg Decoder, peer *Peer) error {
 	// New transaction announcement arrived, make sure we have
@@ -369,7 +384,8 @@ func handleNewPooledTransactionHashes(backend Backend, msg Decoder, peer *Peer) 
 		return nil
 	}
 	ann := new(NewPooledTransactionHashesPacket)
-	if err := msg.Decode(ann); err != nil {
+	// SYSCOIN: Preflight announcement list sizes before allocating typed entries.
+	if err := msg.Decode(&transactionAnnouncementsDecoder{ann}); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
 	if len(ann.Hashes) != len(ann.Types) || len(ann.Hashes) != len(ann.Sizes) {
@@ -399,8 +415,9 @@ func answerGetPooledTransactions(backend Backend, query GetPooledTransactionsReq
 		hashes []common.Hash
 		txs    []rlp.RawValue
 	)
-	for _, hash := range query {
-		if bytes >= softResponseLimit {
+	// SYSCOIN: Bound lookup work even when requested transaction hashes are unknown.
+	for i, hash := range query {
+		if bytes >= softResponseLimit || i >= maxPooledTxServe {
 			break
 		}
 		// Retrieve the requested transaction, skipping if unknown to us
@@ -422,7 +439,8 @@ func handleTransactions(backend Backend, msg Decoder, peer *Peer) error {
 	}
 	// Transactions can be processed, parse all of them and deliver to the pool
 	var txs TransactionsPacket
-	if err := msg.Decode(&txs); err != nil {
+	// SYSCOIN: Bound unsolicited transaction count before typed decoding.
+	if err := msg.Decode(&tracker.ListDecoder{Items: maxTransactionAnnouncements, Bytes: maxMessageSize, Value: &txs}); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
 	for i, tx := range txs {
@@ -442,7 +460,10 @@ func handlePooledTransactions(backend Backend, msg Decoder, peer *Peer) error {
 	}
 	// Transactions can be processed, parse all of them and deliver to the pool
 	var txs PooledTransactionsPacket
-	if err := msg.Decode(&txs); err != nil {
+	// SYSCOIN: Require a live bounded request before decoding pooled transactions.
+	if cancelled, err := decodeResponse(msg, peer, PooledTransactionsMsg, &txs.RequestId, &txs.PooledTransactionsResponse); cancelled {
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
 	for i, tx := range txs.PooledTransactionsResponse {
@@ -456,3 +477,12 @@ func handlePooledTransactions(backend Backend, msg Decoder, peer *Peer) error {
 
 	return backend.Handle(peer, &txs.PooledTransactionsResponse)
 }
+
+// SYSCOIN BEGIN: Apply the tracked byte, count and cancellation limits before typed decoding.
+func decodeResponse(msg Decoder, peer *Peer, code uint64, id *uint64, values ...interface{}) (bool, error) {
+	decoder := tracker.ResponseDecoder{Tracker: peer.responses, Code: code, ID: id, Values: values}
+	err := msg.Decode(&decoder)
+	return decoder.Cancelled, err
+}
+
+// SYSCOIN END: Apply the tracked byte, count and cancellation limits before typed decoding.

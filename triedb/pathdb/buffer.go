@@ -124,7 +124,8 @@ func (b *buffer) size() uint64 {
 
 // flush persists the in-memory dirty trie node into the disk if the configured
 // memory threshold is reached. Note, all data must be written atomically.
-func (b *buffer) flush(db ethdb.KeyValueStore, freezer ethdb.AncientWriter, nodesCache *fastcache.Cache, id uint64) error {
+// SYSCOIN: include a rebased recovery journal in that same physical-state batch.
+func (b *buffer) flush(db ethdb.KeyValueStore, freezer ethdb.AncientWriter, nodesCache *fastcache.Cache, root common.Hash, id uint64, journal *liveJournal) error {
 	// Ensure the target state id is aligned with the internal counter.
 	head := rawdb.ReadPersistentStateID(db)
 	if head+b.layers != id {
@@ -144,6 +145,10 @@ func (b *buffer) flush(db ethdb.KeyValueStore, freezer ethdb.AncientWriter, node
 	}
 	nodes := b.nodes.write(batch, nodesCache)
 	rawdb.WritePersistentStateID(batch, id)
+	// SYSCOIN: never publish a new base with a journal bound to the old one.
+	if err := journal.write(batch, root, id); err != nil {
+		return err
+	}
 
 	// Flush all mutations in a single batch
 	size := batch.ValueSize()

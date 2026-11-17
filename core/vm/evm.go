@@ -39,12 +39,12 @@ type (
 	// and is used by the BLOCKHASH EVM op code.
 	GetHashFunc func(uint64) common.Hash
 	// SYSCOIN
-	ReadSYSHashFunc        func(uint64) []byte
-	BTCCheckpointIndexFunc func(common.Hash) uint64
-	BTCCheckpointLastIndexFunc  func() uint64
+	ReadSYSHashFunc              func(uint64) []byte
+	BTCCheckpointIndexFunc       func(common.Hash) uint64
+	BTCCheckpointLastIndexFunc   func() uint64
 	BTCCheckpointHashByIndexFunc func(uint64) []byte
-	ReadDataHashFunc       func(common.Hash) []byte
-	GetNEVMAddressFunc     func(common.Address) []byte
+	ReadDataHashFunc             func(common.Hash) []byte
+	GetNEVMAddressFunc           func(common.Address) []byte
 )
 
 func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
@@ -63,12 +63,12 @@ type BlockContext struct {
 	// GetHash returns the hash corresponding to n
 	GetHash GetHashFunc
 	// SYSCOIN
-	ReadSYSHash        ReadSYSHashFunc
-	BTCCheckpointIndex BTCCheckpointIndexFunc
-	BTCCheckpointLastIndex  BTCCheckpointLastIndexFunc
+	ReadSYSHash              ReadSYSHashFunc
+	BTCCheckpointIndex       BTCCheckpointIndexFunc
+	BTCCheckpointLastIndex   BTCCheckpointLastIndexFunc
 	BTCCheckpointHashByIndex BTCCheckpointHashByIndexFunc
-	ReadDataHash       ReadDataHashFunc
-	GetNEVMAddress     GetNEVMAddressFunc
+	ReadDataHash             ReadDataHashFunc
+	GetNEVMAddress           GetNEVMAddressFunc
 	// Block information
 	Coinbase    common.Address // Provides information for COINBASE
 	GasLimit    uint64         // Provides information for GASLIMIT

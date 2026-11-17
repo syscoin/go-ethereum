@@ -275,7 +275,7 @@ type list struct {
 
 	costcap   *uint256.Int // Price of the highest costing transaction (reset only if exceeds balance)
 	gascap    uint64       // Gas limit of the highest spending transaction (reset only if exceeds block limit)
-	totalcost *uint256.Int // Total cost of all transactions in the list
+	totalcost *big.Int     // SYSCOIN: Exact sum of transaction costs, including totals above uint256
 }
 
 // newList creates a new transaction list for maintaining nonce-indexable fast,
@@ -285,7 +285,7 @@ func newList(strict bool) *list {
 		strict:    strict,
 		txs:       NewSortedMap(),
 		costcap:   new(uint256.Int),
-		totalcost: new(uint256.Int),
+		totalcost: new(big.Int), // SYSCOIN: Avoid overflow in cumulative costs.
 	}
 }
 
@@ -295,43 +295,54 @@ func (l *list) Contains(nonce uint64) bool {
 	return l.txs.Get(nonce) != nil
 }
 
+// isPriceBumped reports whether tx satisfies the price bump for replacing old.
+// SYSCOIN BEGIN: Share the upstream price-bump predicate with pre-eviction validation.
+func isPriceBumped(old, tx *types.Transaction, priceBump uint64) bool {
+	if old.GasFeeCapCmp(tx) >= 0 || old.GasTipCapCmp(tx) >= 0 {
+		return false
+	}
+	// thresholdFeeCap = oldFC * (100 + priceBump) / 100
+	a := big.NewInt(100 + int64(priceBump))
+	aFeeCap := new(big.Int).Mul(a, old.GasFeeCap())
+	aTip := a.Mul(a, old.GasTipCap())
+
+	// thresholdTip = oldTip * (100 + priceBump) / 100
+	b := big.NewInt(100)
+	thresholdFeeCap := aFeeCap.Div(aFeeCap, b)
+	thresholdTip := aTip.Div(aTip, b)
+
+	// Both caps must increase and meet the percentage threshold, including
+	// for low (Wei-level) gas price replacements.
+	return tx.GasFeeCapIntCmp(thresholdFeeCap) >= 0 && tx.GasTipCapIntCmp(thresholdTip) >= 0
+}
+
+// SYSCOIN END: Share the upstream price-bump predicate with pre-eviction validation.
+
 // Add tries to insert a new transaction into the list, returning whether the
 // transaction was accepted, and if yes, any previous transaction it replaced.
 //
 // If the new transaction is accepted into the list, the lists' cost and gas
 // thresholds are also potentially updated.
 func (l *list) Add(tx *types.Transaction, priceBump uint64) (bool, *types.Transaction) {
+	// SYSCOIN BEGIN: Reject an overflowing individual cost before changing the list.
+	costBig := tx.Cost()
+	cost, overflow := uint256.FromBig(costBig)
+	if overflow {
+		return false, nil
+	}
+	// SYSCOIN END: Reject an overflowing individual cost before changing the list.
 	// If there's an older better transaction, abort
 	old := l.txs.Get(tx.Nonce())
 	if old != nil {
-		if old.GasFeeCapCmp(tx) >= 0 || old.GasTipCapCmp(tx) >= 0 {
-			return false, nil
-		}
-		// thresholdFeeCap = oldFC  * (100 + priceBump) / 100
-		a := big.NewInt(100 + int64(priceBump))
-		aFeeCap := new(big.Int).Mul(a, old.GasFeeCap())
-		aTip := a.Mul(a, old.GasTipCap())
-
-		// thresholdTip    = oldTip * (100 + priceBump) / 100
-		b := big.NewInt(100)
-		thresholdFeeCap := aFeeCap.Div(aFeeCap, b)
-		thresholdTip := aTip.Div(aTip, b)
-
-		// We have to ensure that both the new fee cap and tip are higher than the
-		// old ones as well as checking the percentage threshold to ensure that
-		// this is accurate for low (Wei-level) gas price replacements.
-		if tx.GasFeeCapIntCmp(thresholdFeeCap) < 0 || tx.GasTipCapIntCmp(thresholdTip) < 0 {
+		// SYSCOIN: Use the same replacement-price predicate before changing list costs.
+		if !isPriceBumped(old, tx, priceBump) {
 			return false, nil
 		}
 		// Old is being replaced, subtract old cost
 		l.subTotalCost([]*types.Transaction{old})
 	}
-	// Add new tx cost to totalcost
-	cost, overflow := uint256.FromBig(tx.Cost())
-	if overflow {
-		return false, nil
-	}
-	l.totalcost.Add(l.totalcost, cost)
+	// SYSCOIN: Add new tx cost to the exact total.
+	l.totalcost.Add(l.totalcost, costBig)
 
 	// Otherwise overwrite the old transaction with the current one
 	l.txs.Put(tx)
@@ -463,10 +474,12 @@ func (l *list) LastElement() *types.Transaction {
 // total cost of all transactions.
 func (l *list) subTotalCost(txs []*types.Transaction) {
 	for _, tx := range txs {
-		_, underflow := l.totalcost.SubOverflow(l.totalcost, uint256.MustFromBig(tx.Cost()))
-		if underflow {
+		// SYSCOIN BEGIN: Maintain exact cumulative costs when removing transactions.
+		l.totalcost.Sub(l.totalcost, tx.Cost())
+		if l.totalcost.Sign() < 0 {
 			panic("totalcost underflow")
 		}
+		// SYSCOIN END: Maintain exact cumulative costs when removing transactions.
 	}
 }
 
@@ -608,8 +621,16 @@ func (l *pricedList) underpricedFor(h *priceHeap, tx *types.Transaction) bool {
 
 // Discard finds a number of most underpriced transactions, removes them from the
 // priced list and returns them for further removal from the entire pool.
-// If noPending is set to true, we will only consider the floating list
-func (l *pricedList) Discard(slots int) (types.Transactions, bool) {
+// SYSCOIN: The excluded transaction is already credited as a replacement.
+func (l *pricedList) Discard(slots int, exclude *types.Transaction) (types.Transactions, bool) {
+	// SYSCOIN BEGIN: Restore the temporarily skipped replacement in the price heap.
+	var skipped *types.Transaction
+	defer func() {
+		if skipped != nil {
+			l.Put(skipped)
+		}
+	}()
+	// SYSCOIN END: Restore the temporarily skipped replacement in the price heap.
 	drop := make(types.Transactions, 0, slots) // Remote underpriced transactions to drop
 	for slots > 0 {
 		if len(l.urgent.list)*floatingRatio > len(l.floating.list)*urgentRatio {
@@ -632,6 +653,12 @@ func (l *pricedList) Discard(slots int) (types.Transactions, bool) {
 				l.stales.Add(-1)
 				continue
 			}
+			// SYSCOIN BEGIN: Avoid charging the replaced transaction against capacity twice.
+			if tx == exclude {
+				skipped = tx
+				continue
+			}
+			// SYSCOIN END: Avoid charging the replaced transaction against capacity twice.
 			// Non stale transaction found, discard it
 			drop = append(drop, tx)
 			slots -= numSlots(tx)

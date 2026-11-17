@@ -123,7 +123,8 @@ func FormatSlogValue(v slog.Value, tmp []byte) (result []byte) {
 	var value any
 	defer func() {
 		if err := recover(); err != nil {
-			if v := reflect.ValueOf(value); v.Kind() == reflect.Ptr && v.IsNil() {
+			// SYSCOIN: Use the canonical kind name for Go 1.27 vet.
+			if v := reflect.ValueOf(value); v.Kind() == reflect.Pointer && v.IsNil() {
 				result = []byte("<nil>")
 			} else {
 				panic(err)

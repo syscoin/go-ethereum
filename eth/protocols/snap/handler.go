@@ -29,6 +29,8 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
+	"github.com/ethereum/go-ethereum/p2p/tracker" // SYSCOIN: Validate response reservations before decoding.
+	"github.com/ethereum/go-ethereum/rlp"         // SYSCOIN: Consume raw trie paths without expanding the full request.
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 )
@@ -164,7 +166,8 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	case msg.Code == AccountRangeMsg:
 		// A range of accounts arrived to one of our previous requests
 		res := new(AccountRangePacket)
-		if err := msg.Decode(res); err != nil {
+		// SYSCOIN: Apply tracked response limits before allocating decoded lists.
+		if err := msg.Decode(&tracker.ResponseDecoder{Tracker: peer.responses, Code: AccountRangeMsg, ID: &res.ID, Values: []interface{}{&res.Accounts, &res.Proof}}); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		// Ensure the range is monotonically increasing
@@ -196,7 +199,8 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	case msg.Code == StorageRangesMsg:
 		// A range of storage slots arrived to one of our previous requests
 		res := new(StorageRangesPacket)
-		if err := msg.Decode(res); err != nil {
+		// SYSCOIN: Apply tracked response limits before allocating decoded lists.
+		if err := msg.Decode(&tracker.ResponseDecoder{Tracker: peer.responses, Code: StorageRangesMsg, ID: &res.ID, Values: []interface{}{&res.Slots, &res.Proof}}); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		// Ensure the ranges are monotonically increasing
@@ -229,7 +233,8 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	case msg.Code == ByteCodesMsg:
 		// A batch of byte codes arrived to one of our previous requests
 		res := new(ByteCodesPacket)
-		if err := msg.Decode(res); err != nil {
+		// SYSCOIN: Apply tracked response limits before allocating decoded lists.
+		if err := msg.Decode(&tracker.ResponseDecoder{Tracker: peer.responses, Code: ByteCodesMsg, ID: &res.ID, Values: []interface{}{&res.Codes}}); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		requestTracker.Fulfil(peer.id, peer.version, ByteCodesMsg, res.ID)
@@ -238,12 +243,20 @@ func HandleMessage(backend Backend, peer *Peer) error {
 
 	case msg.Code == GetTrieNodesMsg:
 		// Decode trie node retrieval request
-		var req GetTrieNodesPacket
+		// SYSCOIN BEGIN: Keep trie path lists encoded until work limits can be applied.
+		var req struct {
+			ID    uint64
+			Root  common.Hash
+			Paths rlp.RawValue
+			Bytes uint64
+		}
+		// SYSCOIN END: Keep trie path lists encoded until work limits can be applied.
 		if err := msg.Decode(&req); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		// Service the request, potentially returning nothing in case of errors
-		nodes, err := ServiceGetTrieNodesQuery(backend.Chain(), &req, start)
+		// SYSCOIN: Service the raw path list without allocating every path in advance.
+		nodes, err := serviceGetTrieNodesQuery(backend.Chain(), req.Root, req.Bytes, req.Paths, start)
 		if err != nil {
 			return err
 		}
@@ -256,7 +269,8 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	case msg.Code == TrieNodesMsg:
 		// A batch of trie nodes arrived to one of our previous requests
 		res := new(TrieNodesPacket)
-		if err := msg.Decode(res); err != nil {
+		// SYSCOIN: Apply tracked response limits before allocating decoded lists.
+		if err := msg.Decode(&tracker.ResponseDecoder{Tracker: peer.responses, Code: TrieNodesMsg, ID: &res.ID, Values: []interface{}{&res.Nodes}}); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		requestTracker.Fulfil(peer.id, peer.version, TrieNodesMsg, res.ID)
@@ -467,36 +481,57 @@ func ServiceGetByteCodesQuery(chain *core.BlockChain, req *GetByteCodesPacket) [
 
 // ServiceGetTrieNodesQuery assembles the response to a trie nodes query.
 // It is exposed to allow external packages to test protocol behavior.
+// SYSCOIN BEGIN: Keep the decoded in-process API while sharing bounded raw-path servicing.
 func ServiceGetTrieNodesQuery(chain *core.BlockChain, req *GetTrieNodesPacket, start time.Time) ([][]byte, error) {
 	if req.Bytes > softResponseLimit {
 		req.Bytes = softResponseLimit
 	}
+	paths, err := rlp.EncodeToBytes(req.Paths)
+	if err != nil {
+		return nil, err
+	}
+	return serviceGetTrieNodesQuery(chain, req.Root, req.Bytes, paths, start)
+}
+
+// SYSCOIN END: Keep the decoded in-process API while sharing bounded raw-path servicing.
+
+// SYSCOIN BEGIN: Retain upstream trie servicing while consuming raw paths under byte, lookup and time limits.
+func serviceGetTrieNodesQuery(chain *core.BlockChain, root common.Hash, byteLimit uint64, paths rlp.RawValue, start time.Time) ([][]byte, error) {
+	pathsets, err := newTrieNodePathIterator(paths)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errBadRequest, err)
+	}
+	byteLimit = min(byteLimit, uint64(softResponseLimit))
 	// Make sure we have the state associated with the request
 	triedb := chain.TrieDB()
 
-	accTrie, err := trie.NewStateTrie(trie.StateTrieID(req.Root), triedb)
+	accTrie, err := trie.NewStateTrie(trie.StateTrieID(root), triedb)
 	if err != nil {
 		// We don't have the requested state available, bail out
 		return nil, nil
 	}
 	// The 'snap' might be nil, in which case we cannot serve storage slots.
-	snap := chain.Snapshots().Snapshot(req.Root)
+	snap := chain.Snapshots().Snapshot(root)
 	// Retrieve trie nodes until the packet size limit is reached
 	var (
 		nodes [][]byte
 		bytes uint64
 		loads int // Trie hash expansions to count database reads
 	)
-	for _, pathset := range req.Paths {
-		switch len(pathset) {
+	for len(pathsets) != 0 {
+		pathset, remaining, _ := rlp.SplitList(pathsets)
+		pathsets = remaining
+		count, _ := rlp.CountValues(pathset)
+		first, tail, _ := rlp.SplitString(pathset)
+		switch count {
 		case 0:
 			// Ensure we penalize invalid requests
 			return nil, fmt.Errorf("%w: zero-item pathset requested", errBadRequest)
 
 		case 1:
 			// If we're only retrieving an account trie node, fetch it directly
-			blob, resolved, err := accTrie.GetNode(pathset[0])
-			loads += resolved // always account database reads, even for failures
+			blob, resolved, err := accTrie.GetNode(first)
+			loads += max(resolved, 1) // charge per request regardless of the cache
 			if err != nil {
 				break
 			}
@@ -509,29 +544,31 @@ func ServiceGetTrieNodesQuery(chain *core.BlockChain, req *GetTrieNodesPacket, s
 			if snap == nil {
 				// We don't have the requested state snapshotted yet (or it is stale),
 				// but can look up the account via the trie instead.
-				account, err := accTrie.GetAccountByHash(common.BytesToHash(pathset[0]))
+				account, err := accTrie.GetAccountByHash(common.BytesToHash(first))
 				loads += 8 // We don't know the exact cost of lookup, this is an estimate
 				if err != nil || account == nil {
 					break
 				}
 				stRoot = account.Root
 			} else {
-				account, err := snap.Account(common.BytesToHash(pathset[0]))
+				account, err := snap.Account(common.BytesToHash(first))
 				loads++ // always account database reads, even for failures
 				if err != nil || account == nil {
 					break
 				}
 				stRoot = common.BytesToHash(account.Root)
 			}
-			id := trie.StorageTrieID(req.Root, common.BytesToHash(pathset[0]), stRoot)
+			id := trie.StorageTrieID(root, common.BytesToHash(first), stRoot)
 			stTrie, err := trie.NewStateTrie(id, triedb)
 			loads++ // always account database reads, even for failures
 			if err != nil {
 				break
 			}
-			for _, path := range pathset[1:] {
+			for len(tail) != 0 {
+				path, remaining, _ := rlp.SplitString(tail)
+				tail = remaining
 				blob, resolved, err := stTrie.GetNode(path)
-				loads += resolved // always account database reads, even for failures
+				loads += max(resolved, 1) // charge per request regardless of the cache
 				if err != nil {
 					break
 				}
@@ -539,18 +576,20 @@ func ServiceGetTrieNodesQuery(chain *core.BlockChain, req *GetTrieNodesPacket, s
 				bytes += uint64(len(blob))
 
 				// Sanity check limits to avoid DoS on the store trie loads
-				if bytes > req.Bytes || loads > maxTrieNodeLookups || time.Since(start) > maxTrieNodeTimeSpent {
+				if bytes > byteLimit || loads > maxTrieNodeLookups || time.Since(start) > maxTrieNodeTimeSpent {
 					break
 				}
 			}
 		}
 		// Abort request processing if we've exceeded our limits
-		if bytes > req.Bytes || loads > maxTrieNodeLookups || time.Since(start) > maxTrieNodeTimeSpent {
+		if bytes > byteLimit || loads > maxTrieNodeLookups || time.Since(start) > maxTrieNodeTimeSpent {
 			break
 		}
 	}
 	return nodes, nil
 }
+
+// SYSCOIN END: Retain upstream trie servicing while consuming raw paths under byte, lookup and time limits.
 
 // NodeInfo represents a short summary of the `snap` sub-protocol metadata
 // known about the host peer.

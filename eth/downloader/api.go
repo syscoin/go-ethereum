@@ -181,17 +181,28 @@ type SyncStatusSubscription struct {
 func (s *SyncStatusSubscription) Unsubscribe() {
 	s.unsubOnce.Do(func() {
 		req := uninstallSyncSubscriptionRequest{s.c, make(chan interface{})}
-		s.api.uninstallSyncSubscription <- &req
-
+		// SYSCOIN BEGIN: Drain status events while unsubscribing to avoid a shutdown deadlock.
+	uninstallLoop:
 		for {
+			// Send the uninstall request while also consuming events from the
+			// status channel. This prevents the event loop broadcast from
+			// deadlocking when writing to the status channel while the
+			// subscription owner is no longer reading events and is waiting
+			// for this method to return.
 			select {
+			case s.api.uninstallSyncSubscription <- &req:
+				break uninstallLoop
 			case <-s.c:
-				// drop new status events until uninstall confirmation
-				continue
-			case <-req.uninstalled:
-				return
+				// drop new status events until the request is accepted
 			}
 		}
+
+		// wait for the subscription to be uninstalled in the event loop before
+		// returning. This ensures the event loop won't use the status channel,
+		// which the caller will probably stop reading or close right after
+		// this method returns.
+		<-req.uninstalled
+		// SYSCOIN END: Drain status events while unsubscribing to avoid a shutdown deadlock.
 	})
 }
 

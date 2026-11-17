@@ -219,7 +219,8 @@ func (dl *diskLayer) update(root common.Hash, id uint64, block uint64, nodes *no
 // commit merges the given bottom-most diff layer into the node buffer
 // and returns a newly constructed disk layer. Note the current disk
 // layer must be tagged as stale first to prevent re-access.
-func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
+// SYSCOIN: journal describes the retained branch above each new physical base.
+func (dl *diskLayer) commit(bottom *diffLayer, force bool, journal *liveJournal) (*diskLayer, error) {
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
 
@@ -269,7 +270,8 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	// buffer as the combined layer.
 	combined := dl.buffer.commit(bottom.nodes, bottom.states.stateSet)
 	if combined.full() || force {
-		if err := combined.flush(dl.db.diskdb, dl.db.freezer, dl.nodes, bottom.stateID()); err != nil {
+		// SYSCOIN: physical nodes and the matching recovery journal share one batch.
+		if err := combined.flush(dl.db.diskdb, dl.db.freezer, dl.nodes, bottom.rootHash(), bottom.stateID(), journal); err != nil {
 			return nil, err
 		}
 	}

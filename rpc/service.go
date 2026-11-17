@@ -221,7 +221,8 @@ func isErrorType(t reflect.Type) bool {
 
 // Is t Subscription or *Subscription?
 func isSubscriptionType(t reflect.Type) bool {
-	for t.Kind() == reflect.Ptr {
+	// SYSCOIN: Use the canonical kind name for Go 1.27 vet.
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return t == subscriptionType

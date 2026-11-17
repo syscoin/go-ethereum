@@ -166,7 +166,8 @@ func makeDecoder(typ reflect.Type, tags rlpstruct.Tags) (dec decoder, err error)
 		return decodeU256, nil
 	case typ == u256Int:
 		return decodeU256NoPtr, nil
-	case kind == reflect.Ptr:
+	// SYSCOIN: Use the canonical kind name for Go 1.27 vet.
+	case kind == reflect.Pointer:
 		return makePtrDecoder(typ, tags)
 	case reflect.PointerTo(typ).Implements(decoderInterface):
 		return decodeDecoder, nil
@@ -936,7 +937,8 @@ func (s *Stream) Decode(val interface{}) error {
 	}
 	rval := reflect.ValueOf(val)
 	rtyp := rval.Type()
-	if rtyp.Kind() != reflect.Ptr {
+	// SYSCOIN: Use the canonical kind name for Go 1.27 vet.
+	if rtyp.Kind() != reflect.Pointer {
 		return errNoPointer
 	}
 	if rval.IsNil() {

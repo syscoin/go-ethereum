@@ -87,18 +87,32 @@ func (q *bodyQueue) request(peer *peerConnection, req *fetchRequest, resCh chan 
 
 // deliver is responsible for taking a generic response packet from the concurrent
 // fetcher, unpacking the body data and delivering it to the downloader's queue.
+// SYSCOIN BEGIN: Adapt upstream body delivery for raw payloads and decoded in-process callers.
 func (q *bodyQueue) deliver(peer *peerConnection, packet *eth.Response) (int, error) {
-	txs, uncles, withdrawals := packet.Res.(*eth.BlockBodiesResponse).Unpack()
 	hashsets := packet.Meta.([][]common.Hash) // {txs hashes, uncle hashes, withdrawal hashes}
-
-	accepted, err := q.queue.DeliverBodies(peer.id, txs, hashsets[0], uncles, hashsets[1], withdrawals, hashsets[2])
+	var count, accepted int
+	var err error
+	switch bodies := packet.Res.(type) {
+	case *eth.BlockBodiesRawResponse:
+		count = len(*bodies)
+		accepted, err = q.queue.DeliverBodiesRLP(peer.id, *bodies, hashsets)
+	case *eth.BlockBodiesResponse:
+		// In-process callers may already own decoded bodies.
+		txs, uncles, withdrawals := bodies.Unpack()
+		count = len(txs)
+		accepted, err = q.queue.DeliverBodies(peer.id, txs, hashsets[0], uncles, hashsets[1], withdrawals, hashsets[2])
+	default:
+		panic("unexpected block bodies response")
+	}
 	switch {
-	case err == nil && len(txs) == 0:
+	case err == nil && count == 0:
 		peer.log.Trace("Requested bodies delivered")
 	case err == nil:
-		peer.log.Trace("Delivered new batch of bodies", "count", len(txs), "accepted", accepted)
+		peer.log.Trace("Delivered new batch of bodies", "count", count, "accepted", accepted)
 	default:
 		peer.log.Debug("Failed to deliver retrieved bodies", "err", err)
 	}
 	return accepted, err
 }
+
+// SYSCOIN END: Adapt upstream body delivery for raw payloads and decoded in-process callers.

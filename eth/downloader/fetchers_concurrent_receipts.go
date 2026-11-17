@@ -87,18 +87,31 @@ func (q *receiptQueue) request(peer *peerConnection, req *fetchRequest, resCh ch
 
 // deliver is responsible for taking a generic response packet from the concurrent
 // fetcher, unpacking the receipt data and delivering it to the downloader's queue.
+// SYSCOIN BEGIN: Adapt upstream receipt delivery for raw payloads and decoded in-process callers.
 func (q *receiptQueue) deliver(peer *peerConnection, packet *eth.Response) (int, error) {
-	receipts := *packet.Res.(*eth.ReceiptsResponse)
 	hashes := packet.Meta.([]common.Hash) // {receipt hashes}
-
-	accepted, err := q.queue.DeliverReceipts(peer.id, receipts, hashes)
+	var count, accepted int
+	var err error
+	switch receipts := packet.Res.(type) {
+	case *eth.ReceiptsRLPResponse:
+		count = len(*receipts)
+		accepted, err = q.queue.DeliverReceiptsRLP(peer.id, *receipts, hashes)
+	case *eth.ReceiptsResponse:
+		// In-process callers may already own decoded receipts.
+		count = len(*receipts)
+		accepted, err = q.queue.DeliverReceipts(peer.id, *receipts, hashes)
+	default:
+		panic("unexpected receipts response")
+	}
 	switch {
-	case err == nil && len(receipts) == 0:
+	case err == nil && count == 0:
 		peer.log.Trace("Requested receipts delivered")
 	case err == nil:
-		peer.log.Trace("Delivered new batch of receipts", "count", len(receipts), "accepted", accepted)
+		peer.log.Trace("Delivered new batch of receipts", "count", count, "accepted", accepted)
 	default:
 		peer.log.Debug("Failed to deliver retrieved receipts", "err", err)
 	}
 	return accepted, err
 }
+
+// SYSCOIN END: Adapt upstream receipt delivery for raw payloads and decoded in-process callers.

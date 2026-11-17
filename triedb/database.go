@@ -159,6 +159,15 @@ func (db *Database) Commit(root common.Hash, report bool) error {
 	return db.backend.Commit(root, report)
 }
 
+// SYSCOIN: Checkpoint stages the selected state for a subsequent hot-database
+// sync. Path mode retains recent layers needed for ordinary Core rollback.
+func (db *Database) Checkpoint(root common.Hash) error {
+	if pdb, ok := db.backend.(*pathdb.Database); ok {
+		return pdb.Checkpoint(root)
+	}
+	return db.Commit(root, false)
+}
+
 // Size returns the storage size of diff layer nodes above the persistent disk
 // layer, the dirty nodes buffered within the disk layer, and the size of cached
 // preimages.

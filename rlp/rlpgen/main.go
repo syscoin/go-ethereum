@@ -71,9 +71,9 @@ type Config struct {
 
 // process generates the Go code.
 func (cfg *Config) process() (code []byte, err error) {
-	// Load packages.
+	// SYSCOIN: Type-check source to avoid depending on compiler export formats.
 	pcfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedTypes,
+		Mode: packages.LoadAllSyntax,
 		Dir:  cfg.Dir,
 	}
 	ps, err := packages.Load(pcfg, pathOfPackageRLP, ".")

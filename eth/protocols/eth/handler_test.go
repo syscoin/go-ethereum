@@ -699,3 +699,37 @@ func testGetPooledTransaction(t *testing.T, blobTx bool) {
 		t.Errorf("pooled transaction mismatch: %v", err)
 	}
 }
+
+// Tests that unknown hashes count toward the pooled transaction lookup limit.
+// SYSCOIN BEGIN: Cover the lookup budget including unknown transaction hashes.
+func TestGetPooledTransactionsLookupCap(t *testing.T) {
+	backend := newTestBackendWithGenerator(0, true, false, nil)
+	defer backend.close()
+
+	tx, err := types.SignTx(
+		types.NewTransaction(0, testAddr, big.NewInt(10_000), params.TxGas, big.NewInt(1_000_000_000), nil),
+		types.NewCancunSigner(params.TestChainConfig.ChainID), testKey,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if errs := backend.txpool.Add([]*types.Transaction{tx}, true); errs[0] != nil {
+		t.Fatal(errs[0])
+	}
+	request := func(index int) GetPooledTransactionsRequest {
+		query := make(GetPooledTransactionsRequest, index+1)
+		for i := range index {
+			query[i] = common.BigToHash(big.NewInt(int64(i + 1)))
+		}
+		query[index] = tx.Hash()
+		return query
+	}
+	if hashes, txs := answerGetPooledTransactions(backend, request(maxPooledTxServe-1)); len(hashes) != 1 || len(txs) != 1 {
+		t.Errorf("transaction within lookup cap not served: have %d hashes and %d transactions", len(hashes), len(txs))
+	}
+	if hashes, txs := answerGetPooledTransactions(backend, request(maxPooledTxServe)); len(hashes) != 0 || len(txs) != 0 {
+		t.Errorf("transaction beyond lookup cap served: have %d hashes and %d transactions", len(hashes), len(txs))
+	}
+}
+
+// SYSCOIN END: Cover the lookup budget including unknown transaction hashes.

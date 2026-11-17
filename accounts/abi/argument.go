@@ -112,7 +112,8 @@ func (arguments Arguments) UnpackIntoMap(v map[string]any, data []byte) error {
 // Copy performs the operation go format -> provided struct.
 func (arguments Arguments) Copy(v any, values []any) error {
 	// make sure the passed value is arguments pointer
-	if reflect.Ptr != reflect.ValueOf(v).Kind() {
+	// SYSCOIN: Use the canonical kind name for Go 1.27 vet.
+	if reflect.Pointer != reflect.ValueOf(v).Kind() {
 		return fmt.Errorf("abi: Unpack(non-pointer %T)", v)
 	}
 	if len(values) == 0 {

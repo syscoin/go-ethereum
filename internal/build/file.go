@@ -52,16 +52,33 @@ func HashFiles(files []string) (map[string][32]byte, error) {
 }
 
 // HashFolder iterates all files under the given directory, computing the hash
-// of each.
-func HashFolder(folder string, exlude []string) (map[string][32]byte, error) {
+// of each. Exclusions are paths relative to folder.
+func HashFolder(folder string, exclude []string) (map[string][32]byte, error) {
 	res := make(map[string][32]byte)
-	err := filepath.WalkDir(folder, func(path string, d os.DirEntry, _ error) error {
-		// Skip anything that's exluded or not a regular file
-		for _, skip := range exlude {
-			if strings.HasPrefix(path, filepath.FromSlash(skip)) {
-				return filepath.SkipDir
+	// SYSCOIN: Normalize exclusions relative to the folder being hashed.
+	var exclusions []string
+	for _, path := range exclude {
+		exclusions = append(exclusions, filepath.Clean(filepath.FromSlash(path)))
+	}
+	err := filepath.WalkDir(folder, func(path string, d os.DirEntry, walkErr error) error {
+		// SYSCOIN BEGIN: Match excluded paths at directory boundaries, without
+		// allowing .gitignore or another sibling to terminate the source walk.
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(folder, path)
+		if err != nil {
+			return err
+		}
+		for _, skip := range exclusions {
+			if rel == skip || strings.HasPrefix(rel, skip+string(filepath.Separator)) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
 		}
+		// SYSCOIN END: Match exclusions and propagate traversal failures.
 		if !d.Type().IsRegular() {
 			return nil
 		}
@@ -71,8 +88,14 @@ func HashFolder(folder string, exlude []string) (map[string][32]byte, error) {
 			return err
 		}
 		hasher := sha256.New()
-		if _, err := io.Copy(hasher, f); err != nil {
-			return err
+		// SYSCOIN: Close each file before the walker advances, including on error.
+		_, copyErr := io.Copy(hasher, f)
+		closeErr := f.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
 		}
 		res[path] = [32]byte(hasher.Sum(nil))
 		return nil

@@ -156,7 +156,8 @@ func parseTag(field Field, lastPublic int) (Tags, error) {
 			ts.Ignored = true
 		case "nil", "nilString", "nilList":
 			ts.NilOK = true
-			if field.Type.Kind != reflect.Ptr {
+			// SYSCOIN: Use the canonical kind name for Go 1.27 vet.
+			if field.Type.Kind != reflect.Pointer {
 				return ts, TagError{Field: name, Tag: t, Err: "field is not a pointer"}
 			}
 			switch t {
